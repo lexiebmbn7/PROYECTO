@@ -61,3 +61,73 @@ async def registrar_y_solicitar_custodia(file: UploadFile = File(...)):
         "id_auditoria": respuesta_db.data[0]['id'],
         "sha256": hash_sha256
     }
+from fastapi import Request
+
+@app.post("/telegram-webhook")
+async def recibir_respuesta_telegram(request: Request):
+    data = await request.json()
+    
+    # Verificar si es una respuesta de un botón interactivo (callback_query)
+    if "callback_query" in data:
+        callback = data["callback_query"]
+        action_data = callback["data"]  # Ej: "aprobar_a1b2c3d4e5"
+        callback_id = callback["id"]
+        
+        accion, hash_prefix = action_data.split("_")
+        nuevo_estado = "APROBADO" if accion == "aprobar" else "RECHAZADO"
+        
+        # 1. Actualizar el estado en la base de datos de Supabase
+        # Buscar el registro que coincide con los primeros caracteres del Hash
+        supabase.table("auditoria_custodia")\
+            .update({"estado": nuevo_estado})\
+            .like("hash_sha256", f"{hash_prefix}%")\
+            .execute()
+        
+        # 2. Notificar a Telegram que la acción fue procesada (quita el reloj del botón)
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery",
+            json={"callback_query_id": callback_id, "text": f"Estado actualizado a: {nuevo_estado}"}
+        )
+        
+        # 3. Editar el mensaje original para reflejar la decisión tomada
+        chat_id = callback["message"]["chat"]["id"]
+        message_id = callback["message"]["message_id"]
+        texto_original = callback["message"]["text"]
+        
+        icono = "✅" if nuevo_estado == "APROBADO" else "❌"
+        nuevo_texto = f"{texto_original}\n\n{icono} *DECISIÓN:* Documento {nuevo_estado}"
+        
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/editMessageText",
+            json={
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "text": nuevo_texto,
+                "parse_mode": "Markdown"
+            }
+        )
+        
+    return {"status": "ok"}
+
+from fastapi import Request
+
+@app.post("/telegram-webhook")
+async def recibir_respuesta_telegram(request: Request):
+    data = await request.json()
+    
+    if "callback_query" in data:
+        callback = data["callback_query"]
+        action_data = callback["data"]  # Ej: "aprobar_a1b2c3d4"
+        
+        accion, hash_prefix = action_data.split("_")
+        nuevo_estado = "APROBADO" if accion == "aprobar" else "RECHAZADO"
+        
+        # Actualizar estado en Supabase
+        supabase.table("auditoria_custodia")\
+            .update({"estado": nuevo_estado})\
+            .like("hash_sha256", f"{hash_prefix}%")\
+            .execute()
+            
+        return {"status": "ok", "estado_actualizado": nuevo_estado}
+        
+    return {"status": "no_callback"}
