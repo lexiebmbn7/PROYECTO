@@ -1,3 +1,7 @@
+@app.get("/")
+@app.get("/health")
+def health_check():
+    return {"status": "ok", "service": "DataVault DLP API"}
 import hashlib
 from fastapi import FastAPI, File, UploadFile
 import requests
