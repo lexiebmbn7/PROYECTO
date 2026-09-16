@@ -1101,13 +1101,7 @@
                     '*'
                 )
 
-                .order(
-                    'id',
-                    {
-                        ascending:
-                            false
-                    }
-                )
+                .order('created_at', { ascending: false })
 
                 .limit(
                     10
