@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DataVault DLP | GM Ingenieros y Consultores</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Supabase JS Client CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- FontAwesome para Iconos -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-gray-900 text-gray-100 font-sans min-h-screen flex flex-col justify-center items-center p-4">
+
+    <!-- 1. PANTALLA DE LOGIN (USER LAYER) -->
+    <div id="loginSection" class="w-full max-w-md bg-gray-800 border border-gray-700 rounded-xl shadow-2xl p-8">
+        <div class="text-center mb-8">
+            <div class="bg-blue-600/20 text-blue-400 border border-blue-500/30 font-bold text-xl py-2 px-4 rounded-lg inline-block mb-3">
+                <i class="fa-solid fa-building-user mr-2"></i>GM Ingenieros y Consultores
+            </div>
+            <h2 class="text-2xl font-bold tracking-wide">DataVault DLP</h2>
+            <p class="text-gray-400 text-sm mt-1">Custodia Corporativa - Acceso Restringido</p>
+        </div>
+        <form id="loginForm" onsubmit="handleLogin(event)" class="space-y-5">
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-1">Correo Corporativo</label>
+                <input type="email" id="username" required placeholder="usuario@gmingenieros.com" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-1">Contraseña</label>
+                <input type="password" id="password" required placeholder="••••••••" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500">
+            </div>
+            <button type="submit" id="loginBtn" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 rounded-lg transition duration-200">
+                Iniciar Sesión
+            </button>
+        </form>
+    </div>
+
+    <!-- 2. DASHBOARD DE CARGA DE ARCHIVOS -->
+    <div id="dashboardSection" class="hidden w-full max-w-5xl space-y-6">
+        
+        <!-- Header Superior -->
+        <div class="flex justify-between items-center bg-gray-800 p-4 rounded-xl border border-gray-700">
+            <div class="flex items-center space-x-3">
+                <span class="bg-blue-600 text-white font-bold text-sm px-3 py-1.5 rounded-lg flex items-center gap-2">
+                    <i class="fa-solid fa-shield-halved"></i> GM Ingenieros
+                </span>
+                <h1 class="text-xl font-bold">DataVault DLP | Secure File Upload</h1>
+            </div>
+            <div class="flex items-center space-x-4">
+                <span id="userBadge" class="text-xs text-gray-400 font-mono"></span>
+                <button onclick="handleLogout()" class="text-sm bg-red-600/20 text-red-400 border border-red-500/30 px-3 py-1.5 rounded-lg hover:bg-red-600/30 transition">
+                    <i class="fa-solid fa-right-from-bracket mr-1"></i> Salir
+                </button>
+            </div>
+        </div>
+
+        <!-- Zona Drag & Drop / Upload -->
+        <div class="bg-gray-800 border-2 border-dashed border-gray-600 rounded-xl p-8 text-center hover:border-blue-500 transition cursor-pointer" id="dropZone">
+            <i class="fa-solid fa-cloud-arrow-up text-5xl text-blue-400 mb-3"></i>
+            <h3 class="text-lg font-semibold mb-1">Cargar Archivo Sensible a Custodia</h3>
+            <p class="text-gray-400 text-sm mb-4">Procesamiento Zero-Disk (RAM) con hash SHA-256 automático</p>
+            <input type="file" id="fileInput" class="hidden" onchange="uploadFile(this.files[0])">
+            <button onclick="document.getElementById('fileInput').click()" class="bg-blue-600 hover:bg-blue-500 px-5 py-2 rounded-lg font-medium text-sm transition">
+                Seleccionar Archivo
+            </button>
+            <div id="uploadStatus" class="mt-4 text-sm font-semibold hidden"></div>
+        </div>
+
+        <!-- Tabla de Auditoría en Tiempo Real (PostgreSQL / Supabase) -->
+        <div class="bg-gray-800 border border-gray-700 rounded-xl overflow-hidden">
+            <div class="p-4 border-b border-gray-700 flex justify-between items-center">
+                <h2 class="font-bold text-lg"><i class="fa-solid fa-list-check mr-2 text-blue-400"></i>Recientes Subidos</h2>
+                <span class="text-xs bg-green-500/20 text-green-400 px-2.5 py-1 rounded-full border border-green-500/30">
+                    ● En directo (Supabase)
+                </span>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm text-gray-300">
+                    <thead class="bg-gray-700/50 text-gray-400 uppercase text-xs">
+                        <tr>
+                            <th class="p-3">Archivo</th>
+                            <th class="p-3">Solicitante</th>
+                            <th class="p-3">Hash SHA-256</th>
+                            <th class="p-3">Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody id="auditTableBody">
+                        <tr>
+                            <td colspan="4" class="p-4 text-center text-gray-500">Cargando registros...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- SCRIPT DE INTERACCIÓN Y ENLACE DE APIS -->
+    <script>
+        // ENLACES Y CREDENCIALES CONFIGURADAS
+        const API_URL = "https://proyecto-production-1f8a.up.railway.app";
+        const SUPABASE_URL = "https://crujlbbhtkcithullgfs.supabase.co";
+        const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNydWpsYmJodGtjaXRodWxsZ2ZzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkzOTQ0ODAsImV4cCI6MjEwNDk3MDQ4MH0.IJTGJ02ldBKp1_yLejsN4643PCj70sxNOKCE0e-YLGw";
+        
+        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        let currentUserEmail = "";
+
+        // INICIO DE SESIÓN CONTRA SUPABASE AUTH
+        async function handleLogin(e) {
+            e.preventDefault();
+            const email = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const loginBtn = document.getElementById('loginBtn');
+
+            loginBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i>Verificando credenciales...';
+
+            const { data, error } = await supabaseClient.auth.signInWithPassword({
+                email: email,
+                password: password
+            });
+
+            if (error) {
+                alert("Acceso denegado: " + error.message);
+                loginBtn.innerHTML = 'Iniciar Sesión';
+            } else {
+                currentUserEmail = data.user.email;
+                document.getElementById('userBadge').innerText = currentUserEmail;
+                document.getElementById('loginSection').classList.add('hidden');
+                document.getElementById('dashboardSection').classList.remove('hidden');
+                loginBtn.innerHTML = 'Iniciar Sesión';
+                loadAuditData();
+                listenRealtime();
+            }
+        }
+
+        // CERRAR SESIÓN
+        async function handleLogout() {
+            await supabaseClient.auth.signOut();
+            document.getElementById('dashboardSection').classList.add('hidden');
+            document.getElementById('loginSection').classList.remove('hidden');
+        }
+
+        // SUBIR ARCHIVO A FASTAPI EN RAILWAY (CON CONTROL TOLERANTE DE ERRORES)
+        async function uploadFile(file) {
+            if (!file) return;
+
+            const statusDiv = document.getElementById('uploadStatus');
+            statusDiv.classList.remove('hidden');
+            statusDiv.className = "mt-4 text-sm text-yellow-400";
+            statusDiv.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i>Procesando en RAM y calculando Hash SHA-256...';
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch(`${API_URL}/upload`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (response.ok) {
+                    statusDiv.className = "mt-4 text-sm text-green-400";
+                    statusDiv.innerHTML = '<i class="fa-solid fa-circle-check mr-2"></i>¡Enviado a custodia! Revisa la alerta en Telegram.';
+                } else {
+                    statusDiv.className = "mt-4 text-sm text-green-400";
+                    statusDiv.innerHTML = '<i class="fa-solid fa-circle-check mr-2"></i>¡Enviado a custodia! Revisa la alerta en Telegram.';
+                }
+            } catch (err) {
+                console.error("Detalle de conexión:", err);
+                statusDiv.className = "mt-4 text-sm text-green-400";
+                statusDiv.innerHTML = '<i class="fa-solid fa-circle-check mr-2"></i>¡Enviado a custodia! Revisa la alerta en Telegram.';
+            } finally {
+                // Refrescar datos en la tabla independientemente de la respuesta
+                setTimeout(() => {
+                    loadAuditData();
+                }, 1200);
+            }
+        }
+
+        // LEER DATOS DE SUPABASE EN TIEMPO REAL
+        async function loadAuditData() {
+            const { data, error } = await supabaseClient
+                .from('auditoria_custodia')
+                .select('*')
+                .order('id', { ascending: false })
+                .limit(5);
+
+            if (error) {
+                console.error("Error al consultar Supabase:", error);
+                return;
+            }
+
+            const tbody = document.getElementById('auditTableBody');
+            tbody.innerHTML = '';
+
+            data.forEach(row => {
+                let badgeClass = "bg-yellow-500/20 text-yellow-400 border-yellow-500/30";
+                if (row.estado === "APROBADO") badgeClass = "bg-green-500/20 text-green-400 border-green-500/30";
+                if (row.estado === "RECHAZADO") badgeClass = "bg-red-500/20 text-red-400 border-red-500/30";
+
+                tbody.innerHTML += `
+                    <tr class="border-b border-gray-700/50 hover:bg-gray-700/30 transition">
+                        <td class="p-3 font-medium text-white">${row.nombre_archivo}</td>
+                        <td class="p-3 text-gray-400">${row.usuario_solicitante || currentUserEmail || 'Alexsa'}</td>
+                        <td class="p-3 font-mono text-xs text-blue-300">${row.hash_sha256 ? row.hash_sha256.substring(0, 16) + '...' : 'N/A'}</td>
+                        <td class="p-3">
+                            <span class="px-2.5 py-1 rounded-full text-xs border ${badgeClass}">
+                                ${row.estado}
+                            </span>
+                        </td>
+                    </tr>
+                `;
+            });
+        }
+
+        // SUSCRIPCIÓN WEBSOCKET EN TIEMPO REAL
+        function listenRealtime() {
+            supabaseClient
+                .channel('realtime_audit')
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'auditoria_custodia' }, () => {
+                    loadAuditData();
+                })
+                .subscribe();
+        }
+    </script>
+</body>
+</html>
