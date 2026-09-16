@@ -56,16 +56,28 @@
             </div>
         </div>
 
-        <!-- Zona Drag & Drop / Upload -->
-        <div class="bg-gray-800 border-2 border-dashed border-gray-600 rounded-xl p-8 text-center hover:border-blue-500 transition cursor-pointer" id="dropZone">
-            <i class="fa-solid fa-cloud-arrow-up text-5xl text-blue-400 mb-3"></i>
-            <h3 class="text-lg font-semibold mb-1">Cargar Archivo Sensible a Custodia</h3>
-            <p class="text-gray-400 text-sm mb-4">Procesamiento Zero-Disk (RAM) con hash SHA-256 automático</p>
-            <input type="file" id="fileInput" class="hidden" onchange="uploadFile(this.files[0])">
-            <button onclick="document.getElementById('fileInput').click()" class="bg-blue-600 hover:bg-blue-500 px-5 py-2 rounded-lg font-medium text-sm transition">
-                Seleccionar Archivo
-            </button>
-            <div id="uploadStatus" class="mt-4 text-sm font-semibold hidden"></div>
+        <!-- Seleccionador de Carpeta y Zona Drag & Drop -->
+        <div class="bg-gray-800 border border-gray-700 rounded-xl p-6 space-y-4">
+            <div class="flex items-center space-x-4">
+                <label class="text-sm font-semibold text-gray-300"><i class="fa-solid fa-folder-open text-yellow-400 mr-2"></i>Carpeta Destino:</label>
+                <select id="folderSelect" class="bg-gray-700 border border-gray-600 text-white text-sm rounded-lg p-2.5 focus:border-blue-500">
+                    <option value="PLANOS">📐 PLANOS DE INGENIERÍA</option>
+                    <option value="INFORMES">📄 INFORMES TÉCNICOS</option>
+                    <option value="FINANZAS">📊 FINANZAS Y CONTRATOS</option>
+                    <option value="GENERAL">📁 CUSTODIA GENERAL</option>
+                </select>
+            </div>
+
+            <div class="border-2 border-dashed border-gray-600 rounded-xl p-8 text-center hover:border-blue-500 transition cursor-pointer" id="dropZone">
+                <i class="fa-solid fa-cloud-arrow-up text-5xl text-blue-400 mb-3"></i>
+                <h3 class="text-lg font-semibold mb-1">Cargar Archivo Sensible a Custodia</h3>
+                <p class="text-gray-400 text-sm mb-4">Procesamiento Zero-Disk (RAM) con hash SHA-256 automático</p>
+                <input type="file" id="fileInput" class="hidden" onchange="uploadFile(this.files[0])">
+                <button onclick="document.getElementById('fileInput').click()" class="bg-blue-600 hover:bg-blue-500 px-5 py-2 rounded-lg font-medium text-sm transition">
+                    Seleccionar Archivo
+                </button>
+                <div id="uploadStatus" class="mt-4 text-sm font-semibold hidden"></div>
+            </div>
         </div>
 
         <!-- Tabla de Auditoría en Tiempo Real (PostgreSQL / Supabase) -->
@@ -99,8 +111,7 @@
 
     <!-- SCRIPT DE INTERACCIÓN Y ENLACE DE APIS -->
     <script>
-        // ENLACES Y CREDENCIALES CONFIGURADAS
-        const API_URL = "https://proyecto-production-1f8a.up.railway.app";
+        const API_URL = "https://friendly-adaptation-production.up.railway.app";
         const SUPABASE_URL = "https://crujlbbhtkcithullgfs.supabase.co";
         const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNydWpsYmJodGtjaXRodWxsZ2ZzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkzOTQ0ODAsImV4cCI6MjEwNDk3MDQ4MH0.IJTGJ02ldBKp1_yLejsN4643PCj70sxNOKCE0e-YLGw";
         
@@ -142,17 +153,21 @@
             document.getElementById('loginSection').classList.remove('hidden');
         }
 
-        // SUBIR ARCHIVO A FASTAPI EN RAILWAY (CON CONTROL TOLERANTE DE ERRORES)
+        // SUBIR ARCHIVO A FASTAPI EN RAILWAY
         async function uploadFile(file) {
             if (!file) return;
 
             const statusDiv = document.getElementById('uploadStatus');
+            const folderSelect = document.getElementById('folderSelect').value;
+
             statusDiv.classList.remove('hidden');
             statusDiv.className = "mt-4 text-sm text-yellow-400";
-            statusDiv.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i>Procesando en RAM y calculando Hash SHA-256...';
+            statusDiv.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i>Procesando en RAM y notificando a Telegram...';
 
             const formData = new FormData();
             formData.append('file', file);
+            formData.append('usuario', currentUserEmail || 'Usuario Corp');
+            formData.append('carpeta', folderSelect);
 
             try {
                 const response = await fetch(`${API_URL}/upload`, {
@@ -160,22 +175,23 @@
                     body: formData
                 });
 
+                const result = await response.json();
+
                 if (response.ok) {
                     statusDiv.className = "mt-4 text-sm text-green-400";
                     statusDiv.innerHTML = '<i class="fa-solid fa-circle-check mr-2"></i>¡Enviado a custodia! Revisa la alerta en Telegram.';
                 } else {
-                    statusDiv.className = "mt-4 text-sm text-green-400";
-                    statusDiv.innerHTML = '<i class="fa-solid fa-circle-check mr-2"></i>¡Enviado a custodia! Revisa la alerta en Telegram.';
+                    statusDiv.className = "mt-4 text-sm text-red-400";
+                    statusDiv.innerHTML = `<i class="fa-solid fa-triangle-exclamation mr-2"></i>Error del servidor: ${result.detail || 'Fallo de procesamiento'}`;
                 }
             } catch (err) {
                 console.error("Detalle de conexión:", err);
-                statusDiv.className = "mt-4 text-sm text-green-400";
-                statusDiv.innerHTML = '<i class="fa-solid fa-circle-check mr-2"></i>¡Enviado a custodia! Revisa la alerta en Telegram.';
+                statusDiv.className = "mt-4 text-sm text-red-400";
+                statusDiv.innerHTML = '<i class="fa-solid fa-triangle-exclamation mr-2"></i>Error de conexión con Railway. Verifica la red.';
             } finally {
-                // Refrescar datos en la tabla independientemente de la respuesta
                 setTimeout(() => {
                     loadAuditData();
-                }, 1200);
+                }, 1000);
             }
         }
 
@@ -203,7 +219,7 @@
                 tbody.innerHTML += `
                     <tr class="border-b border-gray-700/50 hover:bg-gray-700/30 transition">
                         <td class="p-3 font-medium text-white">${row.nombre_archivo}</td>
-                        <td class="p-3 text-gray-400">${row.usuario_solicitante || currentUserEmail || 'Alexsa'}</td>
+                        <td class="p-3 text-gray-400">${row.usuario_solicitante || 'Alexsa'}</td>
                         <td class="p-3 font-mono text-xs text-blue-300">${row.hash_sha256 ? row.hash_sha256.substring(0, 16) + '...' : 'N/A'}</td>
                         <td class="p-3">
                             <span class="px-2.5 py-1 rounded-full text-xs border ${badgeClass}">
