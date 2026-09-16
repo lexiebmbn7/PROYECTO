@@ -23,8 +23,8 @@ TELEGRAM_TOKEN = "8934863246:AAEr2BW_fYNyEiri2pv0emcZUBm1qYcwGx8"
 
 # Lista de IDs autorizados en Telegram para recibir y aprobar alertas
 AUTHORIZED_CHAT_IDS = [
-    8893414961,  # ID principal
-    # Agrega aquí los IDs numéricos de los demás colaboradores autorizados
+    8893414961,
+    6718944855
 ]
 
 SUPABASE_URL = "https://crujlbbhtkcithullgfs.supabase.co"
