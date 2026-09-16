@@ -2,33 +2,19 @@ import hashlib
 import os
 import requests
 
-from fastapi import (
-    FastAPI,
-    File,
-    UploadFile,
-    Request,
-    Form,
-    HTTPException
-)
-
+from fastapi import FastAPI, File, UploadFile, Request, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from supabase import create_client, Client
 
 
 # ============================================================
-# DATAVAULT DLP
-# GM INGENIEROS Y CONSULTORES
+# DATAVAULT DLP | GM INGENIEROS Y CONSULTORES
 # ============================================================
 
 app = FastAPI(
     title="DataVault DLP API | GM Ingenieros y Consultores"
 )
-
-
-# ============================================================
-# CORS
-# ============================================================
 
 app.add_middleware(
     CORSMiddleware,
@@ -40,15 +26,26 @@ app.add_middleware(
 
 
 # ============================================================
-# VARIABLES DE ENTORNO
+# CONFIGURACIÓN DESDE RAILWAY
 # ============================================================
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
+TELEGRAM_TOKEN = os.getenv(
+    "TELEGRAM_TOKEN",
+    ""
+).strip()
+
+
+AUTHORIZED_CHAT_IDS_RAW = os.getenv(
+    "AUTHORIZED_CHAT_IDS",
+    "8893414961,6718944855"
+).strip()
+
 
 SUPABASE_URL = os.getenv(
     "SUPABASE_URL",
     "https://crujlbbhtkcithullgfs.supabase.co"
 ).strip()
+
 
 SUPABASE_KEY = os.getenv(
     "SUPABASE_KEY",
@@ -56,58 +53,51 @@ SUPABASE_KEY = os.getenv(
 ).strip()
 
 
-# Railway crea esta variable automáticamente normalmente.
+PUBLIC_BASE_URL = os.getenv(
+    "PUBLIC_BASE_URL",
+    ""
+).strip().rstrip("/")
+
+
 RAILWAY_PUBLIC_DOMAIN = os.getenv(
     "RAILWAY_PUBLIC_DOMAIN",
     ""
 ).strip()
 
-PUBLIC_BASE_URL = os.getenv(
-    "PUBLIC_BASE_URL",
-    ""
-).strip()
-
 
 if not PUBLIC_BASE_URL and RAILWAY_PUBLIC_DOMAIN:
-    PUBLIC_BASE_URL = f"https://{RAILWAY_PUBLIC_DOMAIN}"
 
-PUBLIC_BASE_URL = PUBLIC_BASE_URL.rstrip("/")
+    PUBLIC_BASE_URL = (
+        f"https://{RAILWAY_PUBLIC_DOMAIN}"
+    ).rstrip("/")
 
 
 # ============================================================
-# USUARIOS AUTORIZADOS DE TELEGRAM
-#
-# En Railway:
-#
-# AUTHORIZED_CHAT_IDS=8893414961,6718944855
-#
-# Para agregar otro:
-#
-# AUTHORIZED_CHAT_IDS=8893414961,6718944855,123456789
-#
+# CARGAR IDS DE TELEGRAM
 # ============================================================
-
-AUTHORIZED_CHAT_IDS_RAW = os.getenv(
-    "AUTHORIZED_CHAT_IDS",
-    ""
-)
-
 
 def cargar_ids_autorizados():
+
     ids = []
 
-    for item in AUTHORIZED_CHAT_IDS_RAW.split(","):
+    for valor in AUTHORIZED_CHAT_IDS_RAW.split(","):
 
-        item = item.strip()
+        valor = valor.strip()
 
-        if not item:
+        if not valor:
             continue
 
         try:
-            ids.append(int(item))
+
+            ids.append(
+                int(valor)
+            )
+
         except ValueError:
+
             print(
-                f"[CONFIG] ID Telegram inválido ignorado: {item}"
+                f"[CONFIG] Telegram ID inválido "
+                f"ignorado: {valor}"
             )
 
     return ids
@@ -121,13 +111,16 @@ AUTHORIZED_CHAT_IDS = cargar_ids_autorizados()
 # ============================================================
 
 if not SUPABASE_URL:
+
     raise RuntimeError(
         "SUPABASE_URL no está configurado."
     )
 
+
 if not SUPABASE_KEY:
+
     raise RuntimeError(
-        "SUPABASE_KEY no está configurado."
+        "SUPABASE_KEY no está configurado en Railway."
     )
 
 
@@ -138,28 +131,28 @@ supabase: Client = create_client(
 
 
 # ============================================================
-# FUNCIÓN AUXILIAR TELEGRAM
+# TELEGRAM
 # ============================================================
 
 def telegram_request(
     metodo: str,
     payload: dict
 ):
-    """
-    Ejecuta una petición contra Telegram y devuelve
-    la respuesta real para poder detectar errores.
-    """
 
     if not TELEGRAM_TOKEN:
+
         return {
             "ok": False,
-            "description": "TELEGRAM_TOKEN no configurado"
+            "description":
+                "TELEGRAM_TOKEN no configurado"
         }
+
 
     url = (
         f"https://api.telegram.org/"
         f"bot{TELEGRAM_TOKEN}/{metodo}"
     )
+
 
     try:
 
@@ -169,13 +162,18 @@ def telegram_request(
             timeout=15
         )
 
+
         try:
+
             data = response.json()
+
         except Exception:
+
             data = {
                 "ok": False,
                 "description": response.text
             }
+
 
         print(
             f"[TELEGRAM] {metodo} "
@@ -183,13 +181,17 @@ def telegram_request(
             f"respuesta={data}"
         )
 
+
         return data
+
 
     except Exception as error:
 
         print(
-            f"[TELEGRAM ERROR] {metodo}: {error}"
+            f"[TELEGRAM ERROR] "
+            f"{metodo}: {error}"
         )
+
 
         return {
             "ok": False,
@@ -198,69 +200,184 @@ def telegram_request(
 
 
 # ============================================================
-# CONFIGURAR WEBHOOK AUTOMÁTICAMENTE
+# OBTENER DOMINIO ACTUAL DE RAILWAY
 # ============================================================
 
-def configurar_webhook():
+def obtener_base_url_request(
+    request: Request
+):
+
+    forwarded_host = request.headers.get(
+        "x-forwarded-host",
+        ""
+    ).strip()
+
+
+    host = (
+        forwarded_host
+        or request.headers.get(
+            "host",
+            ""
+        ).strip()
+    )
+
+
+    forwarded_proto = request.headers.get(
+        "x-forwarded-proto",
+        ""
+    ).strip()
+
+
+    proto = (
+        forwarded_proto
+        or request.url.scheme
+        or "https"
+    )
+
+
+    if (
+        host.endswith(".railway.app")
+        or host.endswith(".up.railway.app")
+    ):
+
+        proto = "https"
+
+
+    if host:
+
+        return (
+            f"{proto}://{host}"
+        ).rstrip("/")
+
+
+    return str(
+        request.base_url
+    ).rstrip("/")
+
+
+# ============================================================
+# CONFIGURAR WEBHOOK
+# ============================================================
+
+def configurar_webhook_url(
+    base_url: str
+):
 
     if not TELEGRAM_TOKEN:
 
-        print(
-            "[TELEGRAM] TELEGRAM_TOKEN no configurado."
-        )
+        return {
+            "ok": False,
+            "description":
+                "TELEGRAM_TOKEN no configurado"
+        }
 
-        return
+
+    base_url = (
+        base_url
+        or ""
+    ).strip().rstrip("/")
 
 
-    if not PUBLIC_BASE_URL:
+    if not base_url:
 
-        print(
-            "[TELEGRAM] No se pudo determinar "
-            "PUBLIC_BASE_URL."
-        )
-
-        return
+        return {
+            "ok": False,
+            "description":
+                "No se pudo determinar "
+                "la URL pública"
+        }
 
 
     webhook_url = (
-        f"{PUBLIC_BASE_URL}/telegram-webhook"
+        f"{base_url}/telegram-webhook"
     )
 
 
-    print(
-        "[TELEGRAM] Configurando webhook:",
-        webhook_url
+    info = telegram_request(
+        "getWebhookInfo",
+        {}
     )
+
+
+    if info.get("ok"):
+
+        url_actual = (
+            info
+            .get(
+                "result",
+                {}
+            )
+            .get(
+                "url",
+                ""
+            )
+        )
+
+    else:
+
+        url_actual = ""
+
+
+    # Si ya está bien, no hacer nada.
+    if url_actual == webhook_url:
+
+        return {
+            "ok": True,
+            "webhook": webhook_url,
+            "changed": False
+        }
 
 
     resultado = telegram_request(
+
         "setWebhook",
+
         {
-            "url": webhook_url,
-            "allowed_updates": [
-                "message",
-                "callback_query"
-            ]
+            "url":
+                webhook_url,
+
+            "allowed_updates":
+                [
+                    "message",
+                    "callback_query"
+                ],
+
+            "drop_pending_updates":
+                False
         }
+
     )
 
 
-    print(
-        "[TELEGRAM] Resultado webhook:",
-        resultado
-    )
+    return {
+        "ok":
+            resultado.get(
+                "ok",
+                False
+            ),
 
+        "webhook":
+            webhook_url,
+
+        "changed":
+            True,
+
+        "telegram":
+            resultado
+    }
+
+
+# ============================================================
+# INICIO DE SERVIDOR
+# ============================================================
 
 @app.on_event("startup")
 def startup_event():
 
     print("=" * 60)
-    print("DATAVAULT DLP INICIADO")
-    print("=" * 60)
 
     print(
-        "PUBLIC_BASE_URL:",
-        PUBLIC_BASE_URL
+        "DATAVAULT DLP INICIADO"
     )
 
     print(
@@ -268,7 +385,26 @@ def startup_event():
         AUTHORIZED_CHAT_IDS
     )
 
-    configurar_webhook()
+    print(
+        "PUBLIC_BASE_URL:",
+        PUBLIC_BASE_URL
+        or "(se detectará al subir)"
+    )
+
+    print("=" * 60)
+
+
+    if PUBLIC_BASE_URL:
+
+        print(
+
+            "[WEBHOOK STARTUP]",
+
+            configurar_webhook_url(
+                PUBLIC_BASE_URL
+            )
+
+        )
 
 
 # ============================================================
@@ -281,15 +417,18 @@ def startup_event():
 )
 async def read_index():
 
-    if os.path.exists("index.html"):
+    if os.path.exists(
+        "index.html"
+    ):
 
         with open(
             "index.html",
             "r",
             encoding="utf-8"
-        ) as file:
+        ) as archivo:
 
-            return file.read()
+            return archivo.read()
+
 
     return """
     <h1>DataVault DLP API activa</h1>
@@ -304,23 +443,41 @@ async def read_index():
 def health_check():
 
     return {
-        "status": "ok",
-        "service": (
-            "DataVault DLP API | "
-            "GM Ingenieros y Consultores"
-        ),
-        "telegram_configurado": bool(
-            TELEGRAM_TOKEN
-        ),
-        "usuarios_telegram": len(
-            AUTHORIZED_CHAT_IDS
-        ),
-        "public_url": PUBLIC_BASE_URL
+
+        "status":
+            "ok",
+
+        "service":
+            (
+                "DataVault DLP API | "
+                "GM Ingenieros y Consultores"
+            ),
+
+        "telegram_configurado":
+            bool(
+                TELEGRAM_TOKEN
+            ),
+
+        "usuarios_telegram":
+            len(
+                AUTHORIZED_CHAT_IDS
+            ),
+
+        "supabase_configurado":
+            bool(
+                SUPABASE_URL
+                and
+                SUPABASE_KEY
+            ),
+
+        "public_url":
+            PUBLIC_BASE_URL
+            or None
     }
 
 
 # ============================================================
-# VER WEBHOOK ACTUAL
+# INFORMACIÓN DEL WEBHOOK
 # ============================================================
 
 @app.get("/telegram-info")
@@ -330,18 +487,34 @@ def telegram_info():
 
         return {
             "ok": False,
-            "error": (
+            "error":
                 "TELEGRAM_TOKEN no configurado"
-            )
         }
 
 
-    resultado = telegram_request(
+    return telegram_request(
         "getWebhookInfo",
         {}
     )
 
-    return resultado
+
+# ============================================================
+# FORZAR WEBHOOK MANUALMENTE
+# ============================================================
+
+@app.get("/set-webhook")
+def set_webhook_manual(
+    request: Request
+):
+
+    base_url = obtener_base_url_request(
+        request
+    )
+
+
+    return configurar_webhook_url(
+        base_url
+    )
 
 
 # ============================================================
@@ -350,6 +523,8 @@ def telegram_info():
 
 @app.post("/upload")
 async def registrar_y_solicitar_custodia(
+
+    request: Request,
 
     file: UploadFile = File(...),
 
@@ -364,28 +539,55 @@ async def registrar_y_solicitar_custodia(
 ):
 
     # --------------------------------------------------------
-    # VALIDACIONES DE TELEGRAM
+    # VALIDAR TELEGRAM
     # --------------------------------------------------------
 
     if not TELEGRAM_TOKEN:
 
         raise HTTPException(
+
             status_code=500,
+
             detail=(
-                "Telegram no está configurado."
+                "TELEGRAM_TOKEN "
+                "no está configurado."
             )
+
         )
 
 
     if not AUTHORIZED_CHAT_IDS:
 
         raise HTTPException(
+
             status_code=500,
+
             detail=(
-                "No existen usuarios "
-                "Telegram autorizados."
+                "No hay Telegram IDs "
+                "autorizados."
             )
+
         )
+
+
+    # --------------------------------------------------------
+    # ASEGURAR WEBHOOK CORRECTO
+    # --------------------------------------------------------
+
+    base_url_actual = obtener_base_url_request(
+        request
+    )
+
+
+    estado_webhook = configurar_webhook_url(
+        base_url_actual
+    )
+
+
+    print(
+        "[WEBHOOK UPLOAD]",
+        estado_webhook
+    )
 
 
     # --------------------------------------------------------
@@ -398,13 +600,17 @@ async def registrar_y_solicitar_custodia(
     if not contenido:
 
         raise HTTPException(
+
             status_code=400,
-            detail="El archivo está vacío."
+
+            detail=
+                "El archivo está vacío."
+
         )
 
 
     # --------------------------------------------------------
-    # HASH SHA-256
+    # SHA-256
     # --------------------------------------------------------
 
     hash_sha256 = hashlib.sha256(
@@ -413,7 +619,7 @@ async def registrar_y_solicitar_custodia(
 
 
     # --------------------------------------------------------
-    # SUPABASE
+    # REGISTRAR EN SUPABASE
     # --------------------------------------------------------
 
     registro = {
@@ -425,24 +631,37 @@ async def registrar_y_solicitar_custodia(
             hash_sha256,
 
         "tamano_bytes":
-            len(contenido),
+            len(
+                contenido
+            ),
 
         "estado":
             "PENDIENTE",
 
         "usuario_solicitante":
             usuario
+
     }
 
 
     try:
 
         respuesta_db = (
+
             supabase
-            .table("auditoria_custodia")
-            .insert(registro)
+
+            .table(
+                "auditoria_custodia"
+            )
+
+            .insert(
+                registro
+            )
+
             .execute()
+
         )
+
 
     except Exception as error:
 
@@ -451,59 +670,81 @@ async def registrar_y_solicitar_custodia(
             error
         )
 
+
         raise HTTPException(
+
             status_code=500,
+
             detail=(
                 "No se pudo registrar "
-                "el documento en Supabase."
+                "en Supabase: "
+                f"{error}"
             )
+
         )
 
 
     if not respuesta_db.data:
 
         raise HTTPException(
+
             status_code=500,
+
             detail=(
                 "Supabase no devolvió "
                 "el registro insertado."
             )
+
         )
 
 
     id_auditoria = (
-        respuesta_db.data[0]["id"]
+        respuesta_db
+        .data[0]
+        .get("id")
+    )
+
+
+    # ========================================================
+    # IMPORTANTE:
+    # Conservamos el mismo callback_data del código
+    # anterior que sí funcionaba.
+    # ========================================================
+
+    hash_prefix = (
+        hash_sha256[:10]
     )
 
 
     # --------------------------------------------------------
-    # MENSAJE TELEGRAM
-    #
-    # Sin Markdown para evitar errores con nombres como:
-    #
-    # INFORME_FINAL_[01].pdf
+    # MENSAJE
     # --------------------------------------------------------
 
     mensaje = (
-        "🛡️ DATAVAULT DLP - GM INGENIEROS\n\n"
+
+        "🛡️ [DataVault DLP - GM Ingenieros]\n\n"
+
         f"📁 Archivo: {file.filename}\n"
+
         f"👤 Solicitante: {usuario}\n"
-        f"📂 Carpeta Destino: {carpeta}\n\n"
-        f"🔑 SHA-256:\n{hash_sha256}\n\n"
+
+        f"📂 Carpeta Destino: {carpeta}\n"
+
+        f"🔑 Hash SHA-256: {hash_sha256}\n"
+
         f"🆔 Auditoría: {id_auditoria}\n\n"
-        "¿Autoriza la transferencia "
+
+        "¿Autoriza su transferencia "
         "a la custodia corporativa?"
+
     )
 
 
     # --------------------------------------------------------
     # BOTONES
-    #
-    # Ahora usamos el ID exacto de Supabase.
-    # Ya no usamos solo 10 caracteres del hash.
     # --------------------------------------------------------
 
-    keyboard = {
+    reply_markup = {
 
         "inline_keyboard": [
 
@@ -514,7 +755,7 @@ async def registrar_y_solicitar_custodia(
                         "✅ Aprobar",
 
                     "callback_data":
-                        f"aprobar:{id_auditoria}"
+                        f"aprobar_{hash_prefix}"
                 },
 
                 {
@@ -522,7 +763,7 @@ async def registrar_y_solicitar_custodia(
                         "❌ Rechazar",
 
                     "callback_data":
-                        f"rechazar:{id_auditoria}"
+                        f"rechazar_{hash_prefix}"
                 }
 
             ]
@@ -538,7 +779,7 @@ async def registrar_y_solicitar_custodia(
 
 
     # --------------------------------------------------------
-    # ENVIAR A CADA CUSTODIO
+    # ENVIAR A TODOS LOS AUTORIZADOS
     # --------------------------------------------------------
 
     for chat_id in AUTHORIZED_CHAT_IDS:
@@ -555,13 +796,20 @@ async def registrar_y_solicitar_custodia(
                     mensaje,
 
                 "reply_markup":
-                    keyboard
+                    reply_markup
             }
 
         )
 
 
-        if resultado.get("ok"):
+        ok = bool(
+            resultado.get(
+                "ok"
+            )
+        )
+
+
+        if ok:
 
             enviados_correctamente += 1
 
@@ -572,10 +820,7 @@ async def registrar_y_solicitar_custodia(
                 chat_id,
 
             "ok":
-                resultado.get(
-                    "ok",
-                    False
-                ),
+                ok,
 
             "description":
                 resultado.get(
@@ -587,24 +832,20 @@ async def registrar_y_solicitar_custodia(
 
 
     # --------------------------------------------------------
-    # SI NADIE RECIBIÓ TELEGRAM
+    # NADIE RECIBIÓ LA ALERTA
     # --------------------------------------------------------
 
     if enviados_correctamente == 0:
-
-        print(
-            "[TELEGRAM] Ninguna alerta "
-            "pudo ser entregada."
-        )
 
         raise HTTPException(
 
             status_code=502,
 
             detail={
+
                 "mensaje":
                     (
-                        "El documento se registró "
+                        "El archivo quedó registrado "
                         "en Supabase, pero Telegram "
                         "no pudo notificar a ningún "
                         "custodio."
@@ -612,14 +853,11 @@ async def registrar_y_solicitar_custodia(
 
                 "telegram":
                     resultados_telegram
+
             }
 
         )
 
-
-    # --------------------------------------------------------
-    # RESPUESTA WEB
-    # --------------------------------------------------------
 
     return {
 
@@ -629,7 +867,7 @@ async def registrar_y_solicitar_custodia(
         "mensaje":
             (
                 "Documento registrado "
-                "y alerta enviada."
+                "y notificado a Telegram."
             ),
 
         "id_auditoria":
@@ -642,7 +880,11 @@ async def registrar_y_solicitar_custodia(
             enviados_correctamente,
 
         "telegram":
-            resultados_telegram
+            resultados_telegram,
+
+        "webhook":
+            estado_webhook
+
     }
 
 
@@ -659,7 +901,7 @@ async def recibir_respuesta_telegram(
 
 
     print(
-        "\n[TELEGRAM UPDATE]",
+        "[TELEGRAM UPDATE]",
         data
     )
 
@@ -670,36 +912,45 @@ async def recibir_respuesta_telegram(
 
     if "message" in data:
 
-        message = data["message"]
+        message = data[
+            "message"
+        ]
+
 
         chat_id = (
-            message["chat"]["id"]
+            message[
+                "chat"
+            ][
+                "id"
+            ]
         )
+
 
         user_id = (
-            message["from"]["id"]
+            message[
+                "from"
+            ][
+                "id"
+            ]
         )
+
 
         texto = (
+
             message
-            .get("text", "")
+
+            .get(
+                "text",
+                ""
+            )
+
             .strip()
-        )
 
-
-        print(
-            "[TELEGRAM MESSAGE]",
-            "user_id=",
-            user_id,
-            "chat_id=",
-            chat_id,
-            "texto=",
-            texto
         )
 
 
         # ----------------------------------------------------
-        # NO AUTORIZADO
+        # USUARIO NO AUTORIZADO
         # ----------------------------------------------------
 
         if user_id not in AUTHORIZED_CHAT_IDS:
@@ -714,12 +965,12 @@ async def recibir_respuesta_telegram(
 
                     "text":
                         (
-                            "⛔ ACCESO NO AUTORIZADO\n\n"
-                            "Tu Telegram ID es:\n\n"
+                            "⛔ Acceso no autorizado.\n\n"
+                            f"Tu Telegram ID es: "
                             f"{user_id}\n\n"
-                            "Envía este ID al administrador "
-                            "de DataVault para que pueda "
-                            "autorizar tu cuenta."
+                            "Agrega este ID en Railway "
+                            "en la variable "
+                            "AUTHORIZED_CHAT_IDS."
                         )
                 }
 
@@ -733,27 +984,32 @@ async def recibir_respuesta_telegram(
 
                 "user_id":
                     user_id
+
             }
+
+
+        texto_lower = texto.lower()
 
 
         # ----------------------------------------------------
         # /START
         # ----------------------------------------------------
 
-        if texto.lower().startswith(
+        if texto_lower.startswith(
             "/start"
         ):
 
             respuesta = (
-                "🛡️ DATAVAULT DLP\n"
-                "GM Ingenieros y Consultores\n\n"
+
+                "🛡️ DataVault DLP | GM Ingenieros\n\n"
+
                 "✅ Usuario autorizado.\n\n"
-                f"🆔 Telegram ID: {user_id}\n\n"
+
+                f"Tu Telegram ID es: {user_id}\n\n"
+
                 "Recibirás aquí las solicitudes "
-                "de custodia de documentos.\n\n"
-                "Cuando llegue una solicitud podrás:\n\n"
-                "✅ Aprobar\n"
-                "❌ Rechazar"
+                "de custodia."
+
             )
 
 
@@ -761,13 +1017,16 @@ async def recibir_respuesta_telegram(
         # /ID
         # ----------------------------------------------------
 
-        elif texto.lower().startswith(
+        elif texto_lower.startswith(
             "/id"
         ):
 
             respuesta = (
-                "🆔 TU TELEGRAM ID\n\n"
+
+                "🆔 Tu Telegram ID:\n\n"
+
                 f"{user_id}"
+
             )
 
 
@@ -775,35 +1034,41 @@ async def recibir_respuesta_telegram(
         # /ESTADO
         # ----------------------------------------------------
 
-        elif texto.lower().startswith(
+        elif texto_lower.startswith(
             "/estado"
         ):
 
             respuesta = (
-                "🟢 DATAVAULT DLP ACTIVO\n\n"
-                "Tu cuenta está autorizada "
-                "para recibir solicitudes "
-                "de custodia."
+
+                "🟢 DataVault DLP activo.\n\n"
+
+                "Tu cuenta está autorizada."
+
             )
 
 
         # ----------------------------------------------------
-        # MENSAJE CUALQUIERA
+        # OTROS MENSAJES
         # ----------------------------------------------------
 
         else:
 
             respuesta = (
-                "🛡️ DATAVAULT DLP\n\n"
-                "Bot de autorización activo.\n\n"
-                "Comandos disponibles:\n\n"
-                "/start - Iniciar el bot\n"
-                "/id - Consultar tu Telegram ID\n"
+
+                "🛡️ DataVault DLP activo.\n\n"
+
+                "Comandos:\n"
+
+                "/start - Iniciar\n"
+
+                "/id - Ver tu Telegram ID\n"
+
                 "/estado - Verificar conexión"
+
             )
 
 
-        resultado = telegram_request(
+        telegram_request(
 
             "sendMessage",
 
@@ -819,15 +1084,8 @@ async def recibir_respuesta_telegram(
 
 
         return {
-
             "status":
-                "message_processed",
-
-            "telegram":
-                resultado.get(
-                    "ok",
-                    False
-                )
+                "message_processed"
         }
 
 
@@ -837,21 +1095,25 @@ async def recibir_respuesta_telegram(
 
     if "callback_query" in data:
 
-        callback = (
-            data["callback_query"]
-        )
+        callback = data[
+            "callback_query"
+        ]
 
-        callback_id = (
-            callback["id"]
-        )
 
-        user_id = (
-            callback["from"]["id"]
-        )
+        callback_id = callback[
+            "id"
+        ]
+
+
+        user_id = callback[
+            "from"
+        ][
+            "id"
+        ]
 
 
         # ----------------------------------------------------
-        # VALIDAR USUARIO
+        # VALIDAR AUTORIZACIÓN
         # ----------------------------------------------------
 
         if user_id not in AUTHORIZED_CHAT_IDS:
@@ -866,8 +1128,8 @@ async def recibir_respuesta_telegram(
 
                     "text":
                         (
-                            "❌ Usuario "
-                            "no autorizado."
+                            "❌ Acceso denegado: "
+                            "usuario no autorizado."
                         ),
 
                     "show_alert":
@@ -890,160 +1152,163 @@ async def recibir_respuesta_telegram(
 
 
         print(
-            "[TELEGRAM CALLBACK]",
-            action_data
+
+            f"[TELEGRAM CALLBACK] "
+            f"user={user_id} "
+            f"data={action_data}"
+
         )
 
 
         # ----------------------------------------------------
-        # FORMATO:
+        # SOPORTAR LOS DOS FORMATOS
         #
+        # ORIGINAL:
+        # aprobar_abc123
+        #
+        # NUEVO:
         # aprobar:123
-        # rechazar:123
         # ----------------------------------------------------
 
         try:
 
-            accion, auditoria_id = (
-                action_data.split(
-                    ":",
-                    1
+            # =================================================
+            # FORMATO NUEVO QUE YA PUDO HABER QUEDADO
+            # EN MENSAJES ANTERIORES
+            # =================================================
+
+            if ":" in action_data:
+
+                accion, auditoria_id_raw = (
+                    action_data.split(
+                        ":",
+                        1
+                    )
                 )
-            )
-
-            auditoria_id = int(
-                auditoria_id
-            )
-
-        except Exception:
-
-            telegram_request(
-
-                "answerCallbackQuery",
-
-                {
-                    "callback_query_id":
-                        callback_id,
-
-                    "text":
-                        "❌ Acción inválida."
-                }
-
-            )
 
 
-            return {
-                "status":
-                    "invalid_callback"
-            }
+                if accion not in (
+                    "aprobar",
+                    "rechazar"
+                ):
+
+                    raise ValueError(
+                        "Acción inválida"
+                    )
 
 
-        if accion == "aprobar":
-
-            nuevo_estado = (
-                "APROBADO"
-            )
-
-            icono = "✅"
-
-        elif accion == "rechazar":
-
-            nuevo_estado = (
-                "RECHAZADO"
-            )
-
-            icono = "❌"
-
-        else:
-
-            telegram_request(
-
-                "answerCallbackQuery",
-
-                {
-                    "callback_query_id":
-                        callback_id,
-
-                    "text":
-                        "❌ Acción desconocida."
-                }
-
-            )
-
-            return {
-                "status":
-                    "invalid_action"
-            }
-
-
-        # ----------------------------------------------------
-        # SOLO PERMITIR DECIDIR SI ESTÁ PENDIENTE
-        # ----------------------------------------------------
-
-        try:
-
-            resultado_update = (
-
-                supabase
-                .table(
-                    "auditoria_custodia"
+                auditoria_id = int(
+                    auditoria_id_raw
                 )
-                .update(
-                    {
+
+
+                nuevo_estado = (
+
+                    "APROBADO"
+
+                    if accion == "aprobar"
+
+                    else "RECHAZADO"
+
+                )
+
+
+                resultado_update = (
+
+                    supabase
+
+                    .table(
+                        "auditoria_custodia"
+                    )
+
+                    .update({
                         "estado":
                             nuevo_estado
-                    }
-                )
-                .eq(
-                    "id",
-                    auditoria_id
-                )
-                .eq(
-                    "estado",
-                    "PENDIENTE"
-                )
-                .execute()
+                    })
 
-            )
+                    .eq(
+                        "id",
+                        auditoria_id
+                    )
+
+                    .execute()
+
+                )
+
+
+            # =================================================
+            # FORMATO ORIGINAL
+            # ESTE ES EL QUE GENERAMOS AHORA
+            # =================================================
+
+            elif "_" in action_data:
+
+                accion, hash_prefix = (
+                    action_data.split(
+                        "_",
+                        1
+                    )
+                )
+
+
+                if accion not in (
+                    "aprobar",
+                    "rechazar"
+                ):
+
+                    raise ValueError(
+                        "Acción inválida"
+                    )
+
+
+                nuevo_estado = (
+
+                    "APROBADO"
+
+                    if accion == "aprobar"
+
+                    else "RECHAZADO"
+
+                )
+
+
+                resultado_update = (
+
+                    supabase
+
+                    .table(
+                        "auditoria_custodia"
+                    )
+
+                    .update({
+                        "estado":
+                            nuevo_estado
+                    })
+
+                    .like(
+                        "hash_sha256",
+                        f"{hash_prefix}%"
+                    )
+
+                    .execute()
+
+                )
+
+
+            else:
+
+                raise ValueError(
+                    "Formato de callback inválido"
+                )
+
 
         except Exception as error:
 
             print(
-                "[SUPABASE UPDATE ERROR]",
+                "[CALLBACK ERROR]",
                 error
             )
 
-            telegram_request(
-
-                "answerCallbackQuery",
-
-                {
-                    "callback_query_id":
-                        callback_id,
-
-                    "text":
-                        (
-                            "❌ Error actualizando "
-                            "Supabase."
-                        ),
-
-                    "show_alert":
-                        True
-                }
-
-            )
-
-            return {
-                "status":
-                    "database_error"
-            }
-
-
-        # ----------------------------------------------------
-        # YA HABÍA SIDO DECIDIDO
-        # ----------------------------------------------------
-
-        if not resultado_update.data:
 
             telegram_request(
 
@@ -1055,8 +1320,8 @@ async def recibir_respuesta_telegram(
 
                     "text":
                         (
-                            "⚠️ Este documento "
-                            "ya fue procesado."
+                            "❌ No se pudo procesar: "
+                            f"{error}"
                         ),
 
                     "show_alert":
@@ -1065,14 +1330,35 @@ async def recibir_respuesta_telegram(
 
             )
 
+
             return {
+
                 "status":
-                    "already_processed"
+                    "callback_error",
+
+                "error":
+                    str(
+                        error
+                    )
+
             }
 
 
+        print(
+
+            "[SUPABASE UPDATE]",
+
+            getattr(
+                resultado_update,
+                "data",
+                None
+            )
+
+        )
+
+
         # ----------------------------------------------------
-        # CONFIRMAR CALLBACK
+        # CONFIRMAR A TELEGRAM
         # ----------------------------------------------------
 
         telegram_request(
@@ -1085,7 +1371,7 @@ async def recibir_respuesta_telegram(
 
                 "text":
                     (
-                        f"Documento "
+                        "Estado actualizado a: "
                         f"{nuevo_estado}"
                     )
             }
@@ -1094,7 +1380,7 @@ async def recibir_respuesta_telegram(
 
 
         # ----------------------------------------------------
-        # EDITAR MENSAJE ORIGINAL
+        # EDITAR MENSAJE
         # ----------------------------------------------------
 
         message = callback.get(
@@ -1104,9 +1390,18 @@ async def recibir_respuesta_telegram(
 
 
         chat_id = (
+
             message
-            .get("chat", {})
-            .get("id")
+
+            .get(
+                "chat",
+                {}
+            )
+
+            .get(
+                "id"
+            )
+
         )
 
 
@@ -1121,13 +1416,33 @@ async def recibir_respuesta_telegram(
         )
 
 
-        nuevo_texto = (
-            f"{texto_original}\n\n"
-            "────────────────────────\n"
-            f"{icono} DECISIÓN: {nuevo_estado}\n"
-            f"👤 Telegram ID: {user_id}"
+        icono = (
+
+            "✅"
+
+            if nuevo_estado == "APROBADO"
+
+            else "❌"
+
         )
 
+
+        nuevo_texto = (
+
+            f"{texto_original}\n\n"
+
+            f"{icono} DECISIÓN: "
+            f"Documento {nuevo_estado}\n"
+
+            f"👤 Procesado por Telegram ID: "
+            f"{user_id}"
+
+        )
+
+
+        # ----------------------------------------------------
+        # QUITAR BOTONES DESPUÉS DE DECIDIR
+        # ----------------------------------------------------
 
         if chat_id and message_id:
 
@@ -1145,8 +1460,6 @@ async def recibir_respuesta_telegram(
                     "text":
                         nuevo_texto,
 
-                    # Al editar sin reply_markup
-                    # desaparecen los botones.
                     "reply_markup":
                         {
                             "inline_keyboard":
@@ -1157,34 +1470,19 @@ async def recibir_respuesta_telegram(
             )
 
 
-        print(
-            "[SUPABASE]",
-            f"Auditoría {auditoria_id}",
-            nuevo_estado,
-            "por",
-            user_id
-        )
-
-
         return {
 
             "status":
                 "ok",
-
-            "auditoria_id":
-                auditoria_id,
 
             "estado_actualizado":
                 nuevo_estado,
 
             "autorizado_por":
                 user_id
+
         }
 
-
-    # ========================================================
-    # OTRO TIPO DE UPDATE
-    # ========================================================
 
     return {
         "status":
