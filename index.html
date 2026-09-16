@@ -2,6 +2,7 @@
 <html lang="es">
 
 <head>
+
     <meta charset="UTF-8">
 
     <meta
@@ -13,17 +14,22 @@
         DataVault DLP | GM Ingenieros y Consultores
     </title>
 
-    <!-- Tailwind -->
-    <script src="https://cdn.tailwindcss.com"></script>
 
-    <!-- Supabase -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script
+        src="https://cdn.tailwindcss.com">
+    </script>
 
-    <!-- FontAwesome -->
+
+    <script
+        src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2">
+    </script>
+
+
     <link
         rel="stylesheet"
-        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
+        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
     >
+
 </head>
 
 
@@ -42,9 +48,9 @@
 >
 
 
-<!-- ========================================================= -->
+<!-- ======================================================= -->
 <!-- LOGIN -->
-<!-- ========================================================= -->
+<!-- ======================================================= -->
 
 <div
     id="loginSection"
@@ -60,7 +66,12 @@
     "
 >
 
-    <div class="text-center mb-8">
+    <div
+        class="
+            text-center
+            mb-8
+        "
+    >
 
         <div
             class="
@@ -78,19 +89,38 @@
             "
         >
 
-            <i class="fa-solid fa-building-user mr-2"></i>
+            <i
+                class="
+                    fa-solid
+                    fa-building-user
+                    mr-2
+                "
+            >
+            </i>
 
             GM Ingenieros y Consultores
 
         </div>
 
 
-        <h2 class="text-2xl font-bold tracking-wide">
+        <h2
+            class="
+                text-2xl
+                font-bold
+                tracking-wide
+            "
+        >
             DataVault DLP
         </h2>
 
 
-        <p class="text-gray-400 text-sm mt-1">
+        <p
+            class="
+                text-gray-400
+                text-sm
+                mt-1
+            "
+        >
             Custodia Corporativa - Acceso Restringido
         </p>
 
@@ -189,6 +219,7 @@
                 py-2.5
                 rounded-lg
                 transition
+                duration-200
             "
         >
             Iniciar Sesión
@@ -211,16 +242,16 @@
 </div>
 
 
-<!-- ========================================================= -->
+<!-- ======================================================= -->
 <!-- DASHBOARD -->
-<!-- ========================================================= -->
+<!-- ======================================================= -->
 
 <div
     id="dashboardSection"
     class="
         hidden
         w-full
-        max-w-6xl
+        max-w-5xl
         space-y-6
     "
 >
@@ -231,11 +262,8 @@
     <div
         class="
             flex
-            flex-col
-            md:flex-row
             justify-between
-            md:items-center
-            gap-4
+            items-center
             bg-gray-800
             p-4
             rounded-xl
@@ -244,7 +272,13 @@
         "
     >
 
-        <div class="flex items-center space-x-3">
+        <div
+            class="
+                flex
+                items-center
+                space-x-3
+            "
+        >
 
             <span
                 class="
@@ -261,21 +295,38 @@
                 "
             >
 
-                <i class="fa-solid fa-shield-halved"></i>
+                <i
+                    class="
+                        fa-solid
+                        fa-shield-halved
+                    "
+                >
+                </i>
 
                 GM Ingenieros
 
             </span>
 
 
-            <h1 class="text-xl font-bold">
+            <h1
+                class="
+                    text-xl
+                    font-bold
+                "
+            >
                 DataVault DLP | Secure File Upload
             </h1>
 
         </div>
 
 
-        <div class="flex items-center space-x-4">
+        <div
+            class="
+                flex
+                items-center
+                space-x-4
+            "
+        >
 
             <span
                 id="userBadge"
@@ -310,7 +361,8 @@
                         fa-right-from-bracket
                         mr-1
                     "
-                ></i>
+                >
+                </i>
 
                 Salir
 
@@ -321,9 +373,9 @@
     </div>
 
 
-    <!-- ===================================================== -->
-    <!-- CARGA DE ARCHIVO -->
-    <!-- ===================================================== -->
+    <!-- =================================================== -->
+    <!-- CARGA -->
+    <!-- =================================================== -->
 
     <div
         id="dropZone"
@@ -333,7 +385,7 @@
             border-dashed
             border-gray-600
             rounded-xl
-            p-10
+            p-8
             text-center
             hover:border-blue-500
             transition
@@ -346,18 +398,32 @@
                 fa-cloud-arrow-up
                 text-5xl
                 text-blue-400
-                mb-4
+                mb-3
             "
-        ></i>
+        >
+        </i>
 
 
-        <h3 class="text-lg font-semibold mb-1">
+        <h3
+            class="
+                text-lg
+                font-semibold
+                mb-1
+            "
+        >
             Cargar Archivo Sensible a Custodia
         </h3>
 
 
-        <p class="text-gray-400 text-sm mb-5">
-            Procesamiento Zero-Disk (RAM) con hash SHA-256 automático
+        <p
+            class="
+                text-gray-400
+                text-sm
+                mb-4
+            "
+        >
+            Procesamiento Zero-Disk (RAM)
+            con hash SHA-256 automático
         </p>
 
 
@@ -370,7 +436,6 @@
 
 
         <button
-            id="selectFileBtn"
             onclick="
                 document
                     .getElementById('fileInput')
@@ -380,25 +445,21 @@
                 bg-blue-600
                 hover:bg-blue-500
                 px-5
-                py-2.5
+                py-2
                 rounded-lg
                 font-medium
                 text-sm
                 transition
             "
         >
-
-            <i class="fa-solid fa-file-arrow-up mr-2"></i>
-
             Seleccionar Archivo
-
         </button>
 
 
         <div
             id="uploadStatus"
             class="
-                mt-5
+                mt-4
                 text-sm
                 font-semibold
                 hidden
@@ -409,9 +470,9 @@
     </div>
 
 
-    <!-- ===================================================== -->
-    <!-- AUDITORÍA -->
-    <!-- ===================================================== -->
+    <!-- =================================================== -->
+    <!-- TABLA -->
+    <!-- =================================================== -->
 
     <div
         class="
@@ -429,15 +490,17 @@
                 border-b
                 border-gray-700
                 flex
-                flex-col
-                sm:flex-row
                 justify-between
-                sm:items-center
-                gap-3
+                items-center
             "
         >
 
-            <h2 class="font-bold text-lg">
+            <h2
+                class="
+                    font-bold
+                    text-lg
+                "
+            >
 
                 <i
                     class="
@@ -446,58 +509,37 @@
                         mr-2
                         text-blue-400
                     "
-                ></i>
+                >
+                </i>
 
                 Recientes Subidos
 
             </h2>
 
 
-            <div class="flex gap-2">
-
-                <button
-                    onclick="loadAuditData()"
-                    class="
-                        text-xs
-                        bg-blue-500/20
-                        text-blue-400
-                        px-2.5
-                        py-1
-                        rounded-full
-                        border
-                        border-blue-500/30
-                        hover:bg-blue-500/30
-                    "
-                >
-
-                    <i class="fa-solid fa-rotate mr-1"></i>
-
-                    Actualizar
-
-                </button>
-
-
-                <span
-                    class="
-                        text-xs
-                        bg-green-500/20
-                        text-green-400
-                        px-2.5
-                        py-1
-                        rounded-full
-                        border
-                        border-green-500/30
-                    "
-                >
-                    ● En directo (Supabase)
-                </span>
-
-            </div>
+            <span
+                class="
+                    text-xs
+                    bg-green-500/20
+                    text-green-400
+                    px-2.5
+                    py-1
+                    rounded-full
+                    border
+                    border-green-500/30
+                "
+            >
+                ● En directo (Supabase)
+            </span>
 
         </div>
 
 
-        <div class="overflow-x-auto">
+        <div
+            class="
+                overflow-x-auto
+            "
+        >
 
             <table
                 class="
@@ -540,14 +582,16 @@
                 </thead>
 
 
-                <tbody id="auditTableBody">
+                <tbody
+                    id="auditTableBody"
+                >
 
                     <tr>
 
                         <td
                             colspan="4"
                             class="
-                                p-5
+                                p-4
                                 text-center
                                 text-gray-500
                             "
@@ -568,33 +612,30 @@
 </div>
 
 
-<!-- ========================================================= -->
+<!-- ======================================================= -->
 <!-- JAVASCRIPT -->
-<!-- ========================================================= -->
+<!-- ======================================================= -->
 
 <script>
 
-    // ========================================================
+    // =======================================================
     // BACKEND
-    //
-    // La página usa automáticamente el mismo dominio
-    // de Railway en el que está abierta.
-    // ========================================================
+    // =======================================================
 
-    const API_URL = window.location.origin;
+    const API_URL =
+        window.location.origin;
 
 
-    // ========================================================
+    // =======================================================
     // SUPABASE
-    // ========================================================
+    //
+    // Esta es la misma ANON KEY de tu versión funcional.
+    // =======================================================
 
     const SUPABASE_URL =
         "https://crujlbbhtkcithullgfs.supabase.co";
 
 
-    // IMPORTANTE:
-    // usa aquí SOLO la clave ANON/PUBLISHABLE.
-    // NO service_role.
     const SUPABASE_KEY =
         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNydWpsYmJodGtjaXRodWxsZ2ZzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkzOTQ0ODAsImV4cCI6MjEwNDk3MDQ4MH0.IJTGJ02ldBKp1_yLejsN4643PCj70sxNOKCE0e-YLGw";
 
@@ -611,9 +652,9 @@
     let realtimeChannel = null;
 
 
-    // ========================================================
-    // ESCAPAR HTML
-    // ========================================================
+    // =======================================================
+    // ESCAPAR TEXTO
+    // =======================================================
 
     function escapeHtml(value) {
 
@@ -621,7 +662,9 @@
             value === null ||
             value === undefined
         ) {
+
             return "";
+
         }
 
 
@@ -654,39 +697,52 @@
     }
 
 
-    // ========================================================
+    // =======================================================
     // LOGIN
-    // ========================================================
+    // =======================================================
 
-    async function handleLogin(event) {
+    async function handleLogin(e) {
 
-        event.preventDefault();
+        e.preventDefault();
 
 
         const email =
             document
-                .getElementById("username")
+                .getElementById(
+                    'username'
+                )
                 .value
                 .trim();
 
 
         const password =
             document
-                .getElementById("password")
+                .getElementById(
+                    'password'
+                )
                 .value;
 
 
         const loginBtn =
             document
-                .getElementById("loginBtn");
+                .getElementById(
+                    'loginBtn'
+                );
 
 
         const loginError =
             document
-                .getElementById("loginError");
+                .getElementById(
+                    'loginError'
+                );
 
 
-        loginError.classList.add("hidden");
+        loginError.classList.add(
+            'hidden'
+        );
+
+
+        loginError.textContent = "";
 
 
         loginBtn.disabled = true;
@@ -694,7 +750,7 @@
 
         loginBtn.innerHTML =
             '<i class="fa-solid fa-spinner fa-spin mr-2"></i>' +
-            'Verificando...';
+            'Verificando credenciales...';
 
 
         try {
@@ -707,14 +763,19 @@
                     .auth
                     .signInWithPassword({
 
-                        email: email,
-                        password: password
+                        email:
+                            email,
+
+                        password:
+                            password
 
                     });
 
 
             if (error) {
+
                 throw error;
+
             }
 
 
@@ -724,8 +785,9 @@
             ) {
 
                 throw new Error(
-                    "No se pudo obtener el usuario."
+                    "Supabase no devolvió el usuario."
                 );
+
             }
 
 
@@ -733,7 +795,37 @@
                 data.user.email;
 
 
-            mostrarDashboard();
+            document
+                .getElementById(
+                    'userBadge'
+                )
+                .innerText =
+                    currentUserEmail;
+
+
+            document
+                .getElementById(
+                    'loginSection'
+                )
+                .classList
+                .add(
+                    'hidden'
+                );
+
+
+            document
+                .getElementById(
+                    'dashboardSection'
+                )
+                .classList
+                .remove(
+                    'hidden'
+                );
+
+
+            loadAuditData();
+
+            listenRealtime();
 
 
         } catch (error) {
@@ -744,9 +836,12 @@
             );
 
 
-            loginError.innerText =
+            loginError.textContent =
                 "Acceso denegado: " +
-                error.message;
+                (
+                    error.message ||
+                    "Error desconocido"
+                );
 
 
             loginError.classList.remove(
@@ -756,7 +851,9 @@
 
         } finally {
 
-            loginBtn.disabled = false;
+            loginBtn.disabled =
+                false;
+
 
             loginBtn.innerHTML =
                 "Iniciar Sesión";
@@ -766,150 +863,81 @@
     }
 
 
-    // ========================================================
-    // MOSTRAR DASHBOARD
-    // ========================================================
-
-    function mostrarDashboard() {
-
-        document
-            .getElementById("userBadge")
-            .innerText =
-                currentUserEmail;
-
-
-        document
-            .getElementById("loginSection")
-            .classList
-            .add("hidden");
-
-
-        document
-            .getElementById("dashboardSection")
-            .classList
-            .remove("hidden");
-
-
-        loadAuditData();
-
-        listenRealtime();
-
-    }
-
-
-    // ========================================================
+    // =======================================================
     // LOGOUT
-    // ========================================================
+    // =======================================================
 
     async function handleLogout() {
 
-        try {
-
-            await supabaseClient
-                .auth
-                .signOut();
-
-        } catch (error) {
-
-            console.error(
-                "LOGOUT ERROR:",
-                error
-            );
-
-        }
+        await supabaseClient
+            .auth
+            .signOut();
 
 
         currentUserEmail = "";
 
 
-        if (realtimeChannel) {
-
-            try {
-
-                await supabaseClient
-                    .removeChannel(
-                        realtimeChannel
-                    );
-
-            } catch (error) {
-
-                console.error(
-                    error
-                );
-            }
-
-
-            realtimeChannel = null;
-
-        }
+        document
+            .getElementById(
+                'dashboardSection'
+            )
+            .classList
+            .add(
+                'hidden'
+            );
 
 
         document
-            .getElementById("dashboardSection")
+            .getElementById(
+                'loginSection'
+            )
             .classList
-            .add("hidden");
-
-
-        document
-            .getElementById("loginSection")
-            .classList
-            .remove("hidden");
+            .remove(
+                'hidden'
+            );
 
     }
 
 
-    // ========================================================
+    // =======================================================
     // SUBIR ARCHIVO
-    // ========================================================
+    // =======================================================
 
     async function uploadFile(file) {
 
         if (!file) {
+
             return;
+
         }
 
 
         const statusDiv =
             document
                 .getElementById(
-                    "uploadStatus"
+                    'uploadStatus'
                 );
 
 
         const fileInput =
             document
                 .getElementById(
-                    "fileInput"
+                    'fileInput'
                 );
 
 
-        const selectFileBtn =
-            document
-                .getElementById(
-                    "selectFileBtn"
-                );
-
-
-        statusDiv
-            .classList
-            .remove("hidden");
+        statusDiv.classList.remove(
+            'hidden'
+        );
 
 
         statusDiv.className =
-            "mt-5 text-sm font-semibold text-yellow-400";
+            "mt-4 text-sm text-yellow-400";
 
 
         statusDiv.innerHTML =
             '<i class="fa-solid fa-spinner fa-spin mr-2"></i>' +
-            'Procesando archivo y notificando a Telegram...';
-
-
-        selectFileBtn.disabled = true;
-
-        selectFileBtn.classList.add(
-            "opacity-50",
-            "cursor-not-allowed"
-        );
+            'Procesando en RAM, registrando y notificando a Telegram...';
 
 
         const formData =
@@ -917,22 +945,22 @@
 
 
         formData.append(
-            "file",
+            'file',
             file
         );
 
 
-        // AHORA MANDA EL USUARIO REAL.
+        // CORREO REAL DEL USUARIO
         formData.append(
-            "usuario",
+            'usuario',
             currentUserEmail ||
-            "Usuario desconocido"
+            'Usuario desconocido'
         );
 
 
         formData.append(
-            "carpeta",
-            "PLANOS"
+            'carpeta',
+            'PLANOS'
         );
 
 
@@ -945,7 +973,7 @@
 
                     {
                         method:
-                            "POST",
+                            'POST',
 
                         body:
                             formData
@@ -962,12 +990,7 @@
                 data =
                     await response.json();
 
-            } catch (error) {
-
-                console.error(
-                    "No se pudo convertir la respuesta:",
-                    error
-                );
+            } catch (_) {
 
             }
 
@@ -980,337 +1003,144 @@
 
             if (!response.ok) {
 
-                let mensajeError =
+                let mensaje =
                     `Error HTTP ${response.status}`;
 
 
                 if (
                     typeof data.detail ===
-                    "string"
+                    'string'
                 ) {
 
-                    mensajeError =
+                    mensaje =
                         data.detail;
 
                 }
 
-
                 else if (
                     data.detail &&
                     typeof data.detail ===
-                    "object" &&
+                    'object' &&
                     data.detail.mensaje
                 ) {
 
-                    mensajeError =
+                    mensaje =
                         data.detail.mensaje;
 
                 }
 
 
                 throw new Error(
-                    mensajeError
+                    mensaje
                 );
 
             }
 
 
             statusDiv.className =
-                "mt-5 text-sm font-semibold text-green-400";
+                "mt-4 text-sm text-green-400";
 
 
             statusDiv.innerHTML =
                 '<i class="fa-solid fa-circle-check mr-2"></i>' +
-                'Archivo registrado. Alerta enviada a ' +
+                `¡Enviado a custodia! Telegram notificó a ` +
                 `${data.telegram_enviados || 0} custodio(s).`;
 
 
             await loadAuditData();
 
 
-        } catch (error) {
+        } catch (err) {
 
             console.error(
                 "UPLOAD ERROR:",
-                error
+                err
             );
 
 
             statusDiv.className =
-                "mt-5 text-sm font-semibold text-red-400";
+                "mt-4 text-sm text-red-400";
 
 
             statusDiv.innerHTML =
                 '<i class="fa-solid fa-circle-xmark mr-2"></i>' +
-                "Error: " +
+                'Error: ' +
                 escapeHtml(
-                    error.message
+                    err.message ||
+                    'Error desconocido'
                 );
 
 
         } finally {
 
-            fileInput.value = "";
-
-
-            selectFileBtn.disabled = false;
-
-
-            selectFileBtn.classList.remove(
-                "opacity-50",
-                "cursor-not-allowed"
-            );
+            fileInput.value =
+                "";
 
         }
 
     }
 
 
-    // ========================================================
+    // =======================================================
     // CARGAR AUDITORÍA
-    // ========================================================
+    // =======================================================
 
     async function loadAuditData() {
+
+        const {
+            data,
+            error
+        } =
+            await supabaseClient
+
+                .from(
+                    'auditoria_custodia'
+                )
+
+                .select(
+                    '*'
+                )
+
+                .order(
+                    'id',
+                    {
+                        ascending:
+                            false
+                    }
+                )
+
+                .limit(
+                    10
+                );
+
+
+        if (error) {
+
+            console.error(
+                "Error al consultar Supabase:",
+                error
+            );
+
+            return;
+
+        }
+
 
         const tbody =
             document
                 .getElementById(
-                    "auditTableBody"
+                    'auditTableBody'
                 );
 
 
-        try {
-
-            const {
-                data,
-                error
-            } =
-                await supabaseClient
-
-                    .from(
-                        "auditoria_custodia"
-                    )
-
-                    .select("*")
-
-                    .order(
-                        "id",
-                        {
-                            ascending:
-                                false
-                        }
-                    )
-
-                    .limit(20);
+        tbody.innerHTML =
+            '';
 
 
-            if (error) {
-                throw error;
-            }
-
-
-            tbody.innerHTML = "";
-
-
-            if (
-                !data ||
-                data.length === 0
-            ) {
-
-                tbody.innerHTML = `
-
-                    <tr>
-
-                        <td
-                            colspan="4"
-                            class="
-                                p-5
-                                text-center
-                                text-gray-500
-                            "
-                        >
-                            No existen registros.
-                        </td>
-
-                    </tr>
-
-                `;
-
-                return;
-            }
-
-
-            data.forEach(
-                row => {
-
-                    let badgeClass =
-                        "bg-yellow-500/20 " +
-                        "text-yellow-400 " +
-                        "border-yellow-500/30";
-
-
-                    let icono =
-                        "fa-clock";
-
-
-                    if (
-                        row.estado ===
-                        "APROBADO"
-                    ) {
-
-                        badgeClass =
-                            "bg-green-500/20 " +
-                            "text-green-400 " +
-                            "border-green-500/30";
-
-                        icono =
-                            "fa-circle-check";
-                    }
-
-
-                    else if (
-                        row.estado ===
-                        "RECHAZADO"
-                    ) {
-
-                        badgeClass =
-                            "bg-red-500/20 " +
-                            "text-red-400 " +
-                            "border-red-500/30";
-
-                        icono =
-                            "fa-circle-xmark";
-                    }
-
-
-                    const nombre =
-                        escapeHtml(
-                            row.nombre_archivo ||
-                            "Sin nombre"
-                        );
-
-
-                    const usuario =
-                        escapeHtml(
-                            row.usuario_solicitante ||
-                            "Desconocido"
-                        );
-
-
-                    const hashCompleto =
-                        row.hash_sha256 ||
-                        "";
-
-
-                    const hash =
-                        hashCompleto
-                            ?
-                            escapeHtml(
-                                hashCompleto.substring(
-                                    0,
-                                    16
-                                )
-                            ) + "..."
-                            :
-                            "N/A";
-
-
-                    const estado =
-                        escapeHtml(
-                            row.estado ||
-                            "PENDIENTE"
-                        );
-
-
-                    tbody.innerHTML += `
-
-                        <tr
-                            class="
-                                border-b
-                                border-gray-700/50
-                                hover:bg-gray-700/30
-                                transition
-                            "
-                        >
-
-                            <td
-                                class="
-                                    p-3
-                                    font-medium
-                                    text-white
-                                "
-                            >
-                                ${nombre}
-                            </td>
-
-
-                            <td
-                                class="
-                                    p-3
-                                    text-gray-400
-                                "
-                            >
-                                ${usuario}
-                            </td>
-
-
-                            <td
-                                class="
-                                    p-3
-                                    font-mono
-                                    text-xs
-                                    text-blue-300
-                                "
-                                title="${escapeHtml(hashCompleto)}"
-                            >
-                                ${hash}
-                            </td>
-
-
-                            <td class="p-3">
-
-                                <span
-                                    class="
-                                        inline-flex
-                                        items-center
-                                        gap-1
-                                        px-2.5
-                                        py-1
-                                        rounded-full
-                                        text-xs
-                                        border
-                                        ${badgeClass}
-                                    "
-                                >
-
-                                    <i
-                                        class="
-                                            fa-solid
-                                            ${icono}
-                                        "
-                                    ></i>
-
-                                    ${estado}
-
-                                </span>
-
-                            </td>
-
-                        </tr>
-
-                    `;
-
-                }
-            );
-
-
-        } catch (error) {
-
-            console.error(
-                "SUPABASE ERROR:",
-                error
-            );
-
+        if (
+            !data ||
+            data.length === 0
+        ) {
 
             tbody.innerHTML = `
 
@@ -1319,32 +1149,191 @@
                     <td
                         colspan="4"
                         class="
-                            p-5
+                            p-4
                             text-center
-                            text-red-400
+                            text-gray-500
                         "
                     >
-                        Error cargando auditoría:
-                        ${escapeHtml(error.message)}
+                        No existen registros.
                     </td>
 
                 </tr>
 
             `;
 
+            return;
+
         }
+
+
+        data.forEach(
+            row => {
+
+                let badgeClass =
+                    "bg-yellow-500/20 " +
+                    "text-yellow-400 " +
+                    "border-yellow-500/30";
+
+
+                if (
+                    row.estado ===
+                    "APROBADO"
+                ) {
+
+                    badgeClass =
+                        "bg-green-500/20 " +
+                        "text-green-400 " +
+                        "border-green-500/30";
+
+                }
+
+
+                if (
+                    row.estado ===
+                    "RECHAZADO"
+                ) {
+
+                    badgeClass =
+                        "bg-red-500/20 " +
+                        "text-red-400 " +
+                        "border-red-500/30";
+
+                }
+
+
+                const nombre =
+                    escapeHtml(
+                        row.nombre_archivo ||
+                        'Sin nombre'
+                    );
+
+
+                const usuario =
+                    escapeHtml(
+
+                        row.usuario_solicitante ||
+
+                        currentUserEmail ||
+
+                        'Usuario desconocido'
+
+                    );
+
+
+                const estado =
+                    escapeHtml(
+                        row.estado ||
+                        'PENDIENTE'
+                    );
+
+
+                const hashCompleto =
+                    row.hash_sha256 ||
+                    '';
+
+
+                const hashCorto =
+                    hashCompleto
+
+                        ?
+
+                        escapeHtml(
+                            hashCompleto.substring(
+                                0,
+                                16
+                            )
+                        ) + '...'
+
+                        :
+
+                        'N/A';
+
+
+                tbody.innerHTML += `
+
+                    <tr
+                        class="
+                            border-b
+                            border-gray-700/50
+                            hover:bg-gray-700/30
+                            transition
+                        "
+                    >
+
+                        <td
+                            class="
+                                p-3
+                                font-medium
+                                text-white
+                            "
+                        >
+                            ${nombre}
+                        </td>
+
+
+                        <td
+                            class="
+                                p-3
+                                text-gray-400
+                            "
+                        >
+                            ${usuario}
+                        </td>
+
+
+                        <td
+                            class="
+                                p-3
+                                font-mono
+                                text-xs
+                                text-blue-300
+                            "
+                            title="${escapeHtml(hashCompleto)}"
+                        >
+                            ${hashCorto}
+                        </td>
+
+
+                        <td
+                            class="p-3"
+                        >
+
+                            <span
+                                class="
+                                    px-2.5
+                                    py-1
+                                    rounded-full
+                                    text-xs
+                                    border
+                                    ${badgeClass}
+                                "
+                            >
+                                ${estado}
+                            </span>
+
+                        </td>
+
+                    </tr>
+
+                `;
+
+            }
+
+        );
 
     }
 
 
-    // ========================================================
-    // REALTIME SUPABASE
-    // ========================================================
+    // =======================================================
+    // REALTIME
+    // =======================================================
 
     function listenRealtime() {
 
         if (realtimeChannel) {
+
             return;
+
         }
 
 
@@ -1353,31 +1342,25 @@
             supabaseClient
 
                 .channel(
-                    "datavault-auditoria"
+                    'realtime_audit'
                 )
 
                 .on(
 
-                    "postgres_changes",
+                    'postgres_changes',
 
                     {
                         event:
-                            "*",
+                            '*',
 
                         schema:
-                            "public",
+                            'public',
 
                         table:
-                            "auditoria_custodia"
+                            'auditoria_custodia'
                     },
 
-                    payload => {
-
-                        console.log(
-                            "SUPABASE REALTIME:",
-                            payload
-                        );
-
+                    () => {
 
                         loadAuditData();
 
@@ -1385,27 +1368,18 @@
 
                 )
 
-                .subscribe(
-                    status => {
-
-                        console.log(
-                            "REALTIME STATUS:",
-                            status
-                        );
-
-                    }
-                );
+                .subscribe();
 
     }
 
 
-    // ========================================================
-    // RESTAURAR SESIÓN
-    // ========================================================
+    // =======================================================
+    // RECUPERAR SESIÓN
+    // =======================================================
 
     window.addEventListener(
 
-        "DOMContentLoaded",
+        'DOMContentLoaded',
 
         async () => {
 
@@ -1429,7 +1403,37 @@
                         data.session.user.email;
 
 
-                    mostrarDashboard();
+                    document
+                        .getElementById(
+                            'userBadge'
+                        )
+                        .innerText =
+                            currentUserEmail;
+
+
+                    document
+                        .getElementById(
+                            'loginSection'
+                        )
+                        .classList
+                        .add(
+                            'hidden'
+                        );
+
+
+                    document
+                        .getElementById(
+                            'dashboardSection'
+                        )
+                        .classList
+                        .remove(
+                            'hidden'
+                        );
+
+
+                    loadAuditData();
+
+                    listenRealtime();
 
                 }
 
@@ -1450,4 +1454,5 @@
 
 
 </body>
+
 </html>
