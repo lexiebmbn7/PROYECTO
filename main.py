@@ -1,4 +1,5 @@
 import hashlib
+import io
 import os
 import requests
 
@@ -7,6 +8,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from supabase import create_client, Client
+
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
 
 
 # ============================================================
@@ -30,7 +35,7 @@ app.add_middleware(
 
 
 # ============================================================
-# CONFIGURACIÓN DESDE RAILWAY
+# CONFIGURACIÓN DESDE RAILWAY Y GOOGLE DRIVE
 # ============================================================
 
 TELEGRAM_TOKEN = os.getenv(
@@ -69,11 +74,132 @@ RAILWAY_PUBLIC_DOMAIN = os.getenv(
 ).strip()
 
 
+GOOGLE_CLIENT_ID = os.getenv(
+    "GOOGLE_CLIENT_ID",
+    ""
+).strip()
+
+
+GOOGLE_CLIENT_SECRET = os.getenv(
+    "GOOGLE_CLIENT_SECRET",
+    ""
+).strip()
+
+
+GOOGLE_REFRESH_TOKEN = os.getenv(
+    "GOOGLE_REFRESH_TOKEN",
+    ""
+).strip()
+
+
+GOOGLE_FOLDER_ID = os.getenv(
+    "GOOGLE_FOLDER_ID",
+    ""
+).strip()
+
+
 if not PUBLIC_BASE_URL and RAILWAY_PUBLIC_DOMAIN:
 
     PUBLIC_BASE_URL = (
         f"https://{RAILWAY_PUBLIC_DOMAIN}"
     ).rstrip("/")
+
+
+ARCHIVOS_EN_RAM = {}
+
+
+# ============================================================
+# GOOGLE DRIVE UPLOAD
+# ============================================================
+
+def subir_a_google_drive(
+    nombre_archivo: str,
+    contenido_bytes: bytes
+):
+
+    if not all([
+        GOOGLE_CLIENT_ID,
+        GOOGLE_CLIENT_SECRET,
+        GOOGLE_REFRESH_TOKEN,
+        GOOGLE_FOLDER_ID
+    ]):
+
+        print(
+            "[DRIVE CONFIG ERROR] "
+            "Faltan variables de Google Drive"
+        )
+
+        return None
+
+
+    try:
+
+        creds = Credentials(
+            token=None,
+            refresh_token=GOOGLE_REFRESH_TOKEN,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=GOOGLE_CLIENT_ID,
+            client_secret=GOOGLE_CLIENT_SECRET,
+        )
+
+
+        service = build(
+            'drive',
+            'v3',
+            credentials=creds
+        )
+
+
+        file_metadata = {
+            'name': nombre_archivo,
+            'parents': [GOOGLE_FOLDER_ID]
+        }
+
+
+        media = MediaIoBaseUpload(
+            io.BytesIO(contenido_bytes),
+            mimetype='application/octet-stream'
+        )
+
+
+        archivo_drive = (
+
+            service
+
+            .files()
+
+            .create(
+                body=file_metadata,
+                media_body=media,
+                fields='id'
+            )
+
+            .execute()
+
+        )
+
+
+        drive_id = archivo_drive.get('id')
+
+
+        print(
+            f"[DRIVE SUCCESS] "
+            f"Archivo subido con ID: {drive_id}"
+        )
+
+
+        return drive_id
+
+
+    except Exception as e:
+
+        print(
+            f"[DRIVE EXCEPTION] "
+            f"Error al transferir a Drive: {e}"
+        )
+
+
+        return None
 
 
 # ============================================================
@@ -381,7 +507,7 @@ def startup_event():
     print("=" * 60)
 
     print(
-        "DATAVAULT DLP INICIADO"
+        "DATAVAULT DLP INICIADO - CONEXIÓN CON GOOGLE DRIVE ACTIVA"
     )
 
     print(
@@ -627,32 +753,48 @@ async def registrar_y_solicitar_custodia(
     # --------------------------------------------------------
 
     nombre_original = file.filename or "archivo_sin_nombre"
+
     nombre_base, extension = os.path.splitext(nombre_original)
+
 
     try:
 
         res_existentes = (
+
             supabase
+
             .table("auditoria_custodia")
+
             .select("nombre_archivo")
+
             .ilike("nombre_archivo", f"{nombre_base}%{extension}")
+
             .execute()
+
         )
 
+
         archivos_existentes = res_existentes.data or []
+
 
         if archivos_existentes:
 
             contador = len(archivos_existentes) + 1
+
             nombre_final = f"{nombre_base} ({contador}){extension}"
 
         else:
 
             nombre_final = nombre_original
 
+
     except Exception as e_nombre:
 
-        print("[CORRELATIVO ERROR]", e_nombre)
+        print(
+            "[CORRELATIVO ERROR]",
+            e_nombre
+        )
+
         nombre_final = nombre_original
 
 
@@ -743,11 +885,20 @@ async def registrar_y_solicitar_custodia(
     )
 
 
-    # ========================================================
-    # IMPORTANTE:
-    # Conservamos el mismo callback_data del código
-    # anterior que sí funcionaba.
-    # ========================================================
+    # --------------------------------------------------------
+    # ALMACENAR TEMPORALMENTE EN RAM
+    # --------------------------------------------------------
+
+    ARCHIVOS_EN_RAM[str(id_auditoria)] = {
+
+        "nombre":
+            nombre_final,
+
+        "contenido":
+            contenido
+
+    }
+
 
     hash_prefix = (
         hash_sha256[:10]
@@ -793,7 +944,7 @@ async def registrar_y_solicitar_custodia(
                         "✅ Aprobar",
 
                     "callback_data":
-                        f"aprobar_{hash_prefix}"
+                        f"aprobar:{id_auditoria}"
                 },
 
                 {
@@ -801,7 +952,7 @@ async def registrar_y_solicitar_custodia(
                         "❌ Rechazar",
 
                     "callback_data":
-                        f"rechazar_{hash_prefix}"
+                        f"rechazar:{id_auditoria}"
                 }
 
             ]
@@ -1198,11 +1349,16 @@ async def recibir_respuesta_telegram(
         )
 
 
-        # ----------------------------------------------------
-        # SOPORTAR LOS DOS FORMATOS
-        # ----------------------------------------------------
-
         try:
+
+            id_auditoria_str = None
+
+            nuevo_estado = "PENDIENTE"
+
+
+            # ------------------------------------------------
+            # FORMATO NUEVO
+            # ------------------------------------------------
 
             if ":" in action_data:
 
@@ -1212,6 +1368,9 @@ async def recibir_respuesta_telegram(
                         1
                     )
                 )
+
+
+                id_auditoria_str = auditoria_id_raw
 
 
                 if accion not in (
@@ -1262,6 +1421,10 @@ async def recibir_respuesta_telegram(
 
                 )
 
+
+            # ------------------------------------------------
+            # FORMATO ORIGINAL
+            # ------------------------------------------------
 
             elif "_" in action_data:
 
@@ -1317,10 +1480,67 @@ async def recibir_respuesta_telegram(
                 )
 
 
+                if (
+                    resultado_update.data
+                ):
+
+                    id_auditoria_str = str(
+                        resultado_update
+                        .data[0]
+                        .get("id")
+                    )
+
+
             else:
 
                 raise ValueError(
                     "Formato de callback inválido"
+                )
+
+
+            # ------------------------------------------------
+            # SUBIDA A GOOGLE DRIVE SI SE APRUEBA
+            # ------------------------------------------------
+
+            drive_status = ""
+
+
+            if (
+                nuevo_estado == "APROBADO"
+                and id_auditoria_str
+                and id_auditoria_str in ARCHIVOS_EN_RAM
+            ):
+
+                archivo_ram = ARCHIVOS_EN_RAM.pop(
+                    id_auditoria_str
+                )
+
+
+                drive_id = subir_a_google_drive(
+                    archivo_ram["nombre"],
+                    archivo_ram["contenido"]
+                )
+
+
+                drive_status = (
+
+                    f"\n☁️ Subido a Google Drive (ID: {drive_id})"
+
+                    if drive_id
+
+                    else "\n⚠️ Error al transferir a Drive."
+
+                )
+
+
+            elif (
+                id_auditoria_str
+                and id_auditoria_str in ARCHIVOS_EN_RAM
+            ):
+
+                # SI ES RECHAZADO, SE BORRA DE LA RAM SIN GUARDAR
+                ARCHIVOS_EN_RAM.pop(
+                    id_auditoria_str
                 )
 
 
@@ -1454,7 +1674,7 @@ async def recibir_respuesta_telegram(
             f"{texto_original}\n\n"
 
             f"{icono} DECISIÓN: "
-            f"Documento {nuevo_estado}\n"
+            f"Documento {nuevo_estado}{drive_status}\n"
 
             f"👤 Procesado por Telegram ID: "
             f"{user_id}"
