@@ -416,6 +416,91 @@ def telegram_request(
 
 
 # ============================================================
+# TECLADO PRINCIPAL PERSISTENTE DE TELEGRAM
+# ============================================================
+
+def enviar_teclado_principal(chat_id):
+    """Activa un teclado persistente sin tocar el menú inline existente."""
+
+    return telegram_request(
+        "sendMessage",
+        {
+            "chat_id": chat_id,
+            "text": (
+                "🛡️ DataVault DLP - GM Ingenieros\n\n"
+                "Panel de custodia disponible."
+            ),
+            "reply_markup": {
+                "keyboard": [
+                    [
+                        {"text": "👥 Usuarios"},
+                        {"text": "🔄 Actualizar"},
+                    ],
+                    [
+                        {"text": "📊 Estado"},
+                    ],
+                ],
+                "resize_keyboard": True,
+                "one_time_keyboard": False,
+                "is_persistent": True,
+                "input_field_placeholder": "Seleccione una opción...",
+            },
+        },
+    )
+
+
+def enviar_estado_datavault(chat_id):
+    """Muestra un resumen simple de estados de auditoría."""
+
+    try:
+        respuesta = (
+            supabase
+            .table("auditoria_custodia")
+            .select("estado")
+            .execute()
+        )
+
+        registros = respuesta.data or []
+
+        pendientes = sum(
+            1 for fila in registros
+            if fila.get("estado") == "PENDIENTE"
+        )
+
+        aprobados = sum(
+            1 for fila in registros
+            if fila.get("estado") == "APROBADO"
+        )
+
+        rechazados = sum(
+            1 for fila in registros
+            if fila.get("estado") == "RECHAZADO"
+        )
+
+        texto = (
+            "📊 ESTADO DATAVAULT\n\n"
+            f"🟡 Pendientes: {pendientes}\n"
+            f"🟢 Aprobados: {aprobados}\n"
+            f"🔴 Rechazados: {rechazados}"
+        )
+
+    except Exception as error:
+        print("[ESTADO TELEGRAM ERROR]", error)
+        texto = (
+            "❌ No se pudo consultar el estado de DataVault."
+        )
+
+    return telegram_request(
+        "sendMessage",
+        {
+            "chat_id": chat_id,
+            "text": texto,
+        },
+    )
+
+
+
+# ============================================================
 # MENÚ TELEGRAM - USUARIOS -> ARCHIVOS -> DECISIÓN
 # ============================================================
 
@@ -1421,40 +1506,56 @@ async def recibir_respuesta_telegram(request: Request):
 
         texto_lower = texto.lower()
 
-        # /start, /menu y /pendientes abren directamente el panel.
+        # /start activa el teclado persistente y además abre el panel actual.
+        if texto_lower.startswith("/start"):
+            enviar_teclado_principal(chat_id)
+            mostrar_menu_usuarios(chat_id)
+            return {"status": "panel_principal"}
+
+        # Botón persistente o comandos que abren usuarios pendientes.
         if (
-            texto_lower.startswith("/start")
+            texto == "👥 Usuarios"
             or texto_lower.startswith("/menu")
             or texto_lower.startswith("/pendientes")
         ):
             mostrar_menu_usuarios(chat_id)
             return {"status": "menu_usuarios"}
 
+        # Botón persistente para refrescar la consulta.
+        if texto == "🔄 Actualizar":
+            mostrar_menu_usuarios(chat_id)
+            return {"status": "actualizado"}
+
+        # Botón persistente o comando /estado.
+        if (
+            texto == "📊 Estado"
+            or texto_lower.startswith("/estado")
+        ):
+            enviar_estado_datavault(chat_id)
+            return {"status": "estado"}
+
         if texto_lower.startswith("/id"):
-            respuesta = (
-                "🆔 Tu Telegram ID:\n\n"
-                f"{user_id}"
+            telegram_request(
+                "sendMessage",
+                {
+                    "chat_id": chat_id,
+                    "text": (
+                        "🆔 Tu Telegram ID:\n\n"
+                        f"{user_id}"
+                    ),
+                },
             )
-        elif texto_lower.startswith("/estado"):
-            respuesta = (
-                "🟢 DataVault DLP activo.\n\n"
-                "Tu cuenta está autorizada."
-            )
-        else:
-            respuesta = (
-                "🛡️ DataVault DLP activo.\n\n"
-                "Comandos:\n"
-                "/pendientes - Abrir documentos pendientes\n"
-                "/menu - Abrir menú\n"
-                "/id - Ver tu Telegram ID\n"
-                "/estado - Verificar conexión"
-            )
+            return {"status": "telegram_id"}
 
         telegram_request(
             "sendMessage",
             {
                 "chat_id": chat_id,
-                "text": respuesta,
+                "text": (
+                    "🛡️ DataVault DLP activo.\n\n"
+                    "Utiliza los botones inferiores para gestionar la custodia.\n\n"
+                    "También puedes usar /pendientes, /menu, /id y /estado."
+                ),
             },
         )
         return {"status": "message_processed"}
