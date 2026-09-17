@@ -6,7 +6,7 @@ import threading
 import requests
 from uuid import UUID
 
-from fastapi import FastAPI, File, UploadFile, Request, Form, HTTPException, BackgroundTasks
+from fastapi import FastAPI, File, UploadFile, Request, Form, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
@@ -413,101 +413,6 @@ def telegram_request(
         }
 
 
-
-
-# ============================================================
-# PANEL PRINCIPAL PERSISTENTE DE TELEGRAM
-# ============================================================
-
-def enviar_teclado_principal(chat_id, texto=None):
-    """Activa un teclado persistente para el custodio.
-
-    Este teclado queda disponible debajo de la caja de texto de Telegram
-    y NO reemplaza los botones inline de Usuarios/Archivos/Aprobar/Rechazar.
-    """
-    if not texto:
-        texto = (
-            "🛡️ DataVault DLP - GM Ingenieros\n\n"
-            "Panel de custodia disponible."
-        )
-
-    return telegram_request(
-        "sendMessage",
-        {
-            "chat_id": chat_id,
-            "text": texto,
-            "reply_markup": {
-                "keyboard": [
-                    [
-                        {"text": "👥 Usuarios"},
-                        {"text": "🔄 Actualizar"},
-                    ],
-                    [
-                        {"text": "📊 Estado"},
-                    ],
-                ],
-                "resize_keyboard": True,
-                "one_time_keyboard": False,
-                "is_persistent": True,
-                "input_field_placeholder": "Seleccione una opción...",
-            },
-        },
-    )
-
-
-def obtener_resumen_estados():
-    """Cuenta documentos por estado para el botón 📊 Estado."""
-    try:
-        respuesta = (
-            supabase
-            .table("auditoria_custodia")
-            .select("estado")
-            .execute()
-        )
-        registros = respuesta.data or []
-    except Exception as error:
-        print("[ESTADO TELEGRAM ERROR]", error)
-        return {
-            "PENDIENTE": 0,
-            "APROBADO": 0,
-            "RECHAZADO": 0,
-            "error": str(error),
-        }
-
-    conteo = {
-        "PENDIENTE": 0,
-        "APROBADO": 0,
-        "RECHAZADO": 0,
-    }
-
-    for registro in registros:
-        estado = str(registro.get("estado") or "").upper().strip()
-        if estado in conteo:
-            conteo[estado] += 1
-
-    return conteo
-
-
-def enviar_estado_datavault(chat_id):
-    resumen = obtener_resumen_estados()
-
-    texto = (
-        "📊 ESTADO DATAVAULT\n\n"
-        f"🟡 Pendientes: {resumen.get('PENDIENTE', 0)}\n"
-        f"🟢 Aprobados: {resumen.get('APROBADO', 0)}\n"
-        f"🔴 Rechazados: {resumen.get('RECHAZADO', 0)}"
-    )
-
-    if resumen.get("error"):
-        texto += "\n\n⚠️ No se pudo consultar el resumen completo."
-
-    return telegram_request(
-        "sendMessage",
-        {
-            "chat_id": chat_id,
-            "text": texto,
-        },
-    )
 
 
 # ============================================================
@@ -1119,26 +1024,6 @@ def set_webhook_manual(
 
 
 # ============================================================
-# NOTIFICACIÓN TELEGRAM EN SEGUNDO PLANO
-# ============================================================
-
-def notificar_menu_custodios_background():
-    """Notifica a los custodios sin bloquear la respuesta de /upload."""
-    for chat_id in AUTHORIZED_CHAT_IDS:
-        try:
-            resultado = mostrar_menu_usuarios(chat_id)
-            print(
-                "[TELEGRAM BACKGROUND]",
-                chat_id,
-                resultado
-            )
-        except Exception as error:
-            print(
-                f"[TELEGRAM BACKGROUND ERROR] {chat_id}: {error}"
-            )
-
-
-# ============================================================
 # SUBIR ARCHIVO
 # ============================================================
 
@@ -1146,8 +1031,6 @@ def notificar_menu_custodios_background():
 async def registrar_y_solicitar_custodia(
 
     request: Request,
-
-    background_tasks: BackgroundTasks,
 
     file: UploadFile = File(...),
 
@@ -1204,16 +1087,23 @@ async def registrar_y_solicitar_custodia(
 
 
     # --------------------------------------------------------
-    # WEBHOOK
+    # ASEGURAR WEBHOOK CORRECTO
     # --------------------------------------------------------
-    # El webhook se configura al iniciar Railway mediante PUBLIC_BASE_URL.
-    # No se consulta/configura aquí para no bloquear cada subida.
-    estado_webhook = {
-        "ok": True,
-        "webhook": f"{PUBLIC_BASE_URL}/telegram-webhook" if PUBLIC_BASE_URL else None,
-        "changed": False,
-        "source": "startup"
-    }
+
+    base_url_actual = obtener_base_url_request(
+        request
+    )
+
+
+    estado_webhook = configurar_webhook_url(
+        base_url_actual
+    )
+
+
+    print(
+        "[WEBHOOK UPLOAD]",
+        estado_webhook
+    )
 
 
     # --------------------------------------------------------
@@ -1415,22 +1305,52 @@ async def registrar_y_solicitar_custodia(
 
 
     # --------------------------------------------------------
-    # NOTIFICAR TELEGRAM SIN BLOQUEAR /upload
+    # NOTIFICAR MENÚ DE PENDIENTES A LOS CUSTODIOS
     # --------------------------------------------------------
-    # FastAPI ejecutará esta tarea después de devolver la respuesta HTTP.
-    background_tasks.add_task(
-        notificar_menu_custodios_background
-    )
 
-    resultados_telegram = [
-        {
+    resultados_telegram = []
+    enviados_correctamente = 0
+
+    for chat_id in AUTHORIZED_CHAT_IDS:
+        resultado = mostrar_menu_usuarios(chat_id)
+        ok = bool(resultado.get("ok"))
+
+        if ok:
+            enviados_correctamente += 1
+
+        resultados_telegram.append({
             "chat_id": chat_id,
-            "ok": True,
-            "description": "Notificación programada en segundo plano"
-        }
-        for chat_id in AUTHORIZED_CHAT_IDS
-    ]
-    enviados_correctamente = len(AUTHORIZED_CHAT_IDS)
+            "ok": ok,
+            "description": resultado.get("description", "OK"),
+        })
+
+
+    # --------------------------------------------------------
+    # NADIE RECIBIÓ LA ALERTA
+    # --------------------------------------------------------
+
+    if enviados_correctamente == 0:
+
+        raise HTTPException(
+
+            status_code=502,
+
+            detail={
+
+                "mensaje":
+                    (
+                        "El archivo quedó registrado "
+                        "en Supabase, pero Telegram "
+                        "no pudo notificar a ningún "
+                        "custodio."
+                    ),
+
+                "telegram":
+                    resultados_telegram
+
+            }
+
+        )
 
 
     return {
@@ -1501,72 +1421,40 @@ async def recibir_respuesta_telegram(request: Request):
 
         texto_lower = texto.lower()
 
-        # ----------------------------------------------------
-        # /start activa el teclado persistente y abre usuarios
-        # ----------------------------------------------------
-        if texto_lower.startswith("/start"):
-            enviar_teclado_principal(
-                chat_id,
-                (
-                    "🛡️ DataVault DLP - GM Ingenieros\n\n"
-                    "Panel de custodia habilitado.\n"
-                    "Use los botones inferiores cuando quiera."
-                ),
-            )
-            mostrar_menu_usuarios(chat_id)
-            return {"status": "panel_principal"}
-
-        # ----------------------------------------------------
-        # Usuarios / menú de pendientes
-        # ----------------------------------------------------
+        # /start, /menu y /pendientes abren directamente el panel.
         if (
-            texto == "👥 Usuarios"
+            texto_lower.startswith("/start")
             or texto_lower.startswith("/menu")
             or texto_lower.startswith("/pendientes")
         ):
             mostrar_menu_usuarios(chat_id)
             return {"status": "menu_usuarios"}
 
-        # ----------------------------------------------------
-        # Actualizar vuelve a consultar Supabase en ese momento
-        # ----------------------------------------------------
-        if texto == "🔄 Actualizar":
-            mostrar_menu_usuarios(chat_id)
-            return {"status": "menu_actualizado"}
-
-        # ----------------------------------------------------
-        # Estado general
-        # ----------------------------------------------------
-        if texto == "📊 Estado" or texto_lower.startswith("/estado"):
-            enviar_estado_datavault(chat_id)
-            return {"status": "estado_datavault"}
-
-        # ----------------------------------------------------
-        # Ver Telegram ID
-        # ----------------------------------------------------
         if texto_lower.startswith("/id"):
-            telegram_request(
-                "sendMessage",
-                {
-                    "chat_id": chat_id,
-                    "text": (
-                        "🆔 Tu Telegram ID:\n\n"
-                        f"{user_id}"
-                    ),
-                },
+            respuesta = (
+                "🆔 Tu Telegram ID:\n\n"
+                f"{user_id}"
             )
-            return {"status": "telegram_id"}
+        elif texto_lower.startswith("/estado"):
+            respuesta = (
+                "🟢 DataVault DLP activo.\n\n"
+                "Tu cuenta está autorizada."
+            )
+        else:
+            respuesta = (
+                "🛡️ DataVault DLP activo.\n\n"
+                "Comandos:\n"
+                "/pendientes - Abrir documentos pendientes\n"
+                "/menu - Abrir menú\n"
+                "/id - Ver tu Telegram ID\n"
+                "/estado - Verificar conexión"
+            )
 
-        # Cualquier otro texto recuerda las opciones sin quitar el teclado.
         telegram_request(
             "sendMessage",
             {
                 "chat_id": chat_id,
-                "text": (
-                    "🛡️ DataVault DLP activo.\n\n"
-                    "Use los botones 👥 Usuarios, 🔄 Actualizar o 📊 Estado.\n\n"
-                    "También puede usar /pendientes, /menu, /id y /estado."
-                ),
+                "text": respuesta,
             },
         )
         return {"status": "message_processed"}
