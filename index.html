@@ -1086,56 +1086,39 @@
     // =======================================================
 
     async function loadAuditData() {
-
         const {
             data,
             error
         } =
             await supabaseClient
-
                 .from(
                     'auditoria_custodia'
                 )
-
                 .select(
                     '*'
                 )
-
-                .order('created_at', { ascending: false })
-
+                .order('fecha_solicitud', { ascending: false })
                 .limit(
                     10
                 );
-
-
         if (error) {
-
             console.error(
                 "Error al consultar Supabase:",
                 error
             );
-
             return;
-
         }
-
-
         const tbody =
             document
                 .getElementById(
                     'auditTableBody'
                 );
-
-
         tbody.innerHTML =
             '';
-
-
         if (
             !data ||
             data.length === 0
         ) {
-
             tbody.innerHTML = `
 
                 <tr>
