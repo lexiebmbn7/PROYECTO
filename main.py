@@ -1,6 +1,8 @@
 import hashlib
 import io
+import mimetypes
 import os
+import threading
 import requests
 
 from fastapi import FastAPI, File, UploadFile, Request, Form, HTTPException
@@ -106,34 +108,44 @@ if not PUBLIC_BASE_URL and RAILWAY_PUBLIC_DOMAIN:
 
 
 ARCHIVOS_EN_RAM = {}
+DECISION_LOCK = threading.Lock()
 
 
 # ============================================================
 # GOOGLE DRIVE UPLOAD
 # ============================================================
 
-def subir_a_google_drive(
-    nombre_archivo: str,
-    contenido_bytes: bytes
-):
-
-    if not all([
+def google_drive_configurado() -> bool:
+    return all([
         GOOGLE_CLIENT_ID,
         GOOGLE_CLIENT_SECRET,
         GOOGLE_REFRESH_TOKEN,
         GOOGLE_FOLDER_ID
-    ]):
+    ])
 
+
+def subir_a_google_drive(
+    nombre_archivo: str,
+    contenido_bytes: bytes
+):
+    """Sube un archivo binario directamente desde RAM a Google Drive.
+
+    Devuelve el ID del archivo creado en Drive. Si ocurre cualquier error,
+    devuelve None y el llamador conserva el archivo en RAM.
+    """
+
+    if not google_drive_configurado():
         print(
             "[DRIVE CONFIG ERROR] "
             "Faltan variables de Google Drive"
         )
-
         return None
 
+    if not contenido_bytes:
+        print("[DRIVE ERROR] El contenido recibido está vacío")
+        return None
 
     try:
-
         creds = Credentials(
             token=None,
             refresh_token=GOOGLE_REFRESH_TOKEN,
@@ -142,63 +154,59 @@ def subir_a_google_drive(
             client_secret=GOOGLE_CLIENT_SECRET,
         )
 
-
         service = build(
-            'drive',
-            'v3',
-            credentials=creds
+            "drive",
+            "v3",
+            credentials=creds,
+            cache_discovery=False
         )
 
-
         file_metadata = {
-            'name': nombre_archivo,
-            'parents': [GOOGLE_FOLDER_ID]
+            "name": nombre_archivo,
+            "parents": [GOOGLE_FOLDER_ID]
         }
 
+        mime_type = (
+            mimetypes.guess_type(nombre_archivo)[0]
+            or "application/octet-stream"
+        )
 
         media = MediaIoBaseUpload(
             io.BytesIO(contenido_bytes),
-            mimetype='application/octet-stream'
+            mimetype=mime_type,
+            resumable=False
         )
 
-
         archivo_drive = (
-
             service
-
             .files()
-
             .create(
                 body=file_metadata,
                 media_body=media,
-                fields='id'
+                fields="id,name",
+                supportsAllDrives=True
             )
-
             .execute()
-
         )
 
+        drive_id = archivo_drive.get("id")
 
-        drive_id = archivo_drive.get('id')
-
+        if not drive_id:
+            print("[DRIVE ERROR] Google no devolvió un ID de archivo")
+            return None
 
         print(
-            f"[DRIVE SUCCESS] "
-            f"Archivo subido con ID: {drive_id}"
+            f"[DRIVE SUCCESS] {nombre_archivo} "
+            f"subido con ID: {drive_id}"
         )
-
 
         return drive_id
 
-
     except Exception as e:
-
         print(
             f"[DRIVE EXCEPTION] "
             f"Error al transferir a Drive: {e}"
         )
-
-
         return None
 
 
@@ -507,7 +515,12 @@ def startup_event():
     print("=" * 60)
 
     print(
-        "DATAVAULT DLP INICIADO - CONEXIÓN CON GOOGLE DRIVE ACTIVA"
+        "DATAVAULT DLP INICIADO"
+    )
+
+    print(
+        "Google Drive:",
+        "CONFIGURADO" if google_drive_configurado() else "NO CONFIGURADO"
     )
 
     print(
@@ -599,6 +612,13 @@ def health_check():
                 and
                 SUPABASE_KEY
             ),
+
+        "google_drive_configurado":
+            google_drive_configurado(),
+
+        "google_folder_id":
+            GOOGLE_FOLDER_ID
+            or None,
 
         "public_url":
             PUBLIC_BASE_URL
@@ -1088,12 +1108,10 @@ async def recibir_respuesta_telegram(
 
     data = await request.json()
 
-
     print(
         "[TELEGRAM UPDATE]",
         data
     )
-
 
     # ========================================================
     # MENSAJES NORMALES
@@ -1101,182 +1119,73 @@ async def recibir_respuesta_telegram(
 
     if "message" in data:
 
-        message = data[
-            "message"
-        ]
-
-
-        chat_id = (
-            message[
-                "chat"
-            ][
-                "id"
-            ]
-        )
-
-
-        user_id = (
-            message[
-                "from"
-            ][
-                "id"
-            ]
-        )
-
-
-        texto = (
-
-            message
-
-            .get(
-                "text",
-                ""
-            )
-
-            .strip()
-
-        )
-
-
-        # ----------------------------------------------------
-        # USUARIO NO AUTORIZADO
-        # ----------------------------------------------------
+        message = data["message"]
+        chat_id = message["chat"]["id"]
+        user_id = message["from"]["id"]
+        texto = message.get("text", "").strip()
 
         if user_id not in AUTHORIZED_CHAT_IDS:
 
             telegram_request(
-
                 "sendMessage",
-
                 {
-                    "chat_id":
-                        chat_id,
-
-                    "text":
-                        (
-                            "⛔ Acceso no autorizado.\n\n"
-                            f"Tu Telegram ID es: "
-                            f"{user_id}\n\n"
-                            "Agrega este ID en Railway "
-                            "en la variable "
-                            "AUTHORIZED_CHAT_IDS."
-                        )
+                    "chat_id": chat_id,
+                    "text": (
+                        "⛔ Acceso no autorizado.\n\n"
+                        f"Tu Telegram ID es: {user_id}\n\n"
+                        "Agrega este ID en Railway "
+                        "en la variable AUTHORIZED_CHAT_IDS."
+                    )
                 }
-
             )
 
-
             return {
-
-                "status":
-                    "unauthorized",
-
-                "user_id":
-                    user_id
-
+                "status": "unauthorized",
+                "user_id": user_id
             }
-
 
         texto_lower = texto.lower()
 
-
-        # ----------------------------------------------------
-        # /START
-        # ----------------------------------------------------
-
-        if texto_lower.startswith(
-            "/start"
-        ):
-
+        if texto_lower.startswith("/start"):
             respuesta = (
-
                 "🛡️ DataVault DLP | GM Ingenieros\n\n"
-
                 "✅ Usuario autorizado.\n\n"
-
                 f"Tu Telegram ID es: {user_id}\n\n"
-
-                "Recibirás aquí las solicitudes "
-                "de custodia."
-
+                "Recibirás aquí las solicitudes de custodia."
             )
 
-
-        # ----------------------------------------------------
-        # /ID
-        # ----------------------------------------------------
-
-        elif texto_lower.startswith(
-            "/id"
-        ):
-
+        elif texto_lower.startswith("/id"):
             respuesta = (
-
                 "🆔 Tu Telegram ID:\n\n"
-
                 f"{user_id}"
-
             )
 
-
-        # ----------------------------------------------------
-        # /ESTADO
-        # ----------------------------------------------------
-
-        elif texto_lower.startswith(
-            "/estado"
-        ):
-
+        elif texto_lower.startswith("/estado"):
             respuesta = (
-
                 "🟢 DataVault DLP activo.\n\n"
-
                 "Tu cuenta está autorizada."
-
             )
-
-
-        # ----------------------------------------------------
-        # OTROS MENSAJES
-        # ----------------------------------------------------
 
         else:
-
             respuesta = (
-
                 "🛡️ DataVault DLP activo.\n\n"
-
                 "Comandos:\n"
-
                 "/start - Iniciar\n"
-
                 "/id - Ver tu Telegram ID\n"
-
                 "/estado - Verificar conexión"
-
             )
 
-
         telegram_request(
-
             "sendMessage",
-
             {
-                "chat_id":
-                    chat_id,
-
-                "text":
-                    respuesta
+                "chat_id": chat_id,
+                "text": respuesta
             }
-
         )
 
-
         return {
-            "status":
-                "message_processed"
+            "status": "message_processed"
         }
-
 
     # ========================================================
     # BOTONES APROBAR / RECHAZAR
@@ -1284,265 +1193,223 @@ async def recibir_respuesta_telegram(
 
     if "callback_query" in data:
 
-        callback = data[
-            "callback_query"
-        ]
-
-
-        callback_id = callback[
-            "id"
-        ]
-
-
-        user_id = callback[
-            "from"
-        ][
-            "id"
-        ]
-
-
-        # ----------------------------------------------------
-        # VALIDAR AUTORIZACIÓN
-        # ----------------------------------------------------
+        callback = data["callback_query"]
+        callback_id = callback["id"]
+        user_id = callback["from"]["id"]
 
         if user_id not in AUTHORIZED_CHAT_IDS:
 
             telegram_request(
-
                 "answerCallbackQuery",
-
                 {
-                    "callback_query_id":
-                        callback_id,
-
-                    "text":
-                        (
-                            "❌ Acceso denegado: "
-                            "usuario no autorizado."
-                        ),
-
-                    "show_alert":
-                        True
+                    "callback_query_id": callback_id,
+                    "text": "❌ Acceso denegado: usuario no autorizado.",
+                    "show_alert": True
                 }
-
             )
 
-
             return {
-                "status":
-                    "unauthorized"
+                "status": "unauthorized"
             }
 
-
-        action_data = callback.get(
-            "data",
-            ""
-        )
-
+        action_data = callback.get("data", "")
 
         print(
-
             f"[TELEGRAM CALLBACK] "
             f"user={user_id} "
             f"data={action_data}"
-
         )
 
+        # Este proyecto envía actualmente callbacks con formato:
+        # aprobar:123 / rechazar:123
+        if ":" not in action_data:
+            telegram_request(
+                "answerCallbackQuery",
+                {
+                    "callback_query_id": callback_id,
+                    "text": "❌ Formato de decisión inválido.",
+                    "show_alert": True
+                }
+            )
+            return {
+                "status": "callback_error",
+                "error": "Formato de callback inválido"
+            }
+
+        accion, auditoria_id_raw = action_data.split(":", 1)
+
+        if accion not in ("aprobar", "rechazar"):
+            telegram_request(
+                "answerCallbackQuery",
+                {
+                    "callback_query_id": callback_id,
+                    "text": "❌ Acción inválida.",
+                    "show_alert": True
+                }
+            )
+            return {
+                "status": "callback_error",
+                "error": "Acción inválida"
+            }
 
         try:
+            auditoria_id = int(auditoria_id_raw)
+        except ValueError:
+            telegram_request(
+                "answerCallbackQuery",
+                {
+                    "callback_query_id": callback_id,
+                    "text": "❌ ID de auditoría inválido.",
+                    "show_alert": True
+                }
+            )
+            return {
+                "status": "callback_error",
+                "error": "ID de auditoría inválido"
+            }
 
-            id_auditoria_str = None
+        id_auditoria_str = str(auditoria_id)
+        nuevo_estado = "APROBADO" if accion == "aprobar" else "RECHAZADO"
+        drive_id = None
+        drive_status = ""
 
-            nuevo_estado = "PENDIENTE"
+        try:
+            # Evita que dos custodios procesen simultáneamente el mismo
+            # documento dentro de esta instancia de Railway.
+            with DECISION_LOCK:
 
-
-            # ------------------------------------------------
-            # FORMATO NUEVO
-            # ------------------------------------------------
-
-            if ":" in action_data:
-
-                accion, auditoria_id_raw = (
-                    action_data.split(
-                        ":",
-                        1
-                    )
-                )
-
-
-                id_auditoria_str = auditoria_id_raw
-
-
-                if accion not in (
-                    "aprobar",
-                    "rechazar"
-                ):
-
-                    raise ValueError(
-                        "Acción inválida"
-                    )
-
-
-                auditoria_id = int(
-                    auditoria_id_raw
-                )
-
-
-                nuevo_estado = (
-
-                    "APROBADO"
-
-                    if accion == "aprobar"
-
-                    else "RECHAZADO"
-
-                )
-
-
-                resultado_update = (
-
+                consulta = (
                     supabase
-
-                    .table(
-                        "auditoria_custodia"
-                    )
-
-                    .update({
-                        "estado":
-                            nuevo_estado
-                    })
-
-                    .eq(
-                        "id",
-                        auditoria_id
-                    )
-
+                    .table("auditoria_custodia")
+                    .select("id,estado,nombre_archivo")
+                    .eq("id", auditoria_id)
+                    .limit(1)
                     .execute()
-
                 )
 
-
-            # ------------------------------------------------
-            # FORMATO ORIGINAL
-            # ------------------------------------------------
-
-            elif "_" in action_data:
-
-                accion, hash_prefix = (
-                    action_data.split(
-                        "_",
-                        1
-                    )
-                )
-
-
-                if accion not in (
-                    "aprobar",
-                    "rechazar"
-                ):
-
+                if not consulta.data:
                     raise ValueError(
-                        "Acción inválida"
+                        f"No existe la auditoría {auditoria_id}."
                     )
 
+                registro_actual = consulta.data[0]
+                estado_actual = registro_actual.get("estado")
 
-                nuevo_estado = (
-
-                    "APROBADO"
-
-                    if accion == "aprobar"
-
-                    else "RECHAZADO"
-
-                )
-
-
-                resultado_update = (
-
-                    supabase
-
-                    .table(
-                        "auditoria_custodia"
+                # Si otro custodio ya decidió, no volver a procesar.
+                if estado_actual != "PENDIENTE":
+                    telegram_request(
+                        "answerCallbackQuery",
+                        {
+                            "callback_query_id": callback_id,
+                            "text": (
+                                "⚠️ Este documento ya fue procesado. "
+                                f"Estado actual: {estado_actual}."
+                            ),
+                            "show_alert": True
+                        }
                     )
 
-                    .update({
-                        "estado":
-                            nuevo_estado
-                    })
+                    return {
+                        "status": "already_processed",
+                        "estado_actual": estado_actual
+                    }
 
-                    .like(
-                        "hash_sha256",
-                        f"{hash_prefix}%"
+                # ----------------------------------------------------
+                # APROBAR: primero Drive; después Supabase; al final RAM
+                # ----------------------------------------------------
+                if accion == "aprobar":
+
+                    archivo_ram = ARCHIVOS_EN_RAM.get(
+                        id_auditoria_str
                     )
 
-                    .execute()
+                    if not archivo_ram:
+                        raise RuntimeError(
+                            "El archivo ya no está disponible en RAM. "
+                            "No se modificó el estado en Supabase."
+                        )
 
-                )
-
-
-                if (
-                    resultado_update.data
-                ):
-
-                    id_auditoria_str = str(
-                        resultado_update
-                        .data[0]
-                        .get("id")
+                    drive_id = subir_a_google_drive(
+                        archivo_ram["nombre"],
+                        archivo_ram["contenido"]
                     )
 
+                    if not drive_id:
+                        # IMPORTANTE:
+                        # No se cambia a APROBADO y no se elimina de RAM.
+                        telegram_request(
+                            "answerCallbackQuery",
+                            {
+                                "callback_query_id": callback_id,
+                                "text": (
+                                    "⚠️ Google Drive rechazó o no pudo "
+                                    "completar la transferencia. "
+                                    "El documento sigue PENDIENTE."
+                                ),
+                                "show_alert": True
+                            }
+                        )
 
-            else:
+                        return {
+                            "status": "drive_error",
+                            "estado_actual": "PENDIENTE"
+                        }
 
-                raise ValueError(
-                    "Formato de callback inválido"
-                )
+                    resultado_update = (
+                        supabase
+                        .table("auditoria_custodia")
+                        .update({
+                            "estado": "APROBADO"
+                        })
+                        .eq("id", auditoria_id)
+                        .eq("estado", "PENDIENTE")
+                        .execute()
+                    )
 
+                    if not resultado_update.data:
+                        # La subida a Drive sí ocurrió, pero la BD no se pudo
+                        # confirmar. Se conserva RAM para diagnóstico/reintento.
+                        raise RuntimeError(
+                            "El archivo llegó a Drive, pero Supabase no pudo "
+                            "confirmar el estado APROBADO. "
+                            f"Drive ID: {drive_id}"
+                        )
 
-            # ------------------------------------------------
-            # SUBIDA A GOOGLE DRIVE SI SE APRUEBA
-            # ------------------------------------------------
+                    # Solo después de Drive + Supabase exitosos se libera RAM.
+                    ARCHIVOS_EN_RAM.pop(
+                        id_auditoria_str,
+                        None
+                    )
 
-            drive_status = ""
+                    drive_status = (
+                        f"\n☁️ Subido a Google Drive (ID: {drive_id})"
+                    )
 
+                # ----------------------------------------------------
+                # RECHAZAR: actualizar BD y luego eliminar RAM
+                # ----------------------------------------------------
+                else:
 
-            if (
-                nuevo_estado == "APROBADO"
-                and id_auditoria_str
-                and id_auditoria_str in ARCHIVOS_EN_RAM
-            ):
+                    resultado_update = (
+                        supabase
+                        .table("auditoria_custodia")
+                        .update({
+                            "estado": "RECHAZADO"
+                        })
+                        .eq("id", auditoria_id)
+                        .eq("estado", "PENDIENTE")
+                        .execute()
+                    )
 
-                archivo_ram = ARCHIVOS_EN_RAM.pop(
-                    id_auditoria_str
-                )
+                    if not resultado_update.data:
+                        raise RuntimeError(
+                            "No se pudo cambiar el documento a RECHAZADO."
+                        )
 
-
-                drive_id = subir_a_google_drive(
-                    archivo_ram["nombre"],
-                    archivo_ram["contenido"]
-                )
-
-
-                drive_status = (
-
-                    f"\n☁️ Subido a Google Drive (ID: {drive_id})"
-
-                    if drive_id
-
-                    else "\n⚠️ Error al transferir a Drive."
-
-                )
-
-
-            elif (
-                id_auditoria_str
-                and id_auditoria_str in ARCHIVOS_EN_RAM
-            ):
-
-                # SI ES RECHAZADO, SE BORRA DE LA RAM SIN GUARDAR
-                ARCHIVOS_EN_RAM.pop(
-                    id_auditoria_str
-                )
-
+                    ARCHIVOS_EN_RAM.pop(
+                        id_auditoria_str,
+                        None
+                    )
 
         except Exception as error:
 
@@ -1551,182 +1418,76 @@ async def recibir_respuesta_telegram(
                 error
             )
 
-
             telegram_request(
-
                 "answerCallbackQuery",
-
                 {
-                    "callback_query_id":
-                        callback_id,
-
-                    "text":
-                        (
-                            "❌ No se pudo procesar: "
-                            f"{error}"
-                        ),
-
-                    "show_alert":
-                        True
+                    "callback_query_id": callback_id,
+                    "text": (
+                        "❌ No se pudo procesar: "
+                        f"{error}"
+                    )[:200],
+                    "show_alert": True
                 }
-
             )
 
-
             return {
-
-                "status":
-                    "callback_error",
-
-                "error":
-                    str(
-                        error
-                    )
-
+                "status": "callback_error",
+                "error": str(error)
             }
 
-
         print(
-
             "[SUPABASE UPDATE]",
-
             getattr(
                 resultado_update,
                 "data",
                 None
             )
-
         )
-
-
-        # ----------------------------------------------------
-        # CONFIRMAR A TELEGRAM
-        # ----------------------------------------------------
 
         telegram_request(
-
             "answerCallbackQuery",
-
             {
-                "callback_query_id":
-                    callback_id,
-
-                "text":
-                    (
-                        "Estado actualizado a: "
-                        f"{nuevo_estado}"
-                    )
+                "callback_query_id": callback_id,
+                "text": (
+                    "Estado actualizado a: "
+                    f"{nuevo_estado}"
+                )
             }
-
         )
 
+        message = callback.get("message", {})
+        chat_id = message.get("chat", {}).get("id")
+        message_id = message.get("message_id")
+        texto_original = message.get("text", "")
 
-        # ----------------------------------------------------
-        # EDITAR MENSAJE
-        # ----------------------------------------------------
-
-        message = callback.get(
-            "message",
-            {}
-        )
-
-
-        chat_id = (
-
-            message
-
-            .get(
-                "chat",
-                {}
-            )
-
-            .get(
-                "id"
-            )
-
-        )
-
-
-        message_id = message.get(
-            "message_id"
-        )
-
-
-        texto_original = message.get(
-            "text",
-            ""
-        )
-
-
-        icono = (
-
-            "✅"
-
-            if nuevo_estado == "APROBADO"
-
-            else "❌"
-
-        )
-
+        icono = "✅" if nuevo_estado == "APROBADO" else "❌"
 
         nuevo_texto = (
-
             f"{texto_original}\n\n"
-
-            f"{icono} DECISIÓN: "
-            f"Documento {nuevo_estado}{drive_status}\n"
-
-            f"👤 Procesado por Telegram ID: "
-            f"{user_id}"
-
+            f"{icono} DECISIÓN: Documento {nuevo_estado}{drive_status}\n"
+            f"👤 Procesado por Telegram ID: {user_id}"
         )
 
-
-        # ----------------------------------------------------
-        # QUITAR BOTONES DESPUÉS DE DECIDIR
-        # ----------------------------------------------------
-
         if chat_id and message_id:
-
             telegram_request(
-
                 "editMessageText",
-
                 {
-                    "chat_id":
-                        chat_id,
-
-                    "message_id":
-                        message_id,
-
-                    "text":
-                        nuevo_texto,
-
-                    "reply_markup":
-                        {
-                            "inline_keyboard":
-                                []
-                        }
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "text": nuevo_texto,
+                    "reply_markup": {
+                        "inline_keyboard": []
+                    }
                 }
-
             )
 
-
         return {
-
-            "status":
-                "ok",
-
-            "estado_actualizado":
-                nuevo_estado,
-
-            "autorizado_por":
-                user_id
-
+            "status": "ok",
+            "estado_actualizado": nuevo_estado,
+            "autorizado_por": user_id,
+            "drive_id": drive_id
         }
 
-
     return {
-        "status":
-            "ignored"
+        "status": "ignored"
     }
