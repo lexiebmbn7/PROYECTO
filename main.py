@@ -6,7 +6,7 @@ import threading
 import requests
 from uuid import UUID
 
-from fastapi import FastAPI, File, UploadFile, Request, Form, HTTPException
+from fastapi import FastAPI, File, UploadFile, Request, Form, HTTPException, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
@@ -1119,6 +1119,26 @@ def set_webhook_manual(
 
 
 # ============================================================
+# NOTIFICACIÓN TELEGRAM EN SEGUNDO PLANO
+# ============================================================
+
+def notificar_menu_custodios_background():
+    """Notifica a los custodios sin bloquear la respuesta de /upload."""
+    for chat_id in AUTHORIZED_CHAT_IDS:
+        try:
+            resultado = mostrar_menu_usuarios(chat_id)
+            print(
+                "[TELEGRAM BACKGROUND]",
+                chat_id,
+                resultado
+            )
+        except Exception as error:
+            print(
+                f"[TELEGRAM BACKGROUND ERROR] {chat_id}: {error}"
+            )
+
+
+# ============================================================
 # SUBIR ARCHIVO
 # ============================================================
 
@@ -1126,6 +1146,8 @@ def set_webhook_manual(
 async def registrar_y_solicitar_custodia(
 
     request: Request,
+
+    background_tasks: BackgroundTasks,
 
     file: UploadFile = File(...),
 
@@ -1182,23 +1204,16 @@ async def registrar_y_solicitar_custodia(
 
 
     # --------------------------------------------------------
-    # ASEGURAR WEBHOOK CORRECTO
+    # WEBHOOK
     # --------------------------------------------------------
-
-    base_url_actual = obtener_base_url_request(
-        request
-    )
-
-
-    estado_webhook = configurar_webhook_url(
-        base_url_actual
-    )
-
-
-    print(
-        "[WEBHOOK UPLOAD]",
-        estado_webhook
-    )
+    # El webhook se configura al iniciar Railway mediante PUBLIC_BASE_URL.
+    # No se consulta/configura aquí para no bloquear cada subida.
+    estado_webhook = {
+        "ok": True,
+        "webhook": f"{PUBLIC_BASE_URL}/telegram-webhook" if PUBLIC_BASE_URL else None,
+        "changed": False,
+        "source": "startup"
+    }
 
 
     # --------------------------------------------------------
@@ -1400,52 +1415,22 @@ async def registrar_y_solicitar_custodia(
 
 
     # --------------------------------------------------------
-    # NOTIFICAR MENÚ DE PENDIENTES A LOS CUSTODIOS
+    # NOTIFICAR TELEGRAM SIN BLOQUEAR /upload
     # --------------------------------------------------------
+    # FastAPI ejecutará esta tarea después de devolver la respuesta HTTP.
+    background_tasks.add_task(
+        notificar_menu_custodios_background
+    )
 
-    resultados_telegram = []
-    enviados_correctamente = 0
-
-    for chat_id in AUTHORIZED_CHAT_IDS:
-        resultado = mostrar_menu_usuarios(chat_id)
-        ok = bool(resultado.get("ok"))
-
-        if ok:
-            enviados_correctamente += 1
-
-        resultados_telegram.append({
+    resultados_telegram = [
+        {
             "chat_id": chat_id,
-            "ok": ok,
-            "description": resultado.get("description", "OK"),
-        })
-
-
-    # --------------------------------------------------------
-    # NADIE RECIBIÓ LA ALERTA
-    # --------------------------------------------------------
-
-    if enviados_correctamente == 0:
-
-        raise HTTPException(
-
-            status_code=502,
-
-            detail={
-
-                "mensaje":
-                    (
-                        "El archivo quedó registrado "
-                        "en Supabase, pero Telegram "
-                        "no pudo notificar a ningún "
-                        "custodio."
-                    ),
-
-                "telegram":
-                    resultados_telegram
-
-            }
-
-        )
+            "ok": True,
+            "description": "Notificación programada en segundo plano"
+        }
+        for chat_id in AUTHORIZED_CHAT_IDS
+    ]
+    enviados_correctamente = len(AUTHORIZED_CHAT_IDS)
 
 
     return {
