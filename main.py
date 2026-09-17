@@ -4,6 +4,7 @@ import mimetypes
 import os
 import threading
 import requests
+from uuid import UUID
 
 from fastapi import FastAPI, File, UploadFile, Request, Form, HTTPException
 from fastapi.staticfiles import StaticFiles
@@ -1252,9 +1253,12 @@ async def recibir_respuesta_telegram(
                 "error": "Acción inválida"
             }
 
+        # La PK de auditoria_custodia en Supabase es UUID, no INTEGER.
+        # Telegram recibe, por ejemplo:
+        # aprobar:c9429c64-17df-4e2a-9fb2-2131dadf370f
         try:
-            auditoria_id = int(auditoria_id_raw)
-        except ValueError:
+            auditoria_id = str(UUID(auditoria_id_raw.strip()))
+        except (ValueError, AttributeError, TypeError):
             telegram_request(
                 "answerCallbackQuery",
                 {
@@ -1268,7 +1272,7 @@ async def recibir_respuesta_telegram(
                 "error": "ID de auditoría inválido"
             }
 
-        id_auditoria_str = str(auditoria_id)
+        id_auditoria_str = auditoria_id
         nuevo_estado = "APROBADO" if accion == "aprobar" else "RECHAZADO"
         drive_id = None
         drive_status = ""
