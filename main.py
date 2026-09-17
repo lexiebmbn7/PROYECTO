@@ -270,6 +270,81 @@ supabase: Client = create_client(
 
 
 # ============================================================
+# IDENTIDAD REAL DEL USUARIO DESDE SUPABASE AUTH
+# ============================================================
+
+def obtener_usuario_supabase_desde_request(request: Request) -> dict:
+
+    authorization = request.headers.get("Authorization", "").strip()
+
+    if not authorization.lower().startswith("bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Sesión de Supabase no enviada."
+        )
+
+    access_token = authorization.split(" ", 1)[1].strip()
+
+    if not access_token:
+        raise HTTPException(
+            status_code=401,
+            detail="Token de Supabase vacío."
+        )
+
+    try:
+        respuesta = requests.get(
+            f"{SUPABASE_URL}/auth/v1/user",
+            headers={
+                "apikey": SUPABASE_KEY,
+                "Authorization": f"Bearer {access_token}"
+            },
+            timeout=15
+        )
+    except requests.RequestException as error:
+        print("[SUPABASE AUTH ERROR]", error)
+        raise HTTPException(
+            status_code=503,
+            detail="No se pudo validar la sesión con Supabase."
+        )
+
+    if respuesta.status_code != 200:
+        print(
+            "[SUPABASE AUTH REJECTED]",
+            respuesta.status_code,
+            respuesta.text[:500]
+        )
+        raise HTTPException(
+            status_code=401,
+            detail="Sesión de Supabase inválida o expirada."
+        )
+
+    usuario = respuesta.json()
+
+    solicitante_id = str(usuario.get("id") or "").strip()
+    solicitante_correo = str(usuario.get("email") or "").strip()
+    metadata = usuario.get("user_metadata") or {}
+
+    solicitante_nombre = str(
+        metadata.get("full_name")
+        or metadata.get("name")
+        or solicitante_correo
+        or "Usuario desconocido"
+    ).strip()
+
+    if not solicitante_id:
+        raise HTTPException(
+            status_code=401,
+            detail="Supabase no devolvió el UID del usuario."
+        )
+
+    return {
+        "id": solicitante_id,
+        "nombre": solicitante_nombre,
+        "correo": solicitante_correo
+    }
+
+
+# ============================================================
 # TELEGRAM
 # ============================================================
 
@@ -679,15 +754,25 @@ async def registrar_y_solicitar_custodia(
 
     file: UploadFile = File(...),
 
-    usuario: str = Form(
-        "Usuario desconocido"
-    ),
-
     carpeta: str = Form(
         "PLANOS"
     )
 
 ):
+
+    # --------------------------------------------------------
+    # VALIDAR SESIÓN E IDENTIDAD REAL EN SUPABASE AUTH
+    # --------------------------------------------------------
+
+    usuario_auth = obtener_usuario_supabase_desde_request(request)
+
+    solicitante_id = usuario_auth["id"]
+    solicitante_nombre = usuario_auth["nombre"]
+    solicitante_correo = usuario_auth["correo"]
+
+    # Mantener compatibilidad con los mensajes y la columna antigua
+    usuario = solicitante_nombre
+
 
     # --------------------------------------------------------
     # VALIDAR TELEGRAM
@@ -840,7 +925,16 @@ async def registrar_y_solicitar_custodia(
             "PENDIENTE",
 
         "usuario_solicitante":
-            usuario
+            solicitante_nombre,
+
+        "solicitante_id":
+            solicitante_id,
+
+        "solicitante_nombre":
+            solicitante_nombre,
+
+        "solicitante_correo":
+            solicitante_correo
 
     }
 
@@ -916,7 +1010,16 @@ async def registrar_y_solicitar_custodia(
             nombre_final,
 
         "contenido":
-            contenido
+            contenido,
+
+        "solicitante_id":
+            solicitante_id,
+
+        "solicitante_nombre":
+            solicitante_nombre,
+
+        "solicitante_correo":
+            solicitante_correo
 
     }
 
@@ -936,7 +1039,9 @@ async def registrar_y_solicitar_custodia(
 
         f"📁 Archivo: {nombre_final}\n"
 
-        f"👤 Solicitante: {usuario}\n"
+        f"👤 Solicitante: {solicitante_nombre}\n"
+
+        f"📧 Correo: {solicitante_correo}\n"
 
         f"📂 Carpeta Destino: {carpeta}\n"
 
