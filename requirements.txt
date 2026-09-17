@@ -3,3 +3,5 @@ uvicorn
 requests
 supabase
 python-multipart
+google-auth-oauthlib
+google-api-python-client
