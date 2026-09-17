@@ -147,7 +147,7 @@
                     mt-0.5
                 "
             >
-                Ingrese sus credenciales para continuar
+                Ingreese sus credenciales para continuar
             </p>
         </div>
 
@@ -759,6 +759,7 @@
 
 
     let currentUserEmail = "";
+    let currentDisplayName = "";
 
     let realtimeChannel = null;
 
@@ -905,13 +906,17 @@
             currentUserEmail =
                 data.user.email;
 
+            // Extraer Display Name de raw_user_meta_data
+            currentDisplayName = 
+                data.user.user_metadata?.full_name || currentUserEmail;
+
 
             document
                 .getElementById(
                     'userBadge'
                 )
                 .innerText =
-                    currentUserEmail;
+                    currentDisplayName;
 
 
             document
@@ -986,6 +991,7 @@
 
 
         currentUserEmail = "";
+        currentDisplayName = "";
 
 
         document
@@ -1061,9 +1067,10 @@
         );
 
 
-        // CORREO REAL DEL USUARIO
+        // ENVÍA EL DISPLAY NAME O EL CORREO COMO RESPALDO
         formData.append(
             'usuario',
+            currentDisplayName ||
             currentUserEmail ||
             'Usuario desconocido'
         );
@@ -1301,6 +1308,8 @@
 
                         row.usuario_solicitante ||
 
+                        currentDisplayName ||
+
                         currentUserEmail ||
 
                         'Usuario desconocido'
@@ -1490,13 +1499,16 @@
                     currentUserEmail =
                         data.session.user.email;
 
+                    currentDisplayName =
+                        data.session.user.user_metadata?.full_name || currentUserEmail;
+
 
                     document
                         .getElementById(
                             'userBadge'
                         )
                         .innerText =
-                            currentUserEmail;
+                            currentDisplayName;
 
 
                     document
