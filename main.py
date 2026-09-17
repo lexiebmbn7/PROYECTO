@@ -416,12 +416,11 @@ def telegram_request(
 
 
 # ============================================================
-# TECLADO PRINCIPAL PERSISTENTE DE TELEGRAM
+# PANEL PRINCIPAL INLINE DE TELEGRAM
 # ============================================================
 
-def enviar_teclado_principal(chat_id):
-    """Activa un teclado persistente sin tocar el menú inline existente."""
-
+def enviar_panel_principal(chat_id):
+    """Envía un panel fijo con botones inline sin tocar el menú de pendientes."""
     return telegram_request(
         "sendMessage",
         {
@@ -431,27 +430,31 @@ def enviar_teclado_principal(chat_id):
                 "Panel de custodia disponible."
             ),
             "reply_markup": {
-                "keyboard": [
+                "inline_keyboard": [
                     [
-                        {"text": "👥 Usuarios"},
-                        {"text": "🔄 Actualizar"},
+                        {
+                            "text": "👥 Usuarios",
+                            "callback_data": "panel:usuarios",
+                        },
+                        {
+                            "text": "🔄 Actualizar",
+                            "callback_data": "panel:actualizar",
+                        },
                     ],
                     [
-                        {"text": "📊 Estado"},
+                        {
+                            "text": "📊 Estado",
+                            "callback_data": "panel:estado",
+                        }
                     ],
-                ],
-                "resize_keyboard": True,
-                "one_time_keyboard": False,
-                "is_persistent": True,
-                "input_field_placeholder": "Seleccione una opción...",
+                ]
             },
         },
     )
 
 
 def enviar_estado_datavault(chat_id):
-    """Muestra un resumen simple de estados de auditoría."""
-
+    """Consulta Supabase y muestra un resumen de estados."""
     try:
         respuesta = (
             supabase
@@ -466,12 +469,10 @@ def enviar_estado_datavault(chat_id):
             1 for fila in registros
             if fila.get("estado") == "PENDIENTE"
         )
-
         aprobados = sum(
             1 for fila in registros
             if fila.get("estado") == "APROBADO"
         )
-
         rechazados = sum(
             1 for fila in registros
             if fila.get("estado") == "RECHAZADO"
@@ -486,9 +487,7 @@ def enviar_estado_datavault(chat_id):
 
     except Exception as error:
         print("[ESTADO TELEGRAM ERROR]", error)
-        texto = (
-            "❌ No se pudo consultar el estado de DataVault."
-        )
+        texto = "❌ No se pudo consultar el estado de DataVault."
 
     return telegram_request(
         "sendMessage",
@@ -1506,56 +1505,55 @@ async def recibir_respuesta_telegram(request: Request):
 
         texto_lower = texto.lower()
 
-        # /start activa el teclado persistente y además abre el panel actual.
+        # /start muestra el panel principal y, debajo, los pendientes.
         if texto_lower.startswith("/start"):
-            enviar_teclado_principal(chat_id)
+            enviar_panel_principal(chat_id)
             mostrar_menu_usuarios(chat_id)
             return {"status": "panel_principal"}
 
-        # Botón persistente o comandos que abren usuarios pendientes.
-        if (
-            texto == "👥 Usuarios"
-            or texto_lower.startswith("/menu")
-            or texto_lower.startswith("/pendientes")
-        ):
+        # /menu vuelve a mostrar el panel principal.
+        if texto_lower.startswith("/menu"):
+            enviar_panel_principal(chat_id)
+            return {"status": "panel_principal"}
+
+        # /pendientes abre la lista de usuarios con documentos pendientes.
+        if texto_lower.startswith("/pendientes"):
             mostrar_menu_usuarios(chat_id)
             return {"status": "menu_usuarios"}
 
-        # Botón persistente para refrescar la consulta.
-        if texto == "🔄 Actualizar":
-            mostrar_menu_usuarios(chat_id)
-            return {"status": "actualizado"}
-
-        # Botón persistente o comando /estado.
-        if (
-            texto == "📊 Estado"
-            or texto_lower.startswith("/estado")
-        ):
-            enviar_estado_datavault(chat_id)
-            return {"status": "estado"}
-
         if texto_lower.startswith("/id"):
+            respuesta = (
+                "🆔 Tu Telegram ID:\n\n"
+                f"{user_id}"
+            )
             telegram_request(
                 "sendMessage",
                 {
                     "chat_id": chat_id,
-                    "text": (
-                        "🆔 Tu Telegram ID:\n\n"
-                        f"{user_id}"
-                    ),
+                    "text": respuesta,
                 },
             )
             return {"status": "telegram_id"}
+
+        if texto_lower.startswith("/estado"):
+            enviar_estado_datavault(chat_id)
+            return {"status": "estado"}
+
+        respuesta = (
+            "🛡️ DataVault DLP activo.\n\n"
+            "Comandos:\n"
+            "/start - Abrir panel principal\n"
+            "/pendientes - Abrir documentos pendientes\n"
+            "/menu - Mostrar panel principal\n"
+            "/id - Ver tu Telegram ID\n"
+            "/estado - Ver resumen del sistema"
+        )
 
         telegram_request(
             "sendMessage",
             {
                 "chat_id": chat_id,
-                "text": (
-                    "🛡️ DataVault DLP activo.\n\n"
-                    "Utiliza los botones inferiores para gestionar la custodia.\n\n"
-                    "También puedes usar /pendientes, /menu, /id y /estado."
-                ),
+                "text": respuesta,
             },
         )
         return {"status": "message_processed"}
@@ -1586,6 +1584,43 @@ async def recibir_respuesta_telegram(request: Request):
         print(
             f"[TELEGRAM CALLBACK] user={user_id} data={action_data}"
         )
+
+        # ----------------------------------------------------
+        # PANEL PRINCIPAL: USUARIOS
+        # Se envía como mensaje nuevo para conservar el panel.
+        # ----------------------------------------------------
+        if action_data == "panel:usuarios":
+            telegram_request(
+                "answerCallbackQuery",
+                {"callback_query_id": callback_id},
+            )
+            mostrar_menu_usuarios(chat_id)
+            return {"status": "menu_usuarios"}
+
+        # ----------------------------------------------------
+        # PANEL PRINCIPAL: ACTUALIZAR
+        # ----------------------------------------------------
+        if action_data == "panel:actualizar":
+            telegram_request(
+                "answerCallbackQuery",
+                {
+                    "callback_query_id": callback_id,
+                    "text": "🔄 Información actualizada",
+                },
+            )
+            mostrar_menu_usuarios(chat_id)
+            return {"status": "actualizado"}
+
+        # ----------------------------------------------------
+        # PANEL PRINCIPAL: ESTADO
+        # ----------------------------------------------------
+        if action_data == "panel:estado":
+            telegram_request(
+                "answerCallbackQuery",
+                {"callback_query_id": callback_id},
+            )
+            enviar_estado_datavault(chat_id)
+            return {"status": "estado"}
 
         # ----------------------------------------------------
         # NAVEGACIÓN: MENÚ DE USUARIOS
