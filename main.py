@@ -413,6 +413,286 @@ def telegram_request(
         }
 
 
+
+
+# ============================================================
+# MENÚ TELEGRAM - USUARIOS -> ARCHIVOS -> DECISIÓN
+# ============================================================
+
+def obtener_documentos_pendientes():
+    """Obtiene únicamente documentos pendientes con identidad Supabase."""
+    try:
+        respuesta = (
+            supabase
+            .table("auditoria_custodia")
+            .select(
+                "id,nombre_archivo,hash_sha256,estado,fecha_solicitud,"
+                "solicitante_id,solicitante_nombre,solicitante_correo"
+            )
+            .eq("estado", "PENDIENTE")
+            .execute()
+        )
+        return respuesta.data or []
+    except Exception as error:
+        print("[MENU TELEGRAM ERROR]", error)
+        return []
+
+
+def mostrar_menu_usuarios(chat_id, message_id=None):
+    """Muestra solo usuarios que tienen al menos un archivo PENDIENTE."""
+    documentos = obtener_documentos_pendientes()
+    usuarios = {}
+
+    for documento in documentos:
+        solicitante_id = str(documento.get("solicitante_id") or "").strip()
+
+        # Registros antiguos sin UID no participan del nuevo menú.
+        if not solicitante_id:
+            continue
+
+        if solicitante_id not in usuarios:
+            usuarios[solicitante_id] = {
+                "nombre": (
+                    documento.get("solicitante_nombre")
+                    or documento.get("solicitante_correo")
+                    or "Usuario"
+                ),
+                "correo": documento.get("solicitante_correo") or "",
+                "cantidad": 0,
+            }
+
+        usuarios[solicitante_id]["cantidad"] += 1
+
+    # Orden alfabético para que el menú sea estable.
+    usuarios_ordenados = sorted(
+        usuarios.items(),
+        key=lambda item: str(item[1]["nombre"]).lower()
+    )
+
+    botones = []
+
+    for uid, usuario in usuarios_ordenados:
+        cantidad = usuario["cantidad"]
+        etiqueta = "archivo" if cantidad == 1 else "archivos"
+        botones.append([
+            {
+                "text": f"👤 {usuario['nombre']} · {cantidad} {etiqueta}",
+                "callback_data": f"usr:{uid}",
+            }
+        ])
+
+    botones.append([
+        {
+            "text": "🔄 Actualizar",
+            "callback_data": "menu:usuarios",
+        }
+    ])
+
+    if usuarios:
+        texto = (
+            "🛡️ DataVault DLP - GM Ingenieros\n\n"
+            "📂 DOCUMENTOS PENDIENTES\n\n"
+            "Seleccione un usuario:"
+        )
+    else:
+        texto = (
+            "🛡️ DataVault DLP - GM Ingenieros\n\n"
+            "✅ No existen documentos pendientes."
+        )
+
+    payload = {
+        "chat_id": chat_id,
+        "text": texto,
+        "reply_markup": {
+            "inline_keyboard": botones
+        },
+    }
+
+    if message_id:
+        payload["message_id"] = message_id
+        return telegram_request("editMessageText", payload)
+
+    return telegram_request("sendMessage", payload)
+
+
+def mostrar_archivos_usuario(chat_id, message_id, solicitante_id):
+    """Muestra los archivos PENDIENTES de un único UID de Supabase."""
+    try:
+        respuesta = (
+            supabase
+            .table("auditoria_custodia")
+            .select(
+                "id,nombre_archivo,fecha_solicitud,"
+                "solicitante_id,solicitante_nombre,solicitante_correo"
+            )
+            .eq("solicitante_id", solicitante_id)
+            .eq("estado", "PENDIENTE")
+            .order("fecha_solicitud", desc=True)
+            .execute()
+        )
+        archivos = respuesta.data or []
+    except Exception as error:
+        print("[ARCHIVOS USUARIO ERROR]", error)
+        archivos = []
+
+    if not archivos:
+        return mostrar_menu_usuarios(chat_id, message_id)
+
+    nombre_usuario = (
+        archivos[0].get("solicitante_nombre")
+        or archivos[0].get("solicitante_correo")
+        or "Usuario"
+    )
+    correo = archivos[0].get("solicitante_correo") or ""
+
+    botones = []
+
+    for archivo in archivos:
+        nombre = archivo.get("nombre_archivo") or "Archivo"
+        nombre_boton = nombre if len(nombre) <= 45 else nombre[:42] + "..."
+
+        botones.append([
+            {
+                "text": f"📄 {nombre_boton}",
+                "callback_data": f"doc:{archivo['id']}",
+            }
+        ])
+
+    botones.append([
+        {
+            "text": "🔙 Usuarios",
+            "callback_data": "menu:usuarios",
+        }
+    ])
+
+    cantidad = len(archivos)
+    etiqueta = "archivo pendiente" if cantidad == 1 else "archivos pendientes"
+
+    texto = (
+        f"👤 {nombre_usuario}\n"
+        f"📧 {correo}\n\n"
+        f"📂 {cantidad} {etiqueta}\n\n"
+        "Seleccione un archivo:"
+    )
+
+    return telegram_request(
+        "editMessageText",
+        {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": texto,
+            "reply_markup": {
+                "inline_keyboard": botones
+            },
+        },
+    )
+
+
+def mostrar_detalle_documento(chat_id, message_id, auditoria_id):
+    """Muestra el documento seleccionado y los botones Aprobar/Rechazar."""
+    try:
+        respuesta = (
+            supabase
+            .table("auditoria_custodia")
+            .select(
+                "id,nombre_archivo,hash_sha256,estado,"
+                "solicitante_id,solicitante_nombre,solicitante_correo"
+            )
+            .eq("id", auditoria_id)
+            .limit(1)
+            .execute()
+        )
+
+        if not respuesta.data:
+            raise ValueError("No existe el documento seleccionado.")
+
+        documento = respuesta.data[0]
+    except Exception as error:
+        print("[DETALLE DOCUMENTO ERROR]", error)
+        return telegram_request(
+            "editMessageText",
+            {
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "text": (
+                    "🛡️ DataVault DLP - GM Ingenieros\n\n"
+                    "❌ No se pudo cargar el documento seleccionado."
+                ),
+                "reply_markup": {
+                    "inline_keyboard": [[
+                        {
+                            "text": "👥 Usuarios",
+                            "callback_data": "menu:usuarios",
+                        }
+                    ]]
+                },
+            },
+        )
+
+    solicitante_id = str(documento.get("solicitante_id") or "").strip()
+    estado = documento.get("estado") or "DESCONOCIDO"
+
+    if estado != "PENDIENTE":
+        texto = (
+            "🛡️ DataVault DLP - GM Ingenieros\n\n"
+            f"📁 Archivo: {documento.get('nombre_archivo') or 'Archivo'}\n"
+            f"👤 Solicitante: {documento.get('solicitante_nombre') or 'Usuario'}\n\n"
+            f"⚠️ Este documento ya fue procesado.\n"
+            f"Estado actual: {estado}"
+        )
+        botones = [[
+            {
+                "text": "👥 Usuarios",
+                "callback_data": "menu:usuarios",
+            }
+        ]]
+    else:
+        texto = (
+            "🛡️ DataVault DLP - GM Ingenieros\n\n"
+            f"📁 Archivo: {documento.get('nombre_archivo') or 'Archivo'}\n"
+            f"👤 Solicitante: {documento.get('solicitante_nombre') or 'Usuario'}\n"
+            f"📧 Correo: {documento.get('solicitante_correo') or ''}\n\n"
+            f"🔑 Hash SHA-256:\n{documento.get('hash_sha256') or ''}\n\n"
+            f"🆔 Auditoría:\n{documento.get('id')}\n\n"
+            "¿Autoriza su transferencia a la custodia corporativa?"
+        )
+
+        botones = [
+            [
+                {
+                    "text": "✅ Aprobar",
+                    "callback_data": f"aprobar:{auditoria_id}",
+                },
+                {
+                    "text": "❌ Rechazar",
+                    "callback_data": f"rechazar:{auditoria_id}",
+                },
+            ],
+            [
+                {
+                    "text": "🔙 Archivos",
+                    "callback_data": f"usr:{solicitante_id}",
+                },
+                {
+                    "text": "👥 Usuarios",
+                    "callback_data": "menu:usuarios",
+                },
+            ],
+        ]
+
+    return telegram_request(
+        "editMessageText",
+        {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": texto,
+            "reply_markup": {
+                "inline_keyboard": botones
+            },
+        },
+    )
+
+
 # ============================================================
 # OBTENER DOMINIO ACTUAL DE RAILWAY
 # ============================================================
@@ -1024,125 +1304,24 @@ async def registrar_y_solicitar_custodia(
     }
 
 
-    hash_prefix = (
-        hash_sha256[:10]
-    )
-
-
     # --------------------------------------------------------
-    # MENSAJE
+    # NOTIFICAR MENÚ DE PENDIENTES A LOS CUSTODIOS
     # --------------------------------------------------------
-
-    mensaje = (
-
-        "🛡️ [DataVault DLP - GM Ingenieros]\n\n"
-
-        f"📁 Archivo: {nombre_final}\n"
-
-        f"👤 Solicitante: {solicitante_nombre}\n"
-
-        f"📧 Correo: {solicitante_correo}\n"
-
-        f"📂 Carpeta Destino: {carpeta}\n"
-
-        f"🔑 Hash SHA-256: {hash_sha256}\n"
-
-        f"🆔 Auditoría: {id_auditoria}\n\n"
-
-        "¿Autoriza su transferencia "
-        "a la custodia corporativa?"
-
-    )
-
-
-    # --------------------------------------------------------
-    # BOTONES
-    # --------------------------------------------------------
-
-    reply_markup = {
-
-        "inline_keyboard": [
-
-            [
-
-                {
-                    "text":
-                        "✅ Aprobar",
-
-                    "callback_data":
-                        f"aprobar:{id_auditoria}"
-                },
-
-                {
-                    "text":
-                        "❌ Rechazar",
-
-                    "callback_data":
-                        f"rechazar:{id_auditoria}"
-                }
-
-            ]
-
-        ]
-
-    }
-
 
     resultados_telegram = []
-
     enviados_correctamente = 0
 
-
-    # --------------------------------------------------------
-    # ENVIAR A TODOS LOS AUTORIZADOS
-    # --------------------------------------------------------
-
     for chat_id in AUTHORIZED_CHAT_IDS:
-
-        resultado = telegram_request(
-
-            "sendMessage",
-
-            {
-                "chat_id":
-                    chat_id,
-
-                "text":
-                    mensaje,
-
-                "reply_markup":
-                    reply_markup
-            }
-
-        )
-
-
-        ok = bool(
-            resultado.get(
-                "ok"
-            )
-        )
-
+        resultado = mostrar_menu_usuarios(chat_id)
+        ok = bool(resultado.get("ok"))
 
         if ok:
-
             enviados_correctamente += 1
 
-
         resultados_telegram.append({
-
-            "chat_id":
-                chat_id,
-
-            "ok":
-                ok,
-
-            "description":
-                resultado.get(
-                    "description",
-                    "OK"
-                )
-
+            "chat_id": chat_id,
+            "ok": ok,
+            "description": resultado.get("description", "OK"),
         })
 
 
@@ -1182,7 +1361,7 @@ async def registrar_y_solicitar_custodia(
         "mensaje":
             (
                 "Documento registrado "
-                "y notificado a Telegram."
+                "y menú de pendientes notificado a Telegram."
             ),
 
         "id_auditoria":
@@ -1208,30 +1387,21 @@ async def registrar_y_solicitar_custodia(
 # ============================================================
 
 @app.post("/telegram-webhook")
-async def recibir_respuesta_telegram(
-    request: Request
-):
-
+async def recibir_respuesta_telegram(request: Request):
     data = await request.json()
 
-    print(
-        "[TELEGRAM UPDATE]",
-        data
-    )
+    print("[TELEGRAM UPDATE]", data)
 
     # ========================================================
-    # MENSAJES NORMALES
+    # MENSAJES NORMALES / COMANDOS
     # ========================================================
-
     if "message" in data:
-
         message = data["message"]
         chat_id = message["chat"]["id"]
         user_id = message["from"]["id"]
         texto = message.get("text", "").strip()
 
         if user_id not in AUTHORIZED_CHAT_IDS:
-
             telegram_request(
                 "sendMessage",
                 {
@@ -1239,44 +1409,43 @@ async def recibir_respuesta_telegram(
                     "text": (
                         "⛔ Acceso no autorizado.\n\n"
                         f"Tu Telegram ID es: {user_id}\n\n"
-                        "Agrega este ID en Railway "
-                        "en la variable AUTHORIZED_CHAT_IDS."
-                    )
-                }
+                        "Agrega este ID en Railway en la variable "
+                        "AUTHORIZED_CHAT_IDS."
+                    ),
+                },
             )
-
             return {
                 "status": "unauthorized",
-                "user_id": user_id
+                "user_id": user_id,
             }
 
         texto_lower = texto.lower()
 
-        if texto_lower.startswith("/start"):
-            respuesta = (
-                "🛡️ DataVault DLP | GM Ingenieros\n\n"
-                "✅ Usuario autorizado.\n\n"
-                f"Tu Telegram ID es: {user_id}\n\n"
-                "Recibirás aquí las solicitudes de custodia."
-            )
+        # /start, /menu y /pendientes abren directamente el panel.
+        if (
+            texto_lower.startswith("/start")
+            or texto_lower.startswith("/menu")
+            or texto_lower.startswith("/pendientes")
+        ):
+            mostrar_menu_usuarios(chat_id)
+            return {"status": "menu_usuarios"}
 
-        elif texto_lower.startswith("/id"):
+        if texto_lower.startswith("/id"):
             respuesta = (
                 "🆔 Tu Telegram ID:\n\n"
                 f"{user_id}"
             )
-
         elif texto_lower.startswith("/estado"):
             respuesta = (
                 "🟢 DataVault DLP activo.\n\n"
                 "Tu cuenta está autorizada."
             )
-
         else:
             respuesta = (
                 "🛡️ DataVault DLP activo.\n\n"
                 "Comandos:\n"
-                "/start - Iniciar\n"
+                "/pendientes - Abrir documentos pendientes\n"
+                "/menu - Abrir menú\n"
                 "/id - Ver tu Telegram ID\n"
                 "/estado - Verificar conexión"
             )
@@ -1285,61 +1454,124 @@ async def recibir_respuesta_telegram(
             "sendMessage",
             {
                 "chat_id": chat_id,
-                "text": respuesta
-            }
+                "text": respuesta,
+            },
         )
-
-        return {
-            "status": "message_processed"
-        }
+        return {"status": "message_processed"}
 
     # ========================================================
-    # BOTONES APROBAR / RECHAZAR
+    # CALLBACKS DE BOTONES
     # ========================================================
-
     if "callback_query" in data:
-
         callback = data["callback_query"]
         callback_id = callback["id"]
         user_id = callback["from"]["id"]
+        action_data = callback.get("data", "")
+        message = callback.get("message", {})
+        chat_id = message.get("chat", {}).get("id")
+        message_id = message.get("message_id")
 
         if user_id not in AUTHORIZED_CHAT_IDS:
-
             telegram_request(
                 "answerCallbackQuery",
                 {
                     "callback_query_id": callback_id,
                     "text": "❌ Acceso denegado: usuario no autorizado.",
-                    "show_alert": True
-                }
+                    "show_alert": True,
+                },
             )
-
-            return {
-                "status": "unauthorized"
-            }
-
-        action_data = callback.get("data", "")
+            return {"status": "unauthorized"}
 
         print(
-            f"[TELEGRAM CALLBACK] "
-            f"user={user_id} "
-            f"data={action_data}"
+            f"[TELEGRAM CALLBACK] user={user_id} data={action_data}"
         )
 
-        # Este proyecto envía actualmente callbacks con formato:
-        # aprobar:123 / rechazar:123
+        # ----------------------------------------------------
+        # NAVEGACIÓN: MENÚ DE USUARIOS
+        # ----------------------------------------------------
+        if action_data == "menu:usuarios":
+            telegram_request(
+                "answerCallbackQuery",
+                {"callback_query_id": callback_id},
+            )
+            mostrar_menu_usuarios(chat_id, message_id)
+            return {"status": "menu_usuarios"}
+
+        # ----------------------------------------------------
+        # NAVEGACIÓN: ARCHIVOS DE UN USUARIO
+        # ----------------------------------------------------
+        if action_data.startswith("usr:"):
+            solicitante_id = action_data.split(":", 1)[1].strip()
+
+            try:
+                solicitante_id = str(UUID(solicitante_id))
+            except (ValueError, TypeError, AttributeError):
+                telegram_request(
+                    "answerCallbackQuery",
+                    {
+                        "callback_query_id": callback_id,
+                        "text": "❌ UID de usuario inválido.",
+                        "show_alert": True,
+                    },
+                )
+                return {"status": "callback_error"}
+
+            telegram_request(
+                "answerCallbackQuery",
+                {"callback_query_id": callback_id},
+            )
+            mostrar_archivos_usuario(
+                chat_id,
+                message_id,
+                solicitante_id,
+            )
+            return {"status": "menu_archivos"}
+
+        # ----------------------------------------------------
+        # NAVEGACIÓN: DETALLE DEL DOCUMENTO
+        # ----------------------------------------------------
+        if action_data.startswith("doc:"):
+            auditoria_id_raw = action_data.split(":", 1)[1].strip()
+
+            try:
+                auditoria_id = str(UUID(auditoria_id_raw))
+            except (ValueError, TypeError, AttributeError):
+                telegram_request(
+                    "answerCallbackQuery",
+                    {
+                        "callback_query_id": callback_id,
+                        "text": "❌ ID de auditoría inválido.",
+                        "show_alert": True,
+                    },
+                )
+                return {"status": "callback_error"}
+
+            telegram_request(
+                "answerCallbackQuery",
+                {"callback_query_id": callback_id},
+            )
+            mostrar_detalle_documento(
+                chat_id,
+                message_id,
+                auditoria_id,
+            )
+            return {"status": "detalle_documento"}
+
+        # ----------------------------------------------------
+        # DECISIÓN: APROBAR / RECHAZAR
+        # ----------------------------------------------------
         if ":" not in action_data:
             telegram_request(
                 "answerCallbackQuery",
                 {
                     "callback_query_id": callback_id,
                     "text": "❌ Formato de decisión inválido.",
-                    "show_alert": True
-                }
+                    "show_alert": True,
+                },
             )
             return {
                 "status": "callback_error",
-                "error": "Formato de callback inválido"
+                "error": "Formato de callback inválido",
             }
 
         accion, auditoria_id_raw = action_data.split(":", 1)
@@ -1350,17 +1582,14 @@ async def recibir_respuesta_telegram(
                 {
                     "callback_query_id": callback_id,
                     "text": "❌ Acción inválida.",
-                    "show_alert": True
-                }
+                    "show_alert": True,
+                },
             )
             return {
                 "status": "callback_error",
-                "error": "Acción inválida"
+                "error": "Acción inválida",
             }
 
-        # La PK de auditoria_custodia en Supabase es UUID, no INTEGER.
-        # Telegram recibe, por ejemplo:
-        # aprobar:c9429c64-17df-4e2a-9fb2-2131dadf370f
         try:
             auditoria_id = str(UUID(auditoria_id_raw.strip()))
         except (ValueError, AttributeError, TypeError):
@@ -1369,28 +1598,30 @@ async def recibir_respuesta_telegram(
                 {
                     "callback_query_id": callback_id,
                     "text": "❌ ID de auditoría inválido.",
-                    "show_alert": True
-                }
+                    "show_alert": True,
+                },
             )
             return {
                 "status": "callback_error",
-                "error": "ID de auditoría inválido"
+                "error": "ID de auditoría inválido",
             }
 
         id_auditoria_str = auditoria_id
         nuevo_estado = "APROBADO" if accion == "aprobar" else "RECHAZADO"
         drive_id = None
-        drive_status = ""
+        resultado_update = None
+        registro_actual = None
 
         try:
-            # Evita que dos custodios procesen simultáneamente el mismo
-            # documento dentro de esta instancia de Railway.
+            # Impide decisiones simultáneas dentro de esta instancia Railway.
             with DECISION_LOCK:
-
                 consulta = (
                     supabase
                     .table("auditoria_custodia")
-                    .select("id,estado,nombre_archivo")
+                    .select(
+                        "id,estado,nombre_archivo,hash_sha256,"
+                        "solicitante_id,solicitante_nombre,solicitante_correo"
+                    )
                     .eq("id", auditoria_id)
                     .limit(1)
                     .execute()
@@ -1404,7 +1635,6 @@ async def recibir_respuesta_telegram(
                 registro_actual = consulta.data[0]
                 estado_actual = registro_actual.get("estado")
 
-                # Si otro custodio ya decidió, no volver a procesar.
                 if estado_actual != "PENDIENTE":
                     telegram_request(
                         "answerCallbackQuery",
@@ -1414,23 +1644,17 @@ async def recibir_respuesta_telegram(
                                 "⚠️ Este documento ya fue procesado. "
                                 f"Estado actual: {estado_actual}."
                             ),
-                            "show_alert": True
-                        }
+                            "show_alert": True,
+                        },
                     )
-
                     return {
                         "status": "already_processed",
-                        "estado_actual": estado_actual
+                        "estado_actual": estado_actual,
                     }
 
-                # ----------------------------------------------------
-                # APROBAR: primero Drive; después Supabase; al final RAM
-                # ----------------------------------------------------
+                # APROBAR: Drive -> Supabase -> liberar RAM.
                 if accion == "aprobar":
-
-                    archivo_ram = ARCHIVOS_EN_RAM.get(
-                        id_auditoria_str
-                    )
+                    archivo_ram = ARCHIVOS_EN_RAM.get(id_auditoria_str)
 
                     if not archivo_ram:
                         raise RuntimeError(
@@ -1440,12 +1664,10 @@ async def recibir_respuesta_telegram(
 
                     drive_id = subir_a_google_drive(
                         archivo_ram["nombre"],
-                        archivo_ram["contenido"]
+                        archivo_ram["contenido"],
                     )
 
                     if not drive_id:
-                        # IMPORTANTE:
-                        # No se cambia a APROBADO y no se elimina de RAM.
                         telegram_request(
                             "answerCallbackQuery",
                             {
@@ -1455,56 +1677,38 @@ async def recibir_respuesta_telegram(
                                     "completar la transferencia. "
                                     "El documento sigue PENDIENTE."
                                 ),
-                                "show_alert": True
-                            }
+                                "show_alert": True,
+                            },
                         )
-
                         return {
                             "status": "drive_error",
-                            "estado_actual": "PENDIENTE"
+                            "estado_actual": "PENDIENTE",
                         }
 
                     resultado_update = (
                         supabase
                         .table("auditoria_custodia")
-                        .update({
-                            "estado": "APROBADO"
-                        })
+                        .update({"estado": "APROBADO"})
                         .eq("id", auditoria_id)
                         .eq("estado", "PENDIENTE")
                         .execute()
                     )
 
                     if not resultado_update.data:
-                        # La subida a Drive sí ocurrió, pero la BD no se pudo
-                        # confirmar. Se conserva RAM para diagnóstico/reintento.
                         raise RuntimeError(
                             "El archivo llegó a Drive, pero Supabase no pudo "
                             "confirmar el estado APROBADO. "
                             f"Drive ID: {drive_id}"
                         )
 
-                    # Solo después de Drive + Supabase exitosos se libera RAM.
-                    ARCHIVOS_EN_RAM.pop(
-                        id_auditoria_str,
-                        None
-                    )
+                    ARCHIVOS_EN_RAM.pop(id_auditoria_str, None)
 
-                    drive_status = (
-                        f"\n☁️ Subido a Google Drive (ID: {drive_id})"
-                    )
-
-                # ----------------------------------------------------
-                # RECHAZAR: actualizar BD y luego eliminar RAM
-                # ----------------------------------------------------
+                # RECHAZAR: Supabase -> liberar RAM.
                 else:
-
                     resultado_update = (
                         supabase
                         .table("auditoria_custodia")
-                        .update({
-                            "estado": "RECHAZADO"
-                        })
+                        .update({"estado": "RECHAZADO"})
                         .eq("id", auditoria_id)
                         .eq("estado", "PENDIENTE")
                         .execute()
@@ -1515,18 +1719,10 @@ async def recibir_respuesta_telegram(
                             "No se pudo cambiar el documento a RECHAZADO."
                         )
 
-                    ARCHIVOS_EN_RAM.pop(
-                        id_auditoria_str,
-                        None
-                    )
+                    ARCHIVOS_EN_RAM.pop(id_auditoria_str, None)
 
         except Exception as error:
-
-            print(
-                "[CALLBACK ERROR]",
-                error
-            )
-
+            print("[CALLBACK ERROR]", error)
             telegram_request(
                 "answerCallbackQuery",
                 {
@@ -1535,47 +1731,68 @@ async def recibir_respuesta_telegram(
                         "❌ No se pudo procesar: "
                         f"{error}"
                     )[:200],
-                    "show_alert": True
-                }
+                    "show_alert": True,
+                },
             )
-
             return {
                 "status": "callback_error",
-                "error": str(error)
+                "error": str(error),
             }
 
         print(
             "[SUPABASE UPDATE]",
-            getattr(
-                resultado_update,
-                "data",
-                None
-            )
+            getattr(resultado_update, "data", None),
         )
 
         telegram_request(
             "answerCallbackQuery",
             {
                 "callback_query_id": callback_id,
-                "text": (
-                    "Estado actualizado a: "
-                    f"{nuevo_estado}"
-                )
-            }
+                "text": f"Estado actualizado a: {nuevo_estado}",
+            },
         )
 
-        message = callback.get("message", {})
-        chat_id = message.get("chat", {}).get("id")
-        message_id = message.get("message_id")
-        texto_original = message.get("text", "")
+        solicitante_id = str(
+            (registro_actual or {}).get("solicitante_id") or ""
+        ).strip()
+        nombre_archivo = (
+            (registro_actual or {}).get("nombre_archivo")
+            or "Archivo"
+        )
+        solicitante_nombre = (
+            (registro_actual or {}).get("solicitante_nombre")
+            or "Usuario"
+        )
 
         icono = "✅" if nuevo_estado == "APROBADO" else "❌"
 
         nuevo_texto = (
-            f"{texto_original}\n\n"
-            f"{icono} DECISIÓN: Documento {nuevo_estado}{drive_status}\n"
-            f"👤 Procesado por Telegram ID: {user_id}"
+            "🛡️ DataVault DLP - GM Ingenieros\n\n"
+            f"📁 Archivo: {nombre_archivo}\n"
+            f"👤 Solicitante: {solicitante_nombre}\n\n"
+            f"{icono} DECISIÓN: Documento {nuevo_estado}\n"
         )
+
+        if drive_id:
+            nuevo_texto += f"☁️ Subido a Google Drive (ID: {drive_id})\n"
+
+        nuevo_texto += f"👤 Procesado por Telegram ID: {user_id}"
+
+        botones_finales = []
+        if solicitante_id:
+            botones_finales.append([
+                {
+                    "text": "🔙 Archivos del usuario",
+                    "callback_data": f"usr:{solicitante_id}",
+                }
+            ])
+
+        botones_finales.append([
+            {
+                "text": "👥 Usuarios pendientes",
+                "callback_data": "menu:usuarios",
+            }
+        ])
 
         if chat_id and message_id:
             telegram_request(
@@ -1585,18 +1802,16 @@ async def recibir_respuesta_telegram(
                     "message_id": message_id,
                     "text": nuevo_texto,
                     "reply_markup": {
-                        "inline_keyboard": []
-                    }
-                }
+                        "inline_keyboard": botones_finales
+                    },
+                },
             )
 
         return {
             "status": "ok",
             "estado_actualizado": nuevo_estado,
             "autorizado_por": user_id,
-            "drive_id": drive_id
+            "drive_id": drive_id,
         }
 
-    return {
-        "status": "ignored"
-    }
+    return {"status": "ignored"}
