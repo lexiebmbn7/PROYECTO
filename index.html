@@ -1067,15 +1067,6 @@
         );
 
 
-        // ENVÍA EL DISPLAY NAME O EL CORREO COMO RESPALDO
-        formData.append(
-            'usuario',
-            currentDisplayName ||
-            currentUserEmail ||
-            'Usuario desconocido'
-        );
-
-
         formData.append(
             'carpeta',
             'PLANOS'
@@ -1083,6 +1074,25 @@
 
 
         try {
+
+            // Obtener una sesión vigente justo antes de subir.
+            // FastAPI validará este token contra Supabase y tomará
+            // de allí el UID, nombre y correo reales del usuario.
+            const { data: sessionData, error: sessionError } =
+                await supabaseClient.auth.getSession();
+
+            if (sessionError) {
+                throw sessionError;
+            }
+
+            const accessToken =
+                sessionData?.session?.access_token;
+
+            if (!accessToken) {
+                throw new Error(
+                    'Tu sesión expiró. Inicia sesión nuevamente.'
+                );
+            }
 
             const response =
                 await fetch(
@@ -1092,6 +1102,11 @@
                     {
                         method:
                             'POST',
+
+                        headers: {
+                            'Authorization':
+                                `Bearer ${accessToken}`
+                        },
 
                         body:
                             formData
