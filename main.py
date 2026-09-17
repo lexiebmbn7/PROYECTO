@@ -619,13 +619,47 @@ async def registrar_y_solicitar_custodia(
 
 
     # --------------------------------------------------------
+    # RENOMBRAR CORRELATIVO SI YA EXISTE
+    # --------------------------------------------------------
+
+    nombre_original = file.filename or "archivo_sin_nombre"
+    nombre_base, extension = os.path.splitext(nombre_original)
+
+    try:
+
+        res_existentes = (
+            supabase
+            .table("auditoria_custodia")
+            .select("nombre_archivo")
+            .ilike("nombre_archivo", f"{nombre_base}%{extension}")
+            .execute()
+        )
+
+        archivos_existentes = res_existentes.data or []
+
+        if archivos_existentes:
+
+            contador = len(archivos_existentes) + 1
+            nombre_final = f"{nombre_base} ({contador}){extension}"
+
+        else:
+
+            nombre_final = nombre_original
+
+    except Exception as e_nombre:
+
+        print("[CORRELATIVO ERROR]", e_nombre)
+        nombre_final = nombre_original
+
+
+    # --------------------------------------------------------
     # REGISTRAR EN SUPABASE
     # --------------------------------------------------------
 
     registro = {
 
         "nombre_archivo":
-            file.filename,
+            nombre_final,
 
         "hash_sha256":
             hash_sha256,
@@ -724,7 +758,7 @@ async def registrar_y_solicitar_custodia(
 
         "🛡️ [DataVault DLP - GM Ingenieros]\n\n"
 
-        f"📁 Archivo: {file.filename}\n"
+        f"📁 Archivo: {nombre_final}\n"
 
         f"👤 Solicitante: {usuario}\n"
 
@@ -1162,20 +1196,9 @@ async def recibir_respuesta_telegram(
 
         # ----------------------------------------------------
         # SOPORTAR LOS DOS FORMATOS
-        #
-        # ORIGINAL:
-        # aprobar_abc123
-        #
-        # NUEVO:
-        # aprobar:123
         # ----------------------------------------------------
 
         try:
-
-            # =================================================
-            # FORMATO NUEVO QUE YA PUDO HABER QUEDADO
-            # EN MENSAJES ANTERIORES
-            # =================================================
 
             if ":" in action_data:
 
@@ -1235,11 +1258,6 @@ async def recibir_respuesta_telegram(
 
                 )
 
-
-            # =================================================
-            # FORMATO ORIGINAL
-            # ESTE ES EL QUE GENERAMOS AHORA
-            # =================================================
 
             elif "_" in action_data:
 
