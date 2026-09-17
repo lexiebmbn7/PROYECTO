@@ -3,6 +3,7 @@ import os
 import requests
 
 from fastapi import FastAPI, File, UploadFile, Request, Form, HTTPException
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from supabase import create_client, Client
@@ -15,6 +16,9 @@ from supabase import create_client, Client
 app = FastAPI(
     title="DataVault DLP API | GM Ingenieros y Consultores"
 )
+
+# Exponer la carpeta física "images" para archivos estáticos
+app.mount("/images", StaticFiles(directory="images"), name="images")
 
 app.add_middleware(
     CORSMiddleware,
