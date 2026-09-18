@@ -1164,10 +1164,16 @@
         const limiteVista = 12;
         const visibles = selectedEntries.slice(0, limiteVista);
 
-        preview.innerHTML = visibles.map(entry => (
-            `<div class="flex justify-between gap-3">` +
-            `<span class="truncate">📄 ${escapeHtml(entry.relativePath)}</span>` +
-            `<span class="whitespace-nowrap">${formatearBytes(entry.file.size)}</span>` +
+        preview.innerHTML = visibles.map((entry, index) => (
+            `<div class="flex items-center justify-between gap-3 py-1">` +
+                `<span class="truncate flex-1">📄 ${escapeHtml(entry.relativePath)}</span>` +
+                `<span class="whitespace-nowrap text-slate-400">${formatearBytes(entry.file.size)}</span>` +
+                `<button type="button" ` +
+                    `onclick="eliminarArchivoSeleccionado(${index})" ` +
+                    `title="Quitar archivo" ` +
+                    `class="shrink-0 w-6 h-6 rounded-md bg-red-500/15 text-red-400 hover:bg-red-500 hover:text-white transition flex items-center justify-center font-bold">` +
+                    `×` +
+                `</button>` +
             `</div>`
         )).join('');
 
@@ -1180,6 +1186,25 @@
         }
 
         summary.classList.remove('hidden');
+    }
+
+
+    function eliminarArchivoSeleccionado(index) {
+
+        if (uploadInProgress) {
+            return;
+        }
+
+        if (index < 0 || index >= selectedEntries.length) {
+            return;
+        }
+
+        selectedEntries.splice(index, 1);
+
+        document.getElementById('fileInput').value = '';
+        document.getElementById('folderInput').value = '';
+
+        renderSeleccion();
     }
 
 
