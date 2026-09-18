@@ -4,7 +4,8 @@ import mimetypes
 import os
 import threading
 import requests
-from uuid import UUID
+from uuid import UUID, uuid4
+from typing import List
 
 from fastapi import FastAPI, File, UploadFile, Request, Form, HTTPException
 from fastapi.staticfiles import StaticFiles
@@ -110,6 +111,11 @@ if not PUBLIC_BASE_URL and RAILWAY_PUBLIC_DOMAIN:
 
 ARCHIVOS_EN_RAM = {}
 DECISION_LOCK = threading.Lock()
+
+# Límites de prueba para carga por lotes. Se pueden cambiar en Railway.
+MAX_BATCH_FILES = int(os.getenv("MAX_BATCH_FILES", "100"))
+MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "25"))
+MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 
 
 # ============================================================
@@ -412,90 +418,6 @@ def telegram_request(
             "description": str(error)
         }
 
-
-
-
-# ============================================================
-# PANEL PRINCIPAL INLINE DE TELEGRAM
-# ============================================================
-
-def enviar_panel_principal(chat_id):
-    """Envía un panel fijo con botones inline sin tocar el menú de pendientes."""
-    return telegram_request(
-        "sendMessage",
-        {
-            "chat_id": chat_id,
-            "text": (
-                "🛡️ DataVault DLP - GM Ingenieros\n\n"
-                "Panel de custodia disponible."
-            ),
-            "reply_markup": {
-                "inline_keyboard": [
-                    [
-                        {
-                            "text": "👥 Usuarios",
-                            "callback_data": "panel:usuarios",
-                        },
-                        {
-                            "text": "🔄 Actualizar",
-                            "callback_data": "panel:actualizar",
-                        },
-                    ],
-                    [
-                        {
-                            "text": "📊 Estado",
-                            "callback_data": "panel:estado",
-                        }
-                    ],
-                ]
-            },
-        },
-    )
-
-
-def enviar_estado_datavault(chat_id):
-    """Consulta Supabase y muestra un resumen de estados."""
-    try:
-        respuesta = (
-            supabase
-            .table("auditoria_custodia")
-            .select("estado")
-            .execute()
-        )
-
-        registros = respuesta.data or []
-
-        pendientes = sum(
-            1 for fila in registros
-            if fila.get("estado") == "PENDIENTE"
-        )
-        aprobados = sum(
-            1 for fila in registros
-            if fila.get("estado") == "APROBADO"
-        )
-        rechazados = sum(
-            1 for fila in registros
-            if fila.get("estado") == "RECHAZADO"
-        )
-
-        texto = (
-            "📊 ESTADO DATAVAULT\n\n"
-            f"🟡 Pendientes: {pendientes}\n"
-            f"🟢 Aprobados: {aprobados}\n"
-            f"🔴 Rechazados: {rechazados}"
-        )
-
-    except Exception as error:
-        print("[ESTADO TELEGRAM ERROR]", error)
-        texto = "❌ No se pudo consultar el estado de DataVault."
-
-    return telegram_request(
-        "sendMessage",
-        {
-            "chat_id": chat_id,
-            "text": texto,
-        },
-    )
 
 
 
@@ -1467,6 +1389,281 @@ async def registrar_y_solicitar_custodia(
 
 
 # ============================================================
+# APOYO PARA CARGA POR LOTES
+# ============================================================
+
+def normalizar_ruta_relativa(ruta: str, nombre_archivo: str) -> str:
+    """Normaliza una ruta enviada por el navegador sin escribir nada a disco."""
+    ruta_limpia = str(ruta or nombre_archivo or "archivo_sin_nombre")
+    ruta_limpia = ruta_limpia.replace("\\", "/").lstrip("/")
+
+    partes = [
+        parte
+        for parte in ruta_limpia.split("/")
+        if parte not in ("", ".", "..")
+    ]
+
+    if not partes:
+        return nombre_archivo or "archivo_sin_nombre"
+
+    return "/".join(partes)
+
+
+def obtener_nombre_correlativo(nombre_original: str) -> str:
+    """Conserva la misma lógica de correlativos del endpoint individual."""
+    nombre_original = nombre_original or "archivo_sin_nombre"
+    nombre_base, extension = os.path.splitext(nombre_original)
+
+    try:
+        res_existentes = (
+            supabase
+            .table("auditoria_custodia")
+            .select("nombre_archivo")
+            .ilike("nombre_archivo", f"{nombre_base}%{extension}")
+            .execute()
+        )
+
+        archivos_existentes = res_existentes.data or []
+
+        if archivos_existentes:
+            contador = len(archivos_existentes) + 1
+            return f"{nombre_base} ({contador}){extension}"
+
+        return nombre_original
+
+    except Exception as error:
+        print("[CORRELATIVO BATCH ERROR]", error)
+        return nombre_original
+
+
+# ============================================================
+# SUBIR VARIOS ARCHIVOS / CARPETA COMPLETA
+# ============================================================
+
+@app.post("/upload-batch")
+async def registrar_lote_custodia(
+    request: Request,
+    files: List[UploadFile] = File(...),
+    relative_paths: List[str] = Form(default=[]),
+    carpeta: str = Form("PLANOS"),
+    lote_id: str = Form("")
+):
+    """
+    Registra un lote completo manteniendo cada archivo como una auditoría
+    independiente. Todos los registros comparten lote_id y conservan su
+    ruta relativa cuando provienen de una carpeta seleccionada en la web.
+    """
+
+    # --------------------------------------------------------
+    # IDENTIDAD REAL DESDE SUPABASE AUTH
+    # --------------------------------------------------------
+    usuario_auth = obtener_usuario_supabase_desde_request(request)
+    solicitante_id = usuario_auth["id"]
+    solicitante_nombre = usuario_auth["nombre"]
+    solicitante_correo = usuario_auth["correo"]
+
+    # --------------------------------------------------------
+    # VALIDACIONES GENERALES DEL LOTE
+    # --------------------------------------------------------
+    if not files:
+        raise HTTPException(status_code=400, detail="No se recibieron archivos.")
+
+    if len(files) > MAX_BATCH_FILES:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"El lote contiene {len(files)} archivos. "
+                f"El máximo permitido actualmente es {MAX_BATCH_FILES}."
+            )
+        )
+
+    if relative_paths and len(relative_paths) != len(files):
+        raise HTTPException(
+            status_code=400,
+            detail="La cantidad de rutas relativas no coincide con la cantidad de archivos."
+        )
+
+    if not TELEGRAM_TOKEN:
+        raise HTTPException(status_code=500, detail="TELEGRAM_TOKEN no está configurado.")
+
+    if not AUTHORIZED_CHAT_IDS:
+        raise HTTPException(status_code=500, detail="No hay Telegram IDs autorizados.")
+
+    # --------------------------------------------------------
+    # LOTE UUID
+    # --------------------------------------------------------
+    if lote_id.strip():
+        try:
+            lote_uuid = str(UUID(lote_id.strip()))
+        except (ValueError, TypeError, AttributeError):
+            raise HTTPException(status_code=400, detail="lote_id inválido.")
+    else:
+        lote_uuid = str(uuid4())
+
+    # --------------------------------------------------------
+    # WEBHOOK TELEGRAM (una sola vez por lote)
+    # --------------------------------------------------------
+    base_url_actual = obtener_base_url_request(request)
+    estado_webhook = configurar_webhook_url(base_url_actual)
+    print("[WEBHOOK BATCH]", estado_webhook)
+
+    procesados = []
+    errores = []
+    cancelado = False
+
+    # --------------------------------------------------------
+    # PROCESAR ARCHIVOS UNO A UNO EN RAM
+    # --------------------------------------------------------
+    for indice, archivo in enumerate(files):
+        try:
+            # Si el navegador canceló la petición, detener los pendientes.
+            if await request.is_disconnected():
+                cancelado = True
+                print(f"[BATCH CANCELLED] lote={lote_uuid} indice={indice}")
+                break
+        except Exception:
+            # Si la plataforma no puede informar desconexión, continuar.
+            pass
+
+        nombre_original = archivo.filename or f"archivo_{indice + 1}"
+        ruta_original = (
+            relative_paths[indice]
+            if indice < len(relative_paths)
+            else nombre_original
+        )
+        ruta_relativa = normalizar_ruta_relativa(ruta_original, nombre_original)
+
+        try:
+            contenido = await archivo.read()
+
+            if not contenido:
+                errores.append({
+                    "archivo": nombre_original,
+                    "ruta_relativa": ruta_relativa,
+                    "error": "Archivo vacío"
+                })
+                continue
+
+            if len(contenido) > MAX_FILE_SIZE_BYTES:
+                errores.append({
+                    "archivo": nombre_original,
+                    "ruta_relativa": ruta_relativa,
+                    "error": f"Supera el límite de {MAX_FILE_SIZE_MB} MB"
+                })
+                continue
+
+            hash_sha256 = hashlib.sha256(contenido).hexdigest()
+            nombre_final = obtener_nombre_correlativo(nombre_original)
+
+            registro = {
+                "nombre_archivo": nombre_final,
+                "hash_sha256": hash_sha256,
+                "tamano_bytes": len(contenido),
+                "estado": "PENDIENTE",
+                "usuario_solicitante": solicitante_nombre,
+                "solicitante_id": solicitante_id,
+                "solicitante_nombre": solicitante_nombre,
+                "solicitante_correo": solicitante_correo,
+                "lote_id": lote_uuid,
+                "ruta_relativa": ruta_relativa,
+            }
+
+            respuesta_db = (
+                supabase
+                .table("auditoria_custodia")
+                .insert(registro)
+                .execute()
+            )
+
+            if not respuesta_db.data:
+                raise RuntimeError("Supabase no devolvió el registro insertado.")
+
+            id_auditoria = respuesta_db.data[0].get("id")
+
+            ARCHIVOS_EN_RAM[str(id_auditoria)] = {
+                "nombre": nombre_final,
+                "contenido": contenido,
+                "solicitante_id": solicitante_id,
+                "solicitante_nombre": solicitante_nombre,
+                "solicitante_correo": solicitante_correo,
+                "lote_id": lote_uuid,
+                "ruta_relativa": ruta_relativa,
+                "carpeta": carpeta,
+            }
+
+            procesados.append({
+                "id_auditoria": id_auditoria,
+                "nombre_archivo": nombre_final,
+                "ruta_relativa": ruta_relativa,
+                "sha256": hash_sha256,
+                "tamano_bytes": len(contenido),
+            })
+
+        except Exception as error:
+            print(f"[BATCH FILE ERROR] {nombre_original}: {error}")
+            errores.append({
+                "archivo": nombre_original,
+                "ruta_relativa": ruta_relativa,
+                "error": str(error),
+            })
+
+    # --------------------------------------------------------
+    # TELEGRAM: UNA SOLA NOTIFICACIÓN AL TERMINAR EL LOTE
+    # --------------------------------------------------------
+    resultados_telegram = []
+    enviados_correctamente = 0
+
+    if procesados:
+        for chat_id in AUTHORIZED_CHAT_IDS:
+            resultado = mostrar_menu_usuarios(chat_id)
+            ok = bool(resultado.get("ok"))
+
+            if ok:
+                enviados_correctamente += 1
+
+            resultados_telegram.append({
+                "chat_id": chat_id,
+                "ok": ok,
+                "description": resultado.get("description", "OK"),
+            })
+
+    if not procesados and errores:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "mensaje": "Ningún archivo del lote pudo registrarse.",
+                "lote_id": lote_uuid,
+                "errores": errores,
+            }
+        )
+
+    estado = "cancelado" if cancelado else ("partial" if errores else "ok")
+
+    return {
+        "status": estado,
+        "mensaje": (
+            "Lote cancelado parcialmente."
+            if cancelado
+            else (
+                "Lote registrado con algunas observaciones."
+                if errores
+                else "Lote registrado correctamente."
+            )
+        ),
+        "lote_id": lote_uuid,
+        "total_recibidos": len(files),
+        "total_registrados": len(procesados),
+        "total_errores": len(errores),
+        "cancelado": cancelado,
+        "archivos": procesados,
+        "errores": errores,
+        "telegram_enviados": enviados_correctamente,
+        "telegram": resultados_telegram,
+        "webhook": estado_webhook,
+    }
+
+
+# ============================================================
 # WEBHOOK TELEGRAM
 # ============================================================
 
@@ -1505,19 +1702,12 @@ async def recibir_respuesta_telegram(request: Request):
 
         texto_lower = texto.lower()
 
-        # /start muestra el panel principal y, debajo, los pendientes.
-        if texto_lower.startswith("/start"):
-            enviar_panel_principal(chat_id)
-            mostrar_menu_usuarios(chat_id)
-            return {"status": "panel_principal"}
-
-        # /menu vuelve a mostrar el panel principal.
-        if texto_lower.startswith("/menu"):
-            enviar_panel_principal(chat_id)
-            return {"status": "panel_principal"}
-
-        # /pendientes abre la lista de usuarios con documentos pendientes.
-        if texto_lower.startswith("/pendientes"):
+        # /start, /menu y /pendientes abren directamente el panel.
+        if (
+            texto_lower.startswith("/start")
+            or texto_lower.startswith("/menu")
+            or texto_lower.startswith("/pendientes")
+        ):
             mostrar_menu_usuarios(chat_id)
             return {"status": "menu_usuarios"}
 
@@ -1526,28 +1716,20 @@ async def recibir_respuesta_telegram(request: Request):
                 "🆔 Tu Telegram ID:\n\n"
                 f"{user_id}"
             )
-            telegram_request(
-                "sendMessage",
-                {
-                    "chat_id": chat_id,
-                    "text": respuesta,
-                },
+        elif texto_lower.startswith("/estado"):
+            respuesta = (
+                "🟢 DataVault DLP activo.\n\n"
+                "Tu cuenta está autorizada."
             )
-            return {"status": "telegram_id"}
-
-        if texto_lower.startswith("/estado"):
-            enviar_estado_datavault(chat_id)
-            return {"status": "estado"}
-
-        respuesta = (
-            "🛡️ DataVault DLP activo.\n\n"
-            "Comandos:\n"
-            "/start - Abrir panel principal\n"
-            "/pendientes - Abrir documentos pendientes\n"
-            "/menu - Mostrar panel principal\n"
-            "/id - Ver tu Telegram ID\n"
-            "/estado - Ver resumen del sistema"
-        )
+        else:
+            respuesta = (
+                "🛡️ DataVault DLP activo.\n\n"
+                "Comandos:\n"
+                "/pendientes - Abrir documentos pendientes\n"
+                "/menu - Abrir menú\n"
+                "/id - Ver tu Telegram ID\n"
+                "/estado - Verificar conexión"
+            )
 
         telegram_request(
             "sendMessage",
@@ -1584,43 +1766,6 @@ async def recibir_respuesta_telegram(request: Request):
         print(
             f"[TELEGRAM CALLBACK] user={user_id} data={action_data}"
         )
-
-        # ----------------------------------------------------
-        # PANEL PRINCIPAL: USUARIOS
-        # Se envía como mensaje nuevo para conservar el panel.
-        # ----------------------------------------------------
-        if action_data == "panel:usuarios":
-            telegram_request(
-                "answerCallbackQuery",
-                {"callback_query_id": callback_id},
-            )
-            mostrar_menu_usuarios(chat_id)
-            return {"status": "menu_usuarios"}
-
-        # ----------------------------------------------------
-        # PANEL PRINCIPAL: ACTUALIZAR
-        # ----------------------------------------------------
-        if action_data == "panel:actualizar":
-            telegram_request(
-                "answerCallbackQuery",
-                {
-                    "callback_query_id": callback_id,
-                    "text": "🔄 Información actualizada",
-                },
-            )
-            mostrar_menu_usuarios(chat_id)
-            return {"status": "actualizado"}
-
-        # ----------------------------------------------------
-        # PANEL PRINCIPAL: ESTADO
-        # ----------------------------------------------------
-        if action_data == "panel:estado":
-            telegram_request(
-                "answerCallbackQuery",
-                {"callback_query_id": callback_id},
-            )
-            enviar_estado_datavault(chat_id)
-            return {"status": "estado"}
 
         # ----------------------------------------------------
         # NAVEGACIÓN: MENÚ DE USUARIOS
