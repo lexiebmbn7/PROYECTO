@@ -1074,6 +1074,8 @@
     // =======================================================
 
     let selectedEntries = [];
+    let selectionMode = null; // "files" o "folder"
+    let selectedFolderName = "";
     let uploadController = null;
     let uploadInProgress = false;
 
@@ -1091,6 +1093,25 @@
 
         if (uploadInProgress || !fileList || !fileList.length) {
             return;
+        }
+
+        const nuevoModo = desdeCarpeta ? 'folder' : 'files';
+
+        // Una petición representa archivos sueltos O una sola carpeta.
+        // Así el mismo lote_id puede aprobarse como una unidad sin mezclar orígenes.
+        if (selectionMode && selectionMode !== nuevoModo) {
+            selectedEntries = [];
+        }
+
+        selectionMode = nuevoModo;
+
+        if (desdeCarpeta) {
+            // Elegir otra carpeta reemplaza la carpeta anterior.
+            selectedEntries = [];
+            const primeraRuta = fileList[0]?.webkitRelativePath || '';
+            selectedFolderName = primeraRuta.split('/')[0] || 'Carpeta';
+        } else {
+            selectedFolderName = '';
         }
 
         const existentes = new Map(
@@ -1114,7 +1135,6 @@
 
         selectedEntries = Array.from(existentes.values());
 
-        // Permite volver a seleccionar el mismo input más adelante.
         document.getElementById('fileInput').value = '';
         document.getElementById('folderInput').value = '';
 
@@ -1158,13 +1178,10 @@
             0
         );
 
-        count.textContent = `${selectedEntries.length} archivo(s) seleccionado(s)`;
+        count.textContent = (selectionMode === 'folder' ? `📁 ${selectedFolderName} · ${selectedEntries.length} archivo(s)` : `${selectedEntries.length} archivo(s) seleccionado(s)`);
         size.textContent = `Tamaño total: ${formatearBytes(totalBytes)}`;
 
-        const limiteVista = 12;
-        const visibles = selectedEntries.slice(0, limiteVista);
-
-        preview.innerHTML = visibles.map((entry, index) => (
+        preview.innerHTML = selectedEntries.map((entry, index) => (
             `<div style="display:grid;grid-template-columns:minmax(0,1fr) auto 30px;align-items:center;gap:10px;padding:4px 0;">` +
                 `<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📄 ${escapeHtml(entry.relativePath)}</span>` +
                 `<span style="white-space:nowrap;color:#94a3b8;">${formatearBytes(entry.file.size)}</span>` +
@@ -1177,14 +1194,6 @@
                 `</button>` +
             `</div>`
         )).join('');
-
-        if (selectedEntries.length > limiteVista) {
-            preview.innerHTML += (
-                `<div class="pt-1 text-blue-300">` +
-                `+ ${selectedEntries.length - limiteVista} archivo(s) más...` +
-                `</div>`
-            );
-        }
 
         summary.classList.remove('hidden');
     }
@@ -1202,6 +1211,11 @@
 
         selectedEntries.splice(index, 1);
 
+        if (!selectedEntries.length) {
+            selectionMode = null;
+            selectedFolderName = '';
+        }
+
         document.getElementById('fileInput').value = '';
         document.getElementById('folderInput').value = '';
 
@@ -1216,6 +1230,8 @@
         }
 
         selectedEntries = [];
+        selectionMode = null;
+        selectedFolderName = '';
         document.getElementById('fileInput').value = '';
         document.getElementById('folderInput').value = '';
 
@@ -1312,6 +1328,8 @@
             });
 
             formData.append('carpeta', 'PLANOS');
+            formData.append('selection_mode', selectionMode || 'files');
+            formData.append('folder_name', selectedFolderName || '');
 
             const response = await fetch(
                 `${API_URL}/upload-batch`,
@@ -1363,6 +1381,8 @@
             );
 
             selectedEntries = [];
+            selectionMode = null;
+            selectedFolderName = '';
             renderSeleccion();
 
             await loadAuditData();
