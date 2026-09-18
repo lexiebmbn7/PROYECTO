@@ -131,21 +131,101 @@ def google_drive_configurado() -> bool:
     ])
 
 
+def obtener_servicio_google_drive():
+    if not google_drive_configurado():
+        raise RuntimeError("Faltan variables de Google Drive")
+
+    creds = Credentials(
+        token=None,
+        refresh_token=GOOGLE_REFRESH_TOKEN,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=GOOGLE_CLIENT_ID,
+        client_secret=GOOGLE_CLIENT_SECRET,
+    )
+
+    return build(
+        "drive",
+        "v3",
+        credentials=creds,
+        cache_discovery=False
+    )
+
+
+def crear_carpeta_google_drive(service, nombre: str, parent_id: str):
+    metadata = {
+        "name": nombre,
+        "mimeType": "application/vnd.google-apps.folder",
+        "parents": [parent_id],
+    }
+
+    respuesta = (
+        service
+        .files()
+        .create(
+            body=metadata,
+            fields="id,name",
+            supportsAllDrives=True,
+        )
+        .execute()
+    )
+
+    carpeta_id = respuesta.get("id")
+    if not carpeta_id:
+        raise RuntimeError(f"Google Drive no devolvió ID para la carpeta {nombre}")
+
+    return carpeta_id
+
+
+def subir_archivo_google_drive_en_carpeta(
+    service,
+    nombre_archivo: str,
+    contenido_bytes: bytes,
+    parent_id: str,
+):
+    if not contenido_bytes:
+        raise RuntimeError(f"El archivo {nombre_archivo} está vacío")
+
+    mime_type = (
+        mimetypes.guess_type(nombre_archivo)[0]
+        or "application/octet-stream"
+    )
+
+    media = MediaIoBaseUpload(
+        io.BytesIO(contenido_bytes),
+        mimetype=mime_type,
+        resumable=False,
+    )
+
+    respuesta = (
+        service
+        .files()
+        .create(
+            body={
+                "name": nombre_archivo,
+                "parents": [parent_id],
+            },
+            media_body=media,
+            fields="id,name",
+            supportsAllDrives=True,
+        )
+        .execute()
+    )
+
+    archivo_id = respuesta.get("id")
+    if not archivo_id:
+        raise RuntimeError(f"Google Drive no devolvió ID para {nombre_archivo}")
+
+    return archivo_id
+
+
 def subir_a_google_drive(
     nombre_archivo: str,
     contenido_bytes: bytes
 ):
-    """Sube un archivo binario directamente desde RAM a Google Drive.
-
-    Devuelve el ID del archivo creado en Drive. Si ocurre cualquier error,
-    devuelve None y el llamador conserva el archivo en RAM.
-    """
+    """Sube un archivo individual directamente desde RAM a Google Drive."""
 
     if not google_drive_configurado():
-        print(
-            "[DRIVE CONFIG ERROR] "
-            "Faltan variables de Google Drive"
-        )
+        print("[DRIVE CONFIG ERROR] Faltan variables de Google Drive")
         return None
 
     if not contenido_bytes:
@@ -153,67 +233,165 @@ def subir_a_google_drive(
         return None
 
     try:
-        creds = Credentials(
-            token=None,
-            refresh_token=GOOGLE_REFRESH_TOKEN,
-            token_uri="https://oauth2.googleapis.com/token",
-            client_id=GOOGLE_CLIENT_ID,
-            client_secret=GOOGLE_CLIENT_SECRET,
+        service = obtener_servicio_google_drive()
+        drive_id = subir_archivo_google_drive_en_carpeta(
+            service,
+            nombre_archivo,
+            contenido_bytes,
+            GOOGLE_FOLDER_ID,
         )
-
-        service = build(
-            "drive",
-            "v3",
-            credentials=creds,
-            cache_discovery=False
-        )
-
-        file_metadata = {
-            "name": nombre_archivo,
-            "parents": [GOOGLE_FOLDER_ID]
-        }
-
-        mime_type = (
-            mimetypes.guess_type(nombre_archivo)[0]
-            or "application/octet-stream"
-        )
-
-        media = MediaIoBaseUpload(
-            io.BytesIO(contenido_bytes),
-            mimetype=mime_type,
-            resumable=False
-        )
-
-        archivo_drive = (
-            service
-            .files()
-            .create(
-                body=file_metadata,
-                media_body=media,
-                fields="id,name",
-                supportsAllDrives=True
-            )
-            .execute()
-        )
-
-        drive_id = archivo_drive.get("id")
-
-        if not drive_id:
-            print("[DRIVE ERROR] Google no devolvió un ID de archivo")
-            return None
 
         print(
             f"[DRIVE SUCCESS] {nombre_archivo} "
             f"subido con ID: {drive_id}"
         )
-
         return drive_id
 
     except Exception as e:
-        print(
-            f"[DRIVE EXCEPTION] "
-            f"Error al transferir a Drive: {e}"
+        print(f"[DRIVE EXCEPTION] Error al transferir a Drive: {e}")
+        return None
+
+
+def obtener_carpeta_desde_ruta(ruta_relativa: str):
+    ruta = str(ruta_relativa or "").replace("\\", "/").strip("/")
+    partes = [p for p in ruta.split("/") if p not in ("", ".", "..")]
+
+    # webkitRelativePath de una carpeta incluye: Carpeta/archivo.ext
+    if len(partes) < 2:
+        return None
+
+    return partes[0]
+
+
+def subir_lote_carpeta_a_drive(documentos: list):
+    """Sube un lote proveniente de una carpeta como UNA carpeta en Drive.
+
+    Mantiene las subcarpetas. Si cualquier archivo falla, intenta borrar la
+    carpeta raíz creada y devuelve None. Supabase/RAM se actualizan después,
+    únicamente si todos los archivos llegaron correctamente a Drive.
+    """
+
+    if not documentos:
+        return None
+
+    if not google_drive_configurado():
+        print("[DRIVE LOTE CONFIG ERROR] Faltan variables de Google Drive")
+        return None
+
+    preparados = []
+
+    for documento in documentos:
+        auditoria_id = str(documento.get("id") or "").strip()
+        archivo_ram = ARCHIVOS_EN_RAM.get(auditoria_id)
+
+        if not auditoria_id or not archivo_ram:
+            print(
+                "[DRIVE LOTE ERROR] Archivo no disponible en RAM:",
+                auditoria_id,
+            )
+            return None
+
+        ruta = str(
+            documento.get("ruta_relativa")
+            or archivo_ram.get("ruta_relativa")
+            or documento.get("nombre_archivo")
+            or archivo_ram.get("nombre")
+            or "archivo"
+        ).replace("\\", "/").strip("/")
+
+        preparados.append({
+            "documento": documento,
+            "ram": archivo_ram,
+            "ruta": ruta,
+        })
+
+    nombre_carpeta = obtener_carpeta_desde_ruta(preparados[0]["ruta"])
+    if not nombre_carpeta:
+        lote_id = str(documentos[0].get("lote_id") or "lote")
+        nombre_carpeta = f"LOTE_{lote_id[:8]}"
+
+    service = None
+    carpeta_raiz_id = None
+
+    try:
+        service = obtener_servicio_google_drive()
+        carpeta_raiz_id = crear_carpeta_google_drive(
+            service,
+            nombre_carpeta,
+            GOOGLE_FOLDER_ID,
         )
+
+        # Cache de subcarpetas ya creadas dentro de esta carpeta nueva.
+        carpetas_cache = {"": carpeta_raiz_id}
+        archivos_drive = []
+
+        for item in preparados:
+            ruta = item["ruta"]
+            partes = [p for p in ruta.split("/") if p]
+
+            # Quitar el nombre de la carpeta raíz del webkitRelativePath.
+            if partes and partes[0] == nombre_carpeta:
+                partes = partes[1:]
+
+            if not partes:
+                partes = [item["documento"].get("nombre_archivo") or "archivo"]
+
+            nombre_drive = partes[-1]
+            subdirectorios = partes[:-1]
+            parent_id = carpeta_raiz_id
+            ruta_cache = ""
+
+            for directorio in subdirectorios:
+                ruta_cache = f"{ruta_cache}/{directorio}" if ruta_cache else directorio
+
+                if ruta_cache not in carpetas_cache:
+                    carpetas_cache[ruta_cache] = crear_carpeta_google_drive(
+                        service,
+                        directorio,
+                        parent_id,
+                    )
+
+                parent_id = carpetas_cache[ruta_cache]
+
+            archivo_drive_id = subir_archivo_google_drive_en_carpeta(
+                service,
+                nombre_drive,
+                item["ram"]["contenido"],
+                parent_id,
+            )
+            archivos_drive.append(archivo_drive_id)
+
+        print(
+            f"[DRIVE LOTE SUCCESS] carpeta={nombre_carpeta} "
+            f"archivos={len(archivos_drive)} id={carpeta_raiz_id}"
+        )
+
+        return {
+            "folder_id": carpeta_raiz_id,
+            "folder_name": nombre_carpeta,
+            "file_ids": archivos_drive,
+        }
+
+    except Exception as error:
+        print(f"[DRIVE LOTE EXCEPTION] {error}")
+
+        # Todo el lote se creó debajo de una carpeta nueva. Si hubo un fallo,
+        # eliminamos esa carpeta para no dejar una transferencia parcial.
+        if service and carpeta_raiz_id:
+            try:
+                (
+                    service
+                    .files()
+                    .delete(
+                        fileId=carpeta_raiz_id,
+                        supportsAllDrives=True,
+                    )
+                    .execute()
+                )
+                print(f"[DRIVE LOTE ROLLBACK] carpeta eliminada {carpeta_raiz_id}")
+            except Exception as rollback_error:
+                print(f"[DRIVE LOTE ROLLBACK ERROR] {rollback_error}")
+
         return None
 
 
@@ -426,14 +604,15 @@ def telegram_request(
 # ============================================================
 
 def obtener_documentos_pendientes():
-    """Obtiene únicamente documentos pendientes con identidad Supabase."""
+    """Obtiene documentos PENDIENTES con datos para agrupar carpetas."""
     try:
         respuesta = (
             supabase
             .table("auditoria_custodia")
             .select(
-                "id,nombre_archivo,hash_sha256,estado,fecha_solicitud,"
-                "solicitante_id,solicitante_nombre,solicitante_correo"
+                "id,nombre_archivo,hash_sha256,tamano_bytes,estado,fecha_solicitud,"
+                "solicitante_id,solicitante_nombre,solicitante_correo,"
+                "lote_id,ruta_relativa"
             )
             .eq("estado", "PENDIENTE")
             .execute()
@@ -444,15 +623,30 @@ def obtener_documentos_pendientes():
         return []
 
 
+def info_carpeta_documento(documento: dict):
+    lote_id = str(documento.get("lote_id") or "").strip()
+    ruta = str(documento.get("ruta_relativa") or "").replace("\\", "/").strip("/")
+
+    if not lote_id or "/" not in ruta:
+        return None
+
+    nombre_carpeta = obtener_carpeta_desde_ruta(ruta)
+    if not nombre_carpeta:
+        return None
+
+    return {
+        "lote_id": lote_id,
+        "nombre": nombre_carpeta,
+    }
+
+
 def mostrar_menu_usuarios(chat_id, message_id=None):
-    """Muestra solo usuarios que tienen al menos un archivo PENDIENTE."""
+    """Muestra usuarios; una carpeta completa cuenta como una sola unidad."""
     documentos = obtener_documentos_pendientes()
     usuarios = {}
 
     for documento in documentos:
         solicitante_id = str(documento.get("solicitante_id") or "").strip()
-
-        # Registros antiguos sin UID no participan del nuevo menú.
         if not solicitante_id:
             continue
 
@@ -464,35 +658,44 @@ def mostrar_menu_usuarios(chat_id, message_id=None):
                     or "Usuario"
                 ),
                 "correo": documento.get("solicitante_correo") or "",
-                "cantidad": 0,
+                "carpetas": set(),
+                "archivos_sueltos": 0,
             }
 
-        usuarios[solicitante_id]["cantidad"] += 1
+        info_carpeta = info_carpeta_documento(documento)
+        if info_carpeta:
+            usuarios[solicitante_id]["carpetas"].add(info_carpeta["lote_id"])
+        else:
+            usuarios[solicitante_id]["archivos_sueltos"] += 1
 
-    # Orden alfabético para que el menú sea estable.
     usuarios_ordenados = sorted(
         usuarios.items(),
-        key=lambda item: str(item[1]["nombre"]).lower()
+        key=lambda item: str(item[1]["nombre"]).lower(),
     )
 
     botones = []
 
     for uid, usuario in usuarios_ordenados:
-        cantidad = usuario["cantidad"]
-        etiqueta = "archivo" if cantidad == 1 else "archivos"
-        botones.append([
-            {
-                "text": f"👤 {usuario['nombre']} · {cantidad} {etiqueta}",
-                "callback_data": f"usr:{uid}",
-            }
-        ])
+        n_carpetas = len(usuario["carpetas"])
+        n_archivos = usuario["archivos_sueltos"]
+        partes = []
 
-    botones.append([
-        {
-            "text": "🔄 Actualizar",
-            "callback_data": "menu:usuarios",
-        }
-    ])
+        if n_carpetas:
+            partes.append(f"{n_carpetas} carpeta" if n_carpetas == 1 else f"{n_carpetas} carpetas")
+        if n_archivos:
+            partes.append(f"{n_archivos} archivo" if n_archivos == 1 else f"{n_archivos} archivos")
+
+        resumen = " + ".join(partes) if partes else "sin pendientes"
+
+        botones.append([{
+            "text": f"👤 {usuario['nombre']} · {resumen}",
+            "callback_data": f"usr:{uid}",
+        }])
+
+    botones.append([{
+        "text": "🔄 Actualizar",
+        "callback_data": "menu:usuarios",
+    }])
 
     if usuarios:
         texto = (
@@ -509,9 +712,7 @@ def mostrar_menu_usuarios(chat_id, message_id=None):
     payload = {
         "chat_id": chat_id,
         "text": texto,
-        "reply_markup": {
-            "inline_keyboard": botones
-        },
+        "reply_markup": {"inline_keyboard": botones},
     }
 
     if message_id:
@@ -522,14 +723,15 @@ def mostrar_menu_usuarios(chat_id, message_id=None):
 
 
 def mostrar_archivos_usuario(chat_id, message_id, solicitante_id):
-    """Muestra los archivos PENDIENTES de un único UID de Supabase."""
+    """Muestra carpetas como una sola opción y archivos sueltos individualmente."""
     try:
         respuesta = (
             supabase
             .table("auditoria_custodia")
             .select(
-                "id,nombre_archivo,fecha_solicitud,"
-                "solicitante_id,solicitante_nombre,solicitante_correo"
+                "id,nombre_archivo,tamano_bytes,fecha_solicitud,"
+                "solicitante_id,solicitante_nombre,solicitante_correo,"
+                "lote_id,ruta_relativa"
             )
             .eq("solicitante_id", solicitante_id)
             .eq("estado", "PENDIENTE")
@@ -551,34 +753,64 @@ def mostrar_archivos_usuario(chat_id, message_id, solicitante_id):
     )
     correo = archivos[0].get("solicitante_correo") or ""
 
-    botones = []
+    carpetas = {}
+    sueltos = []
 
     for archivo in archivos:
+        info = info_carpeta_documento(archivo)
+
+        if info:
+            lote_id = info["lote_id"]
+            if lote_id not in carpetas:
+                carpetas[lote_id] = {
+                    "nombre": info["nombre"],
+                    "cantidad": 0,
+                    "tamano": 0,
+                }
+            carpetas[lote_id]["cantidad"] += 1
+            carpetas[lote_id]["tamano"] += int(archivo.get("tamano_bytes") or 0)
+        else:
+            sueltos.append(archivo)
+
+    botones = []
+
+    # Una carpeta = un único botón, aunque contenga 80 archivos.
+    for lote_id, carpeta in carpetas.items():
+        nombre = carpeta["nombre"]
+        if len(nombre) > 30:
+            nombre = nombre[:27] + "..."
+
+        botones.append([{
+            "text": f"📁 {nombre} · {carpeta['cantidad']} archivos",
+            "callback_data": f"lot:{lote_id}",
+        }])
+
+    # Los archivos seleccionados de forma suelta siguen siendo individuales.
+    for archivo in sueltos:
         nombre = archivo.get("nombre_archivo") or "Archivo"
-        nombre_boton = nombre if len(nombre) <= 45 else nombre[:42] + "..."
+        nombre_boton = nombre if len(nombre) <= 42 else nombre[:39] + "..."
 
-        botones.append([
-            {
-                "text": f"📄 {nombre_boton}",
-                "callback_data": f"doc:{archivo['id']}",
-            }
-        ])
+        botones.append([{
+            "text": f"📄 {nombre_boton}",
+            "callback_data": f"doc:{archivo['id']}",
+        }])
 
-    botones.append([
-        {
-            "text": "🔙 Usuarios",
-            "callback_data": "menu:usuarios",
-        }
-    ])
+    botones.append([{
+        "text": "🔙 Usuarios",
+        "callback_data": "menu:usuarios",
+    }])
 
-    cantidad = len(archivos)
-    etiqueta = "archivo pendiente" if cantidad == 1 else "archivos pendientes"
+    resumen = []
+    if carpetas:
+        resumen.append(f"{len(carpetas)} carpeta(s)")
+    if sueltos:
+        resumen.append(f"{len(sueltos)} archivo(s) suelto(s)")
 
     texto = (
         f"👤 {nombre_usuario}\n"
         f"📧 {correo}\n\n"
-        f"📂 {cantidad} {etiqueta}\n\n"
-        "Seleccione un archivo:"
+        f"📂 {' + '.join(resumen)} pendiente(s)\n\n"
+        "Seleccione una carpeta o archivo:"
     )
 
     return telegram_request(
@@ -587,15 +819,126 @@ def mostrar_archivos_usuario(chat_id, message_id, solicitante_id):
             "chat_id": chat_id,
             "message_id": message_id,
             "text": texto,
-            "reply_markup": {
-                "inline_keyboard": botones
+            "reply_markup": {"inline_keyboard": botones},
+        },
+    )
+
+
+def mostrar_detalle_lote(chat_id, message_id, lote_id):
+    """Muestra una carpeta/lote completo como una sola decisión."""
+    try:
+        respuesta = (
+            supabase
+            .table("auditoria_custodia")
+            .select(
+                "id,nombre_archivo,hash_sha256,tamano_bytes,estado,"
+                "solicitante_id,solicitante_nombre,solicitante_correo,"
+                "lote_id,ruta_relativa"
+            )
+            .eq("lote_id", lote_id)
+            .eq("estado", "PENDIENTE")
+            .order("fecha_solicitud", desc=False)
+            .execute()
+        )
+        documentos = respuesta.data or []
+    except Exception as error:
+        print("[DETALLE LOTE ERROR]", error)
+        documentos = []
+
+    if not documentos:
+        return telegram_request(
+            "editMessageText",
+            {
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "text": (
+                    "🛡️ DataVault DLP - GM Ingenieros\n\n"
+                    "⚠️ Esta carpeta ya no tiene documentos pendientes."
+                ),
+                "reply_markup": {
+                    "inline_keyboard": [[{
+                        "text": "👥 Usuarios",
+                        "callback_data": "menu:usuarios",
+                    }]]
+                },
             },
+        )
+
+    primer = documentos[0]
+    solicitante_id = str(primer.get("solicitante_id") or "").strip()
+    nombre_usuario = primer.get("solicitante_nombre") or "Usuario"
+    correo = primer.get("solicitante_correo") or ""
+    nombre_carpeta = obtener_carpeta_desde_ruta(primer.get("ruta_relativa")) or f"LOTE_{lote_id[:8]}"
+    total_bytes = sum(int(d.get("tamano_bytes") or 0) for d in documentos)
+
+    def formato_bytes(valor):
+        unidades = ["B", "KB", "MB", "GB"]
+        numero = float(valor or 0)
+        indice = 0
+        while numero >= 1024 and indice < len(unidades) - 1:
+            numero /= 1024
+            indice += 1
+        return f"{numero:.2f} {unidades[indice]}" if indice else f"{int(numero)} B"
+
+    nombres = []
+    for doc in documentos[:8]:
+        ruta = str(doc.get("ruta_relativa") or doc.get("nombre_archivo") or "Archivo").replace("\\", "/")
+        partes = [p for p in ruta.split("/") if p]
+        if partes and partes[0] == nombre_carpeta:
+            partes = partes[1:]
+        nombres.append("/".join(partes) if partes else (doc.get("nombre_archivo") or "Archivo"))
+
+    contenido = "\n".join(f"• {nombre}" for nombre in nombres)
+    if len(documentos) > len(nombres):
+        contenido += f"\n• ... y {len(documentos) - len(nombres)} archivo(s) más"
+
+    texto = (
+        "🛡️ DataVault DLP - GM Ingenieros\n\n"
+        f"📁 Carpeta: {nombre_carpeta}\n"
+        f"👤 Solicitante: {nombre_usuario}\n"
+        f"📧 Correo: {correo}\n"
+        f"📄 Archivos: {len(documentos)}\n"
+        f"📦 Tamaño total: {formato_bytes(total_bytes)}\n\n"
+        f"Contenido:\n{contenido}\n\n"
+        "¿Autoriza la transferencia de TODA la carpeta a Google Drive?"
+    )
+
+    botones = [
+        [
+            {
+                "text": "✅ Aprobar carpeta",
+                "callback_data": f"aplot:{lote_id}",
+            },
+            {
+                "text": "❌ Rechazar carpeta",
+                "callback_data": f"relot:{lote_id}",
+            },
+        ],
+        [
+            {
+                "text": "🔙 Volver",
+                "callback_data": f"usr:{solicitante_id}",
+            },
+            {
+                "text": "👥 Usuarios",
+                "callback_data": "menu:usuarios",
+            },
+        ],
+    ]
+
+    return telegram_request(
+        "editMessageText",
+        {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": texto,
+            "reply_markup": {"inline_keyboard": botones},
         },
     )
 
 
 def mostrar_detalle_documento(chat_id, message_id, auditoria_id):
-    """Muestra el documento seleccionado y los botones Aprobar/Rechazar."""
+    """Muestra un archivo suelto y sus botones Aprobar/Rechazar."""
     try:
         respuesta = (
             supabase
@@ -625,12 +968,10 @@ def mostrar_detalle_documento(chat_id, message_id, auditoria_id):
                     "❌ No se pudo cargar el documento seleccionado."
                 ),
                 "reply_markup": {
-                    "inline_keyboard": [[
-                        {
-                            "text": "👥 Usuarios",
-                            "callback_data": "menu:usuarios",
-                        }
-                    ]]
+                    "inline_keyboard": [[{
+                        "text": "👥 Usuarios",
+                        "callback_data": "menu:usuarios",
+                    }]]
                 },
             },
         )
@@ -646,12 +987,10 @@ def mostrar_detalle_documento(chat_id, message_id, auditoria_id):
             f"⚠️ Este documento ya fue procesado.\n"
             f"Estado actual: {estado}"
         )
-        botones = [[
-            {
-                "text": "👥 Usuarios",
-                "callback_data": "menu:usuarios",
-            }
-        ]]
+        botones = [[{
+            "text": "👥 Usuarios",
+            "callback_data": "menu:usuarios",
+        }]]
     else:
         texto = (
             "🛡️ DataVault DLP - GM Ingenieros\n\n"
@@ -692,9 +1031,7 @@ def mostrar_detalle_documento(chat_id, message_id, auditoria_id):
             "chat_id": chat_id,
             "message_id": message_id,
             "text": texto,
-            "reply_markup": {
-                "inline_keyboard": botones
-            },
+            "reply_markup": {"inline_keyboard": botones},
         },
     )
 
@@ -1839,7 +2176,249 @@ async def recibir_respuesta_telegram(request: Request):
             return {"status": "detalle_documento"}
 
         # ----------------------------------------------------
-        # DECISIÓN: APROBAR / RECHAZAR
+        # NAVEGACIÓN: DETALLE DE UNA CARPETA / LOTE
+        # ----------------------------------------------------
+        if action_data.startswith("lot:"):
+            lote_id_raw = action_data.split(":", 1)[1].strip()
+
+            try:
+                lote_id = str(UUID(lote_id_raw))
+            except (ValueError, TypeError, AttributeError):
+                telegram_request(
+                    "answerCallbackQuery",
+                    {
+                        "callback_query_id": callback_id,
+                        "text": "❌ ID de lote inválido.",
+                        "show_alert": True,
+                    },
+                )
+                return {"status": "callback_error"}
+
+            telegram_request(
+                "answerCallbackQuery",
+                {"callback_query_id": callback_id},
+            )
+            mostrar_detalle_lote(chat_id, message_id, lote_id)
+            return {"status": "detalle_lote"}
+
+        # ----------------------------------------------------
+        # DECISIÓN: APROBAR / RECHAZAR CARPETA COMPLETA
+        # ----------------------------------------------------
+        if action_data.startswith("aplot:") or action_data.startswith("relot:"):
+            accion_lote, lote_id_raw = action_data.split(":", 1)
+
+            try:
+                lote_id = str(UUID(lote_id_raw.strip()))
+            except (ValueError, TypeError, AttributeError):
+                telegram_request(
+                    "answerCallbackQuery",
+                    {
+                        "callback_query_id": callback_id,
+                        "text": "❌ ID de lote inválido.",
+                        "show_alert": True,
+                    },
+                )
+                return {"status": "callback_error"}
+
+            aprobar_lote = accion_lote == "aplot"
+            estado_lote = "APROBADO" if aprobar_lote else "RECHAZADO"
+            drive_lote = None
+            documentos_lote = []
+
+            try:
+                with DECISION_LOCK:
+                    consulta_lote = (
+                        supabase
+                        .table("auditoria_custodia")
+                        .select(
+                            "id,nombre_archivo,hash_sha256,tamano_bytes,estado,"
+                            "solicitante_id,solicitante_nombre,solicitante_correo,"
+                            "lote_id,ruta_relativa"
+                        )
+                        .eq("lote_id", lote_id)
+                        .eq("estado", "PENDIENTE")
+                        .execute()
+                    )
+
+                    documentos_lote = consulta_lote.data or []
+
+                    if not documentos_lote:
+                        telegram_request(
+                            "answerCallbackQuery",
+                            {
+                                "callback_query_id": callback_id,
+                                "text": "⚠️ Esta carpeta ya fue procesada o no tiene pendientes.",
+                                "show_alert": True,
+                            },
+                        )
+                        return {"status": "already_processed"}
+
+                    # Asegurarnos de que realmente es una carpeta seleccionada.
+                    nombre_carpeta = obtener_carpeta_desde_ruta(
+                        documentos_lote[0].get("ruta_relativa")
+                    )
+                    if not nombre_carpeta:
+                        raise RuntimeError(
+                            "El lote no corresponde a una carpeta completa."
+                        )
+
+                    if aprobar_lote:
+                        # Verificar ANTES de subir que todos siguen disponibles en RAM.
+                        faltantes_ram = [
+                            str(doc.get("id"))
+                            for doc in documentos_lote
+                            if not ARCHIVOS_EN_RAM.get(str(doc.get("id")))
+                        ]
+
+                        if faltantes_ram:
+                            raise RuntimeError(
+                                f"{len(faltantes_ram)} archivo(s) ya no están disponibles en RAM. "
+                                "La carpeta no fue transferida."
+                            )
+
+                        drive_lote = subir_lote_carpeta_a_drive(documentos_lote)
+
+                        if not drive_lote:
+                            telegram_request(
+                                "answerCallbackQuery",
+                                {
+                                    "callback_query_id": callback_id,
+                                    "text": (
+                                        "⚠️ Google Drive no pudo completar toda la carpeta. "
+                                        "Los documentos siguen PENDIENTES."
+                                    ),
+                                    "show_alert": True,
+                                },
+                            )
+                            return {
+                                "status": "drive_batch_error",
+                                "estado_actual": "PENDIENTE",
+                            }
+
+                        resultado_lote = (
+                            supabase
+                            .table("auditoria_custodia")
+                            .update({"estado": "APROBADO"})
+                            .eq("lote_id", lote_id)
+                            .eq("estado", "PENDIENTE")
+                            .execute()
+                        )
+
+                        if not resultado_lote.data:
+                            # Drive ya se creó, pero Supabase no confirmó. Intentamos rollback.
+                            try:
+                                service = obtener_servicio_google_drive()
+                                (
+                                    service
+                                    .files()
+                                    .delete(
+                                        fileId=drive_lote["folder_id"],
+                                        supportsAllDrives=True,
+                                    )
+                                    .execute()
+                                )
+                            except Exception as rollback_error:
+                                print("[DRIVE/SUPABASE ROLLBACK ERROR]", rollback_error)
+
+                            raise RuntimeError(
+                                "La carpeta llegó a Drive, pero Supabase no pudo confirmar APROBADO."
+                            )
+
+                    else:
+                        resultado_lote = (
+                            supabase
+                            .table("auditoria_custodia")
+                            .update({"estado": "RECHAZADO"})
+                            .eq("lote_id", lote_id)
+                            .eq("estado", "PENDIENTE")
+                            .execute()
+                        )
+
+                        if not resultado_lote.data:
+                            raise RuntimeError(
+                                "No se pudo cambiar la carpeta a RECHAZADO."
+                            )
+
+                    # Solo después de una decisión confirmada liberamos la RAM.
+                    for doc in documentos_lote:
+                        ARCHIVOS_EN_RAM.pop(str(doc.get("id")), None)
+
+            except Exception as error:
+                print("[CALLBACK LOTE ERROR]", error)
+                telegram_request(
+                    "answerCallbackQuery",
+                    {
+                        "callback_query_id": callback_id,
+                        "text": f"❌ No se pudo procesar la carpeta: {error}"[:200],
+                        "show_alert": True,
+                    },
+                )
+                return {
+                    "status": "callback_lote_error",
+                    "error": str(error),
+                }
+
+            primer = documentos_lote[0]
+            solicitante_id_lote = str(primer.get("solicitante_id") or "").strip()
+            solicitante_nombre_lote = primer.get("solicitante_nombre") or "Usuario"
+            nombre_carpeta = obtener_carpeta_desde_ruta(primer.get("ruta_relativa")) or f"LOTE_{lote_id[:8]}"
+
+            telegram_request(
+                "answerCallbackQuery",
+                {
+                    "callback_query_id": callback_id,
+                    "text": f"Carpeta actualizada a: {estado_lote}",
+                },
+            )
+
+            icono = "✅" if estado_lote == "APROBADO" else "❌"
+            nuevo_texto = (
+                "🛡️ DataVault DLP - GM Ingenieros\n\n"
+                f"📁 Carpeta: {nombre_carpeta}\n"
+                f"👤 Solicitante: {solicitante_nombre_lote}\n"
+                f"📄 Archivos procesados: {len(documentos_lote)}\n\n"
+                f"{icono} DECISIÓN: Carpeta {estado_lote}\n"
+            )
+
+            if drive_lote:
+                nuevo_texto += (
+                    f"☁️ Carpeta subida a Google Drive\n"
+                    f"🆔 Drive folder ID: {drive_lote['folder_id']}\n"
+                )
+
+            nuevo_texto += f"👤 Procesado por Telegram ID: {user_id}"
+
+            botones_finales_lote = []
+            if solicitante_id_lote:
+                botones_finales_lote.append([{
+                    "text": "🔙 Pendientes del usuario",
+                    "callback_data": f"usr:{solicitante_id_lote}",
+                }])
+
+            botones_finales_lote.append([{
+                "text": "👥 Usuarios pendientes",
+                "callback_data": "menu:usuarios",
+            }])
+
+            telegram_request(
+                "editMessageText",
+                {
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "text": nuevo_texto,
+                    "reply_markup": {"inline_keyboard": botones_finales_lote},
+                },
+            )
+
+            return {
+                "status": "ok",
+                "estado_actualizado": estado_lote,
+                "lote_id": lote_id,
+                "drive_folder_id": drive_lote["folder_id"] if drive_lote else None,
+            }
+
+        # ----------------------------------------------------
+        # DECISIÓN: APROBAR / RECHAZAR ARCHIVO SUELTO
         # ----------------------------------------------------
         if ":" not in action_data:
             telegram_request(
