@@ -1777,7 +1777,17 @@ def obtener_nombre_correlativo(nombre_original: str) -> str:
 # NOTIFICACIÓN TELEGRAM EN SEGUNDO PLANO
 # ============================================================
 
-def notificar_menu_pendientes_background():
+def notificar_menu_pendientes_background(base_url: str = ""):
+    # Revalidar/configurar el webhook usando el dominio REAL de la petición
+    # sin bloquear la respuesta del navegador. Esto evita que Telegram quede
+    # apuntando a un dominio anterior de Railway después de un redeploy/cambio.
+    if base_url:
+        try:
+            estado_webhook = configurar_webhook_url(base_url)
+            print(f"[WEBHOOK BATCH BG] {estado_webhook}")
+        except Exception as error:
+            print(f"[WEBHOOK BATCH BG ERROR] {error}")
+
     for chat_id in AUTHORIZED_CHAT_IDS:
         try:
             resultado = mostrar_menu_usuarios(chat_id)
@@ -1854,12 +1864,14 @@ async def registrar_lote_custodia(
     # --------------------------------------------------------
     # WEBHOOK TELEGRAM
     # --------------------------------------------------------
-    # Ya se configura al iniciar Railway. No lo verificamos en cada lote
-    # para no mantener abierta la petición del navegador innecesariamente.
+    # Capturamos el dominio REAL de esta petición. La corrección del webhook
+    # se hará en segundo plano para no retrasar la respuesta de /upload-batch.
+    base_url_actual = obtener_base_url_request(request)
     estado_webhook = {
         "ok": True,
         "changed": False,
-        "source": "startup"
+        "source": "background",
+        "base_url": base_url_actual
     }
 
     procesados = []
@@ -1971,7 +1983,10 @@ async def registrar_lote_custodia(
     enviados_correctamente = 0
 
     if procesados:
-        background_tasks.add_task(notificar_menu_pendientes_background)
+        background_tasks.add_task(
+            notificar_menu_pendientes_background,
+            base_url_actual
+        )
 
     if not procesados and errores:
         raise HTTPException(
