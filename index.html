@@ -4519,5 +4519,139 @@ window.addEventListener('DOMContentLoaded',()=>{
 })();
 </script>
 
+
+
+<style id="datavault-topbar-role-final-fix">
+/* FIX DEFINITIVO DEL NAVBAR POR ROL: sin solapes ni botones duplicados */
+#topbar .topbar-brand{
+  flex:0 0 auto !important;
+}
+#topbar .topbar-nav{
+  display:flex !important;
+  flex:1 1 auto !important;
+  min-width:0 !important;
+  align-items:center !important;
+  justify-content:flex-start !important;
+  gap:8px !important;
+  overflow:hidden !important;
+  white-space:nowrap !important;
+  margin-left:6px !important;
+}
+#topbar .topbar-nav > .top-nav-item{
+  display:inline-flex !important;
+  flex:0 0 auto !important;
+  flex-shrink:0 !important;
+  width:auto !important;
+  min-width:0 !important;
+  max-width:none !important;
+  height:42px !important;
+  padding:0 12px !important;
+  align-items:center !important;
+  justify-content:center !important;
+  gap:6px !important;
+  font-size:12px !important;
+  line-height:1 !important;
+  white-space:nowrap !important;
+  overflow:visible !important;
+  text-overflow:clip !important;
+}
+#topbar .topbar-nav > .top-nav-item > span{
+  display:inline-block !important;
+  white-space:nowrap !important;
+  overflow:visible !important;
+  width:auto !important;
+  max-width:none !important;
+}
+#topbar .topbar-nav > .role-hidden,
+#topbar .topbar-nav > .hidden{
+  display:none !important;
+}
+#topbar .topbar-actions{
+  flex:0 0 auto !important;
+  margin-left:auto !important;
+}
+
+/* Cuando no entra con comodidad, se usa menú hamburguesa; nunca se aplasta el texto. */
+#topbar.dv-role-compact .mobile-menu-btn{display:flex !important;}
+#topbar.dv-role-compact .topbar-nav{display:none !important;}
+
+@media (min-width:901px) and (max-width:1200px){
+  #topbar.app-topbar{padding-left:14px !important;padding-right:14px !important;gap:10px !important;}
+  #topbar .topbar-brand{min-width:185px !important;}
+  #topbar .topbar-nav{gap:5px !important;margin-left:0 !important;}
+  #topbar .topbar-nav > .top-nav-item{padding:0 10px !important;font-size:11px !important;}
+}
+</style>
+
+<script id="datavault-topbar-role-final-script">
+(function(){
+  function cleanTopbarNav(){
+    const nav=document.querySelector('#topbar .topbar-nav');
+    if(!nav) return;
+
+    // Si por algún parche previo quedara repetido un módulo, conserva solo uno.
+    const seen=new Set();
+    [...nav.querySelectorAll(':scope > [data-nav]')].forEach(btn=>{
+      const key=btn.getAttribute('data-nav');
+      if(seen.has(key)) btn.remove();
+      else seen.add(key);
+    });
+  }
+
+  function roleNavbarFit(){
+    const topbar=document.getElementById('topbar');
+    const nav=topbar?.querySelector('.topbar-nav');
+    const brand=topbar?.querySelector('.topbar-brand');
+    const actions=topbar?.querySelector('.topbar-actions');
+    if(!topbar||!nav||!brand||!actions) return;
+
+    cleanTopbarNav();
+
+    // Móvil: siempre hamburguesa.
+    if(window.innerWidth<=900){
+      topbar.classList.add('dv-role-compact');
+      return;
+    }
+
+    // Medir el ancho REAL de los botones visibles sin permitir que se encojan.
+    topbar.classList.remove('dv-role-compact');
+    const visible=[...nav.querySelectorAll(':scope > .top-nav-item')].filter(el=>{
+      const st=getComputedStyle(el);
+      return st.display!=='none' && !el.classList.contains('role-hidden') && !el.classList.contains('hidden');
+    });
+    const navStyle=getComputedStyle(nav);
+    const gap=parseFloat(navStyle.columnGap||navStyle.gap||0) || 0;
+    const required=visible.reduce((sum,el)=>sum+Math.ceil(el.getBoundingClientRect().width),0)+gap*Math.max(0,visible.length-1);
+    const available=Math.max(0, topbar.clientWidth-brand.getBoundingClientRect().width-actions.getBoundingClientRect().width-52);
+
+    if(required>available){
+      topbar.classList.add('dv-role-compact');
+    }
+  }
+
+  const schedule=()=>requestAnimationFrame(()=>requestAnimationFrame(roleNavbarFit));
+  window.addEventListener('resize',schedule);
+  document.addEventListener('DOMContentLoaded',()=>{
+    cleanTopbarNav();
+    schedule();
+    setTimeout(schedule,100);
+    setTimeout(schedule,500);
+    const nav=document.querySelector('#topbar .topbar-nav');
+    if(nav) new MutationObserver(schedule).observe(nav,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['class','style']});
+  });
+
+  // Los parches de rol cambian etiquetas/visibilidad después del login.
+  const oldApply=window.applyRoleExperience;
+  if(typeof oldApply==='function'){
+    window.applyRoleExperience=function(){
+      const r=oldApply.apply(this,arguments);
+      schedule();
+      return r;
+    };
+  }
+  window.dvRoleNavbarFit=roleNavbarFit;
+})();
+</script>
+
 </body>
 </html>
