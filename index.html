@@ -4453,5 +4453,71 @@ window.addEventListener('DOMContentLoaded',()=>{
   window.addEventListener('load',()=>setTimeout(applyRoleExperience,100));
 })();
 </script>\n
+
+
+<style id="datavault-topbar-spacing-fix">
+/* ===== BARRA SUPERIOR: separación limpia entre módulos ===== */
+#topbar .topbar-nav{
+  display:flex !important;
+  align-items:center !important;
+  justify-content:flex-start !important;
+  flex:1 1 auto !important;
+  min-width:0 !important;
+  gap:10px !important;
+  margin-left:8px !important;
+  overflow:visible !important;
+  white-space:nowrap !important;
+}
+#topbar .top-nav-item{
+  flex:0 0 auto !important;
+  width:auto !important;
+  min-width:max-content !important;
+  height:44px !important;
+  padding:0 14px !important;
+  gap:7px !important;
+  font-size:13px !important;
+  line-height:1 !important;
+  letter-spacing:0 !important;
+  white-space:nowrap !important;
+}
+#topbar .top-nav-item + .top-nav-item{
+  margin-left:0 !important;
+}
+#topbar .topbar-actions{
+  flex:0 0 auto !important;
+  margin-left:auto !important;
+}
+
+/* En anchos intermedios se compacta un poco antes de pasar al menú hamburguesa. */
+@media (min-width:901px) and (max-width:1450px){
+  #topbar.app-topbar{gap:16px !important;padding-left:20px !important;padding-right:20px !important;}
+  #topbar .topbar-brand{min-width:180px !important;flex-basis:180px !important;}
+  #topbar .topbar-nav{gap:6px !important;margin-left:2px !important;}
+  #topbar .top-nav-item{padding:0 11px !important;font-size:12px !important;gap:6px !important;}
+  #topbar .top-nav-item i{font-size:12px !important;}
+}
+</style>
+
+<script id="datavault-topbar-spacing-recalc">
+(function(){
+  function recalc(){
+    if(typeof updateTopbarResponsive === 'function'){
+      requestAnimationFrame(function(){ updateTopbarResponsive(); });
+    }
+  }
+  function init(){
+    const nav=document.querySelector('#topbar .topbar-nav');
+    if(!nav) return;
+    const obs=new MutationObserver(recalc);
+    obs.observe(nav,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['class','style']});
+    recalc();
+    setTimeout(recalc,80);
+    setTimeout(recalc,300);
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',init);
+  else init();
+})();
+</script>
+
 </body>
 </html>
