@@ -2966,8 +2966,66 @@ const dropZoneEl = document.getElementById('dropZone');
 ['dragleave', 'drop'].forEach(evt => {
   dropZoneEl.addEventListener(evt, e => { e.preventDefault(); dropZoneEl.classList.remove('drop-active'); });
 });
-dropZoneEl.addEventListener('drop', e => {
-  if (e.dataTransfer.files?.length) handleFilesSelected(e.dataTransfer.files);
+dropZoneEl.addEventListener('drop', async e => {
+  if (dvUploadInProgress) return;
+
+  const items = Array.from(e.dataTransfer?.items || []);
+  const entradas = [];
+
+  // En Chromium/Brave esto permite arrastrar una carpeta completa
+  // y conservar también todas sus subcarpetas.
+  const roots = items
+    .map(item => item.webkitGetAsEntry ? item.webkitGetAsEntry() : null)
+    .filter(Boolean);
+
+  async function leerTodasLasEntradas(reader){
+    const total = [];
+    while(true){
+      const bloque = await new Promise((resolve,reject)=>reader.readEntries(resolve,reject));
+      if(!bloque.length) break;
+      total.push(...bloque);
+    }
+    return total;
+  }
+
+  async function recorrerEntry(entry, rutaBase){
+    if(entry.isFile){
+      const file = await new Promise((resolve,reject)=>entry.file(resolve,reject));
+      entradas.push({ file, relativePath: rutaBase });
+      return;
+    }
+    if(entry.isDirectory){
+      const reader = entry.createReader();
+      const hijos = await leerTodasLasEntradas(reader);
+      for(const hijo of hijos){
+        await recorrerEntry(hijo, `${rutaBase}/${hijo.name}`);
+      }
+    }
+  }
+
+  if(roots.length){
+    try{
+      for(const root of roots){
+        await recorrerEntry(root, root.name);
+      }
+
+      if(entradas.length){
+        const primeraRaiz = roots[0];
+        const esCarpeta = roots.length === 1 && primeraRaiz?.isDirectory;
+
+        dvSelectionMode = esCarpeta ? 'folder' : 'files';
+        dvSelectedFolderName = esCarpeta ? (primeraRaiz.name || 'Carpeta') : '';
+        dvSelectedEntries = entradas.sort((a,b)=>a.relativePath.localeCompare(b.relativePath,'es',{numeric:true,sensitivity:'base'}));
+        renderSelectedFiles();
+        return;
+      }
+    }catch(error){
+      console.warn('[DROP FOLDER ERROR]', error);
+    }
+  }
+
+  // Respaldo para arrastrar únicamente archivos sueltos.
+  if (e.dataTransfer.files?.length) handleFilesSelected(e.dataTransfer.files,false);
 });
 
 // =======================================================
@@ -3794,10 +3852,17 @@ function dvEntryKey(entry){
 async function seleccionarCarpetaReal(){
   if(dvUploadInProgress) return;
 
-  // API moderna: abre un selector de directorio real.
+  const status=document.getElementById('uploadStatus');
+  if(status){
+    status.classList.add('hidden');
+    status.innerHTML='';
+  }
+
+  // API moderna: selector REAL de directorios.
+  // Sin opciones extra para máxima compatibilidad con Brave/Chrome/Edge.
   if('showDirectoryPicker' in window){
     try{
-      const directorio = await window.showDirectoryPicker({ mode: 'read' });
+      const directorio = await window.showDirectoryPicker();
       const entradas = [];
 
       async function recorrerDirectorio(handle, rutaBase){
@@ -3840,14 +3905,27 @@ async function seleccionarCarpetaReal(){
     }catch(error){
       // Cancelar el selector no es un error.
       if(error && error.name === 'AbortError') return;
-      console.warn('[DIRECTORY PICKER] Se usará el selector compatible:', error);
+      console.warn('[DIRECTORY PICKER ERROR]', error);
+
+      // No abrimos un selector de ARCHIVOS como respaldo porque genera
+      // exactamente el cuadro de Windows con botón "Abrir" que confunde.
+      if(status){
+        status.classList.remove('hidden');
+        status.className='mt-3 text-sm font-semibold text-amber-600';
+        status.innerHTML='<i class="fa-solid fa-triangle-exclamation mr-2"></i>Brave bloqueó el selector directo de carpetas. Puedes arrastrar la carpeta completa al recuadro de carga y se conservarán sus subcarpetas.';
+      }
+      return;
     }
   }
 
-  // Respaldo para navegadores sin showDirectoryPicker.
-  // Sigue usando webkitdirectory, preservando webkitRelativePath.
-  const fallback=document.getElementById('folderInput');
-  if(fallback) fallback.click();
+  // Si el navegador no implementa File System Access API, evitamos abrir
+  // el selector normal de archivos. El drag & drop de carpeta sí funciona
+  // en Chromium/Brave mediante webkitGetAsEntry.
+  if(status){
+    status.classList.remove('hidden');
+    status.className='mt-3 text-sm font-semibold text-amber-600';
+    status.innerHTML='<i class="fa-solid fa-folder-open mr-2"></i>Este navegador no ofrece selector directo de carpetas. Arrastra la carpeta completa al recuadro para cargarla con todas sus subcarpetas.';
+  }
 }
 
 handleFilesSelected = function(fileList, fromFolder=false){
