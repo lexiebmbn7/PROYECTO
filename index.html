@@ -2262,8 +2262,33 @@ body {
 <section id="view-auditoria" class="view space-y-4"><div class="page-title"><div><h2>Historial y Auditoría</h2><p>Consulta la trazabilidad de archivos, usuarios e integridad.</p></div><span class="live-badge">● En vivo</span></div><div class="dashboard-card overflow-hidden"><div class="section-head"><div><h3>Registro de auditoría</h3><p>Eventos de custodia e integridad documental.</p></div></div><div class="overflow-x-auto"><table class="data-table"><thead><tr><th>Archivo</th><th>Solicitante</th><th>Carpeta</th><th>Hash SHA-256</th><th>Estado</th></tr></thead><tbody id="auditTableBody"><tr><td colspan="5" class="p-6 text-center text-slate-400">Cargando registros...</td></tr></tbody></table></div></div></section>
 <!-- CONFIGURACION -->
 <section id="view-configuracion" class="view space-y-4"><div class="page-title"><div><h2>Configuración</h2><p>Administra la configuración general de DataVault DLP.</p></div><span class="text-[10px] text-slate-400">Configuración local del panel</span></div><div class="grid grid-cols-1 lg:grid-cols-2 gap-4"><div class="dashboard-card overflow-hidden"><div class="section-head"><div><h3>Información de la empresa</h3><p>Datos generales del sistema.</p></div></div><div class="p-5 flex items-center gap-4"><div class="h-14 w-14 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center overflow-hidden"><img src="images/gm_logo.jpg" class="h-12 w-12 object-contain" alt="GM"></div><div><p class="text-xs text-slate-400">Nombre</p><p class="text-sm font-bold text-slate-800">GM Ingenieros y Consultores</p><p class="text-xs text-slate-400 mt-1">Sistema DataVault DLP · Entorno Cloud</p></div></div></div><div class="dashboard-card overflow-hidden"><div class="section-head"><div><h3>Preferencias</h3><p>Comportamiento de la interfaz.</p></div></div><div class="p-5 space-y-4"><label class="setting-row"><div><b>Notificaciones por correo</b><span>Mostrar indicadores visuales de solicitudes.</span></div><input id="cfgNotifications" type="checkbox" onchange="saveConfigValue('notifications',this.checked)"></label><label class="setting-row"><div><b>Actualización automática</b><span>Mantener actualizados los datos del panel.</span></div><input id="cfgAutoRefresh" type="checkbox" onchange="saveConfigValue('autoRefresh',this.checked)"></label><label class="setting-row"><div><b>Registro de auditoría</b><span>Conservar los eventos de custodia.</span></div><input id="cfgConfirmDelete" type="checkbox" onchange="saveConfigValue('confirmDelete',this.checked)"></label><label class="setting-row"><div><b>Modo compacto</b><span>Reducir espacios del panel.</span></div><input id="cfgCompact" type="checkbox" onchange="saveConfigValue('compact',this.checked)"></label></div></div></div><div class="flex items-center gap-3"><button onclick="saveAllSettings()" class="primary-btn">Guardar cambios</button><span id="configSaved" class="hidden text-xs font-semibold text-emerald-600"><i class="fa-solid fa-check mr-1"></i>Cambios guardados</span></div></section>
-<!-- USUARIOS -->
-<section id="view-usuarios" class="view space-y-4"><div class="page-title"><div><h2>Usuarios</h2><p>Gestión de roles y accesos al sistema.</p></div></div><div class="dashboard-card overflow-hidden"><div class="section-head"><div><h3>Usuarios y roles</h3><p>La autenticación y administración de usuarios se gestiona mediante Supabase Auth.</p></div></div><div class="p-5"><div class="flex items-start gap-4"><div class="h-11 w-11 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center"><i class="fa-solid fa-users"></i></div><div><p class="text-sm font-semibold text-slate-800">Supabase Auth</p><p class="text-xs text-slate-500 mt-1">Asigna <code class="bg-slate-100 px-1.5 py-0.5 rounded">user_metadata.rol</code> como <code class="bg-slate-100 px-1.5 py-0.5 rounded">"jefe"</code> o <code class="bg-slate-100 px-1.5 py-0.5 rounded">"subordinado"</code>.</p></div></div></div></div></section>
+<!-- USUARIOS / SOLO ADMIN -->
+<section id="view-usuarios" class="view space-y-4">
+  <div class="page-title">
+    <div><span class="module-kicker">Administración</span><h2>Usuarios y actividad</h2><p>Consulta quién carga documentos, cuántos archivos tiene y el estado de sus solicitudes.</p></div>
+    <button onclick="loadAdminUsers()" class="secondary-btn"><i class="fa-solid fa-rotate"></i>Actualizar</button>
+  </div>
+  <div class="grid grid-cols-2 xl:grid-cols-4 gap-3">
+    <div class="dashboard-card p-4"><p class="metric-label">Usuarios con actividad</p><b id="admUsersTotal" class="text-2xl">—</b></div>
+    <div class="dashboard-card p-4"><p class="metric-label">Archivos registrados</p><b id="admFilesTotal" class="text-2xl text-blue-600">—</b></div>
+    <div class="dashboard-card p-4"><p class="metric-label">Pendientes</p><b id="admPendingTotal" class="text-2xl text-amber-600">—</b></div>
+    <div class="dashboard-card p-4"><p class="metric-label">Rechazados</p><b id="admRejectedTotal" class="text-2xl text-red-500">—</b></div>
+  </div>
+  <div class="filter-bar">
+    <div class="relative flex-1"><i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i><input id="adminUserSearch" oninput="renderAdminUsers()" placeholder="Buscar usuario o correo..." class="input-modern pl-9"></div>
+  </div>
+  <div class="dashboard-card overflow-hidden">
+    <div class="section-head"><div><h3>Usuarios con archivos cargados</h3><p>Solo aparecen usuarios que registraron actividad en custodia.</p></div><span class="live-badge">● En vivo</span></div>
+    <div class="overflow-x-auto"><table class="data-table"><thead><tr><th>Usuario</th><th>Correo</th><th>Archivos</th><th>Aprobados</th><th>Pendientes</th><th>Rechazados</th><th>Última actividad</th><th>Acción</th></tr></thead><tbody id="adminUsersBody"><tr><td colspan="8" class="p-8 text-center text-slate-400">Cargando usuarios...</td></tr></tbody></table></div>
+  </div>
+  <div id="adminUserDetail" class="dashboard-card overflow-hidden hidden">
+    <div class="section-head"><div><h3 id="adminUserDetailName">Detalle de usuario</h3><p id="adminUserDetailEmail">—</p></div><button onclick="closeAdminUserDetail()" class="icon-btn"><i class="fa-solid fa-xmark"></i></button></div>
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 p-4 border-b border-slate-100">
+      <div class="mini-stat"><span>Total</span><b id="audUserTotal">—</b></div><div class="mini-stat"><span>Aprobados</span><b id="audUserApproved" class="text-emerald-600">—</b></div><div class="mini-stat"><span>Pendientes</span><b id="audUserPending" class="text-amber-600">—</b></div><div class="mini-stat"><span>Rechazados</span><b id="audUserRejected" class="text-red-500">—</b></div>
+    </div>
+    <div class="overflow-x-auto"><table class="data-table"><thead><tr><th>Archivo / carpeta</th><th>Ruta</th><th>Hash</th><th>Estado</th><th>Fecha</th></tr></thead><tbody id="adminUserFilesBody"></tbody></table></div>
+  </div>
+</section>
 </main></div></div></div>
 <script>
 
@@ -4136,5 +4161,297 @@ window.addEventListener('DOMContentLoaded',()=>{
 });
 </script>
 
+
+<style id="datavault-role-v3-css">
+.role-hidden{display:none!important}
+.admin-user-name{font-weight:700;color:#1f2b31}
+.admin-user-mail{font-size:10px;color:#78909c}
+.admin-user-avatar{width:34px;height:34px;border-radius:50%;background:#eaf1f4;color:#1f2b31;display:flex;align-items:center;justify-content:center;font-weight:800}
+.admin-filter-wrap{display:flex;align-items:center;gap:8px;margin-left:auto}
+.admin-filter-wrap select{min-width:210px}
+.role-readonly-note{font-size:11px;color:#64748b;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px}
+</style>
+\n<script id="datavault-role-v3">
+/* =========================================================
+   EXPERIENCIA POR ROL
+   - subordinado: Inicio | Archivos | Operaciones | Mis solicitudes
+   - jefe/admin: Inicio | Usuarios | Aprobaciones | Archivos | Reglas DLP | Reportes | Auditoría | Configuración
+   IMPORTANTE: esto organiza la interfaz. La seguridad definitiva debe reforzarse con RLS/backend.
+   ========================================================= */
+(function(){
+  const ROLE_ADMIN = 'jefe';
+  const ROLE_SUB = 'subordinado';
+  let roleAllAudit = [];
+  let roleAllRequests = [];
+  let adminUsersCache = [];
+  let adminUserFilter = '';
+
+  function norm(v){ return String(v ?? '').trim().toLowerCase(); }
+  function isAdmin(){ return norm(currentRole) === ROLE_ADMIN; }
+  function rowUserId(r){ return String(r?.solicitante_id || '').trim(); }
+  function rowEmail(r){ return String(r?.solicitante_correo || r?.correo || '').trim(); }
+  function rowName(r){ return String(r?.solicitante_nombre || r?.usuario_solicitante || r?.usuario || 'Usuario').trim(); }
+  function belongsToMe(r){
+    const uid=String(currentUser?.id||'').trim();
+    if(uid && rowUserId(r) && rowUserId(r)===uid) return true;
+    if(currentUserEmail && rowEmail(r) && norm(rowEmail(r))===norm(currentUserEmail)) return true;
+    return !!currentDisplayName && norm(rowName(r))===norm(currentDisplayName);
+  }
+  function requestBelongsToMe(r){
+    const uid=String(currentUser?.id||'').trim();
+    if(uid && String(r?.solicitante_id||'').trim()===uid) return true;
+    const mail=String(r?.solicitante_correo||r?.correo||'').trim();
+    if(currentUserEmail && mail && norm(mail)===norm(currentUserEmail)) return true;
+    const who=String(r?.usuario_solicitante||r?.solicitante_nombre||r?.usuario||'').trim();
+    return !!who && (norm(who)===norm(currentDisplayName) || norm(who)===norm(currentUserEmail));
+  }
+  function roleFromUser(user){
+    const raw = user?.app_metadata?.rol || user?.app_metadata?.role || user?.user_metadata?.rol || user?.user_metadata?.role || ROLE_SUB;
+    const v=norm(raw);
+    return ['jefe','admin','administrador'].includes(v) ? ROLE_ADMIN : ROLE_SUB;
+  }
+  function setNavVisible(name,visible){
+    document.querySelectorAll(`[data-nav="${name}"]`).forEach(el=>el.classList.toggle('role-hidden',!visible));
+  }
+  function renameNav(name,label){
+    document.querySelectorAll(`[data-nav="${name}"]`).forEach(el=>{const s=el.querySelector('span');if(s)s.textContent=label;});
+  }
+  function findCardByTitle(title){
+    return [...document.querySelectorAll('#view-inicio .dashboard-card')].find(c=>norm(c.querySelector('h3')?.textContent)===norm(title));
+  }
+
+  function ensureAdminFileFilter(){
+    const head=document.querySelector('#view-gestor .file-content-head');
+    if(!head || document.getElementById('adminFileUserFilterWrap')) return;
+    const wrap=document.createElement('div');
+    wrap.id='adminFileUserFilterWrap';
+    wrap.className='admin-filter-wrap role-hidden';
+    wrap.innerHTML='<select id="adminFileUserFilter" class="input-modern"><option value="">Todos los usuarios</option></select>';
+    const select=wrap.querySelector('select');
+    select.addEventListener('change',()=>{adminUserFilter=select.value;loadFilesView();});
+    head.appendChild(wrap);
+  }
+
+  function applyRoleExperience(){
+    const admin=isAdmin();
+    const allowed=admin
+      ? new Set(['inicio','usuarios','cola','gestor','reglas','reportes','auditoria','configuracion'])
+      : new Set(['inicio','gestor','operaciones','cola']);
+    ['inicio','gestor','operaciones','reglas','reportes','auditoria','configuracion','usuarios','cola'].forEach(n=>setNavVisible(n,allowed.has(n)));
+    renameNav('cola',admin?'Aprobaciones':'Mis solicitudes');
+
+    const roleText=admin?'Administrador':'Subordinado';
+    ['userRoleBadge','profileRolTexto','profileRolBadge','solRoleMini'].forEach(id=>{const e=document.getElementById(id);if(e)e.textContent=roleText;});
+
+    const adminLabel=document.getElementById('adminLabel');
+    if(adminLabel) adminLabel.classList.toggle('role-hidden',!admin);
+
+    // El admin supervisa: no necesita controles de carga en su explorador.
+    const drop=document.getElementById('dropZone');
+    if(drop) drop.classList.toggle('role-hidden',admin);
+    ['batchActionBar','selectedFilesList'].forEach(id=>{const e=document.getElementById(id);if(e && admin)e.classList.add('role-hidden');else if(e)e.classList.remove('role-hidden');});
+    document.querySelectorAll('#view-gestor .file-content-head button').forEach(btn=>{
+      const click=btn.getAttribute('onclick')||'';
+      if(/fileInput|folderInput|seleccionarCarpeta/i.test(click)) btn.classList.toggle('role-hidden',admin);
+    });
+    ensureAdminFileFilter();
+    const af=document.getElementById('adminFileUserFilterWrap');if(af)af.classList.toggle('role-hidden',!admin);
+
+    const panelTitle=document.getElementById('filePanelTitle');
+    if(panelTitle) panelTitle.textContent=admin?'Archivos corporativos':'Mis archivos';
+    const rootTree=[...document.querySelectorAll('#view-gestor [data-folder=""]')];
+    rootTree.forEach(x=>{const t=[...x.childNodes].find(n=>n.nodeType===3);if(t)t.textContent=admin?' Todos los archivos':' Mis archivos';});
+
+    // Home: el subordinado no administra políticas ni ve gráficos corporativos.
+    ['Actividad de archivos','Tipos de eventos DLP','Estado de protección'].forEach(title=>{const c=findCardByTitle(title);if(c)c.classList.toggle('role-hidden',!admin);});
+    const auditLink=[...document.querySelectorAll('#view-inicio button')].find(b=>/Ver auditoría/i.test(b.textContent||''));
+    if(auditLink) auditLink.classList.toggle('role-hidden',!admin);
+
+    const colaTitle=document.querySelector('#view-cola .page-title h2');
+    const colaDesc=document.querySelector('#view-cola .page-title p');
+    if(colaTitle)colaTitle.textContent=admin?'Aprobaciones':'Mis solicitudes';
+    if(colaDesc)colaDesc.textContent=admin?'Revisa las cargas pendientes por usuario. La decisión final sigue disponible en Telegram.':'Consulta el estado de tus cargas y operaciones solicitadas.';
+    const nueva=document.querySelector('#view-cola .page-title .primary-btn');
+    if(nueva)nueva.classList.toggle('role-hidden',admin);
+
+    updateTopbarResponsive?.();
+  }
+
+  // Captura final del rol; app_metadata tiene prioridad sobre user_metadata.
+  const baseSetSession=setSessionFromUser;
+  setSessionFromUser=function(user){
+    baseSetSession(user);
+    currentRole=roleFromUser(user);
+    applyRoleExperience();
+  };
+
+  // Evita navegación visual a módulos que no corresponden al rol.
+  const baseShowView=showView;
+  showView=function(name){
+    const admin=isAdmin();
+    const allowed=admin
+      ? ['inicio','usuarios','cola','gestor','reglas','reportes','auditoria','configuracion']
+      : ['inicio','gestor','operaciones','cola'];
+    if(!allowed.includes(name)) name='inicio';
+    baseShowView(name);
+    applyRoleExperience();
+    if(name==='usuarios' && admin) loadAdminUsers();
+    if(name==='inicio') setTimeout(loadRoleHome,0);
+  };
+
+  function currentAuditRows(){
+    let rows=isAdmin()?roleAllAudit:roleAllAudit.filter(belongsToMe);
+    if(isAdmin() && adminUserFilter) rows=rows.filter(r=>userKey(r)===adminUserFilter);
+    return rows;
+  }
+  function userKey(r){return rowUserId(r)||norm(rowEmail(r))||norm(rowName(r));}
+
+  // Archivos: subordinado ve solo los suyos; admin puede filtrar por usuario.
+  loadFilesView=async function(){
+    const body=document.getElementById('filesTableBody');if(!body)return;
+    body.innerHTML='<tr><td colspan="5" class="p-6 text-center text-slate-400"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Cargando archivos...</td></tr>';
+    const {data,error}=await supabaseClient.from('auditoria_custodia').select('*').order('fecha_solicitud',{ascending:false}).limit(1000);
+    if(error){body.innerHTML='<tr><td colspan="5" class="p-6 text-center text-red-400">No se pudo cargar el inventario.</td></tr>';return;}
+    roleAllAudit=Array.isArray(data)?data:[];
+    populateAdminFileFilter();
+    auditCache=currentAuditRows();
+    renderFilesTable(auditCache);
+  };
+
+  function populateAdminFileFilter(){
+    const sel=document.getElementById('adminFileUserFilter');if(!sel||!isAdmin())return;
+    const map=new Map();roleAllAudit.forEach(r=>{const k=userKey(r);if(k&&!map.has(k))map.set(k,{name:rowName(r),email:rowEmail(r)});});
+    const old=adminUserFilter;
+    sel.innerHTML='<option value="">Todos los usuarios</option>'+[...map.entries()].sort((a,b)=>a[1].name.localeCompare(b[1].name)).map(([k,u])=>`<option value="${escapeHtml(k)}">${escapeHtml(u.name)}${u.email?' · '+escapeHtml(u.email):''}</option>`).join('');
+    sel.value=old;
+  }
+
+  // Solicitudes actuales construidas desde auditoria_custodia, que sí pertenece al backend actual.
+  function groupAuditUnits(rows){
+    const map=new Map();
+    rows.forEach(r=>{
+      const lote=String(r.lote_id||'').trim();
+      const key=lote?'lote:'+lote:'file:'+String(r.id||Math.random());
+      if(!map.has(key))map.set(key,{key,lote_id:lote,rows:[],fecha:r.fecha_solicitud||'',userKey:userKey(r),name:rowName(r),email:rowEmail(r)});
+      map.get(key).rows.push(r);
+    });
+    return [...map.values()].sort((a,b)=>String(b.fecha).localeCompare(String(a.fecha)));
+  }
+  function unitStatus(u){const s=[...new Set(u.rows.map(r=>String(r.estado||'PENDIENTE').toUpperCase()))];return s.length===1?s[0]:'PARCIAL';}
+  function unitName(u){
+    if(u.lote_id){const p=String(u.rows[0]?.ruta_relativa||'').replace(/\\/g,'/').split('/').filter(Boolean);return p.length>1?p[0]:(u.rows[0]?.nombre_archivo||'Lote');}
+    return u.rows[0]?.nombre_archivo||'Archivo';
+  }
+  function renderAuditRequests(){
+    const tbody=document.getElementById('colaContainer');if(!tbody)return;
+    const q=norm(document.getElementById('solSearch')?.value||'');
+    const st=document.getElementById('solStateFilter')?.value||'';
+    let units=groupAuditUnits(isAdmin()?roleAllAudit:roleAllAudit.filter(belongsToMe));
+    units=units.filter(u=>{const state=unitStatus(u);const text=norm([unitName(u),u.name,u.email,u.lote_id].join(' '));return(!q||text.includes(q))&&(!st||state===st);});
+    tbody.innerHTML=units.length?units.map((u,i)=>{const state=unitStatus(u),name=unitName(u);const path=u.lote_id?'Carpeta / lote':'Archivo suelto';return `<tr>
+      <td>#${escapeHtml(String(u.lote_id||u.rows[0]?.id||i+1).slice(-8))}</td>
+      <td>${u.lote_id?'Carpeta':'Archivo'}<div class="text-[9px] text-slate-400">${u.rows.length} archivo(s)</div></td>
+      <td>${escapeHtml(name)}</td><td>Google Drive</td><td>${escapeHtml(u.name)}</td><td>${formatShortDate(u.fecha)}</td><td>${statusPill(state)}</td>
+      <td>${isAdmin()&&state==='PENDIENTE'?'<span class="text-xs text-blue-600 font-semibold"><i class="fa-brands fa-telegram mr-1"></i>Resolver en Telegram</span>':'—'}</td>
+    </tr>`}).join(''):'<tr><td colspan="8" class="p-8 text-center text-slate-400">No se encontraron solicitudes.</td></tr>';
+    const pending=units.filter(u=>unitStatus(u)==='PENDIENTE').length;
+    const sum=document.getElementById('solSummary');if(sum)sum.textContent=`${units.length} unidad(es) · ${pending} pendiente(s)`;
+    const mini=document.getElementById('solPendingMini');if(mini)mini.textContent=pending;
+    updateKpis({pendientes:pending});
+  }
+  loadCola=async function(){
+    const {data,error}=await supabaseClient.from('auditoria_custodia').select('*').order('fecha_solicitud',{ascending:false}).limit(1000);
+    if(error){console.error('COLA DESDE AUDITORÍA:',error);return;}
+    roleAllAudit=Array.isArray(data)?data:[];
+    renderAuditRequests();
+  };
+  filterSolicitudesUI=renderAuditRequests;
+
+  // Auditoría: exclusiva del admin.
+  loadAudit=async function(){
+    const {data,error}=await supabaseClient.from('auditoria_custodia').select('*').order('fecha_solicitud',{ascending:false}).limit(1000);
+    if(error){console.error('AUDITORIA:',error);return;}
+    roleAllAudit=Array.isArray(data)?data:[];
+    const rows=isAdmin()?roleAllAudit:roleAllAudit.filter(belongsToMe);
+    auditCache=rows;
+    const body=document.getElementById('auditTableBody');
+    if(body)body.innerHTML=rows.length?rows.map(r=>`<tr><td>${escapeHtml(r.nombre_archivo||'Sin nombre')}</td><td>${escapeHtml(rowName(r))}</td><td>${escapeHtml((r.ruta_relativa||r.carpeta||'—').split('/')[0]||'—')}</td><td class="font-mono text-[9px]" title="${escapeHtml(r.hash_sha256||'')}">${r.hash_sha256?escapeHtml(r.hash_sha256.slice(0,18))+'…':'N/A'}</td><td>${statusPill(r.estado)}</td></tr>`).join(''):'<tr><td colspan="5" class="p-6 text-center text-slate-400">No existen registros.</td></tr>';
+    renderRoleRecent(rows);
+    loadRoleHome();
+    if(document.getElementById('view-gestor')?.classList.contains('active')){populateAdminFileFilter();renderFilesTable(currentAuditRows());}
+  };
+
+  function renderRoleRecent(rows){
+    const body=document.getElementById('inicioTableBody');if(!body)return;
+    const visible=(isAdmin()?rows:rows.filter(belongsToMe)).slice(0,6);
+    body.innerHTML=visible.length?visible.map(r=>`<tr><td>${formatShortDate(r.fecha_solicitud)}</td><td>${escapeHtml(rowName(r))}</td><td>${escapeHtml(r.lote_id?'Carga de carpeta':'Carga de archivo')}</td><td>${statusPill(r.estado)}</td></tr>`).join(''):'<tr><td colspan="4" class="p-6 text-center text-slate-400">No existen registros.</td></tr>';
+  }
+
+  async function loadRoleHome(){
+    if(!roleAllAudit.length){const {data}=await supabaseClient.from('auditoria_custodia').select('*').order('fecha_solicitud',{ascending:false}).limit(1000);roleAllAudit=Array.isArray(data)?data:[];}
+    const rows=isAdmin()?roleAllAudit:roleAllAudit.filter(belongsToMe);
+    const approved=rows.filter(r=>r.estado==='APROBADO').length;
+    const pending=rows.filter(r=>r.estado==='PENDIENTE').length;
+    const rejected=rows.filter(r=>r.estado==='RECHAZADO').length;
+    const cards=[...document.querySelectorAll('#view-inicio .grid.grid-cols-2.xl\\:grid-cols-4 .dashboard-card')];
+    const vals=isAdmin()?
+      [['Archivos protegidos',rows.length,'Registros corporativos'],['Solicitudes pendientes',groupAuditUnits(rows).filter(u=>unitStatus(u)==='PENDIENTE').length,'Requieren revisión'],['Usuarios con actividad',new Set(rows.map(userKey).filter(Boolean)).size,'Con cargas registradas'],['Rechazados',rejected,'Eventos bloqueados']]:
+      [['Mis archivos',rows.length,'En custodia'],['Pendientes',pending,'Esperando aprobación'],['Aprobados',approved,'Transferidos'],['Rechazados',rejected,'No autorizados']];
+    cards.slice(0,4).forEach((c,i)=>{const label=c.querySelector('.metric-label');const value=c.querySelector('.metric-value');const trend=c.querySelector('.metric-trend');if(label)label.textContent=vals[i][0];if(value)value.textContent=vals[i][1];if(trend)trend.textContent=vals[i][2];});
+    const welcome=document.getElementById('dashWelcome');if(welcome)welcome.textContent=currentDisplayName||(isAdmin()?'Administrador':'Usuario');
+    renderRoleRecent(rows);
+  }
+
+  // Usuarios del admin derivados de la auditoría real.
+  window.loadAdminUsers=async function(){
+    if(!isAdmin())return;
+    const {data,error}=await supabaseClient.from('auditoria_custodia').select('*').order('fecha_solicitud',{ascending:false}).limit(2000);
+    if(error){console.error('USUARIOS ADMIN:',error);return;}
+    roleAllAudit=Array.isArray(data)?data:[];
+    const map=new Map();
+    roleAllAudit.forEach(r=>{const k=userKey(r);if(!k)return;if(!map.has(k))map.set(k,{key:k,id:rowUserId(r),name:rowName(r),email:rowEmail(r),rows:[],last:r.fecha_solicitud||''});const u=map.get(k);u.rows.push(r);if(String(r.fecha_solicitud||'')>String(u.last||''))u.last=r.fecha_solicitud;});
+    adminUsersCache=[...map.values()].sort((a,b)=>String(b.last).localeCompare(String(a.last)));
+    document.getElementById('admUsersTotal').textContent=adminUsersCache.length;
+    document.getElementById('admFilesTotal').textContent=roleAllAudit.length;
+    document.getElementById('admPendingTotal').textContent=roleAllAudit.filter(r=>r.estado==='PENDIENTE').length;
+    document.getElementById('admRejectedTotal').textContent=roleAllAudit.filter(r=>r.estado==='RECHAZADO').length;
+    renderAdminUsers();populateAdminFileFilter();
+  };
+  window.renderAdminUsers=function(){
+    const body=document.getElementById('adminUsersBody');if(!body)return;const q=norm(document.getElementById('adminUserSearch')?.value||'');
+    const rows=adminUsersCache.filter(u=>!q||norm(u.name+' '+u.email).includes(q));
+    body.innerHTML=rows.length?rows.map(u=>{const a=u.rows.filter(r=>r.estado==='APROBADO').length,p=u.rows.filter(r=>r.estado==='PENDIENTE').length,x=u.rows.filter(r=>r.estado==='RECHAZADO').length;return `<tr>
+      <td><div class="flex items-center gap-2"><span class="admin-user-avatar">${escapeHtml((u.name||'?').slice(0,1).toUpperCase())}</span><span class="admin-user-name">${escapeHtml(u.name)}</span></div></td><td>${escapeHtml(u.email||'—')}</td><td><b>${u.rows.length}</b></td><td><span class="text-emerald-600 font-bold">${a}</span></td><td><span class="text-amber-600 font-bold">${p}</span></td><td><span class="text-red-500 font-bold">${x}</span></td><td>${formatShortDate(u.last)}</td><td><button class="secondary-btn" onclick="openAdminUserDetail('${escapeHtml(u.key)}')">Ver actividad</button></td>
+    </tr>`}).join(''):'<tr><td colspan="8" class="p-8 text-center text-slate-400">No se encontraron usuarios con actividad.</td></tr>';
+  };
+  window.openAdminUserDetail=function(key){
+    const u=adminUsersCache.find(x=>x.key===key);if(!u)return;
+    const box=document.getElementById('adminUserDetail');box.classList.remove('hidden');
+    document.getElementById('adminUserDetailName').textContent=u.name;document.getElementById('adminUserDetailEmail').textContent=u.email||u.id||'—';
+    document.getElementById('audUserTotal').textContent=u.rows.length;document.getElementById('audUserApproved').textContent=u.rows.filter(r=>r.estado==='APROBADO').length;document.getElementById('audUserPending').textContent=u.rows.filter(r=>r.estado==='PENDIENTE').length;document.getElementById('audUserRejected').textContent=u.rows.filter(r=>r.estado==='RECHAZADO').length;
+    const body=document.getElementById('adminUserFilesBody');body.innerHTML=u.rows.slice(0,100).map(r=>`<tr><td>${escapeHtml(r.nombre_archivo||'Archivo')}</td><td>${escapeHtml(r.ruta_relativa||r.carpeta||'—')}</td><td class="font-mono text-[9px]">${r.hash_sha256?escapeHtml(r.hash_sha256.slice(0,14))+'…':'N/A'}</td><td>${statusPill(r.estado)}</td><td>${formatShortDate(r.fecha_solicitud)}</td></tr>`).join('');
+    adminUserFilter=key;
+    box.scrollIntoView({behavior:'smooth',block:'start'});
+  };
+  window.closeAdminUserDetail=function(){document.getElementById('adminUserDetail')?.classList.add('hidden');};
+  window.openAdminUserFiles=function(key){adminUserFilter=key;showView('gestor');setTimeout(()=>{const s=document.getElementById('adminFileUserFilter');if(s)s.value=key;loadFilesView();},0);};
+
+  // Realtime: refresca la experiencia visible sin depender de solicitudes_lote.
+  const baseListen=listenRealtime;
+  listenRealtime=function(){
+    try{baseListen();}catch(e){console.warn(e);}
+    if(!window.__dvRoleAuditChannel){
+      window.__dvRoleAuditChannel=supabaseClient.channel('role_ui_audit').on('postgres_changes',{event:'*',schema:'public',table:'auditoria_custodia'},()=>{loadAudit();loadCola();if(isAdmin()&&document.getElementById('view-usuarios')?.classList.contains('active'))loadAdminUsers();}).subscribe();
+    }
+  };
+
+  // Refresco posterior al ingreso/sesión restaurada.
+  const baseEnter=enterApp;
+  enterApp=function(){baseEnter();applyRoleExperience();setTimeout(()=>{loadAudit();loadCola();if(isAdmin())loadAdminUsers();},80);};
+
+  document.addEventListener('DOMContentLoaded',()=>{ensureAdminFileFilter();applyRoleExperience();});
+  window.addEventListener('load',()=>setTimeout(applyRoleExperience,100));
+})();
+</script>\n
 </body>
 </html>
