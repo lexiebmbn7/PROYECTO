@@ -2226,8 +2226,8 @@ body {
       <div class="explorer-foot"><span><i class="fa-solid fa-shield-halved"></i> Custodia DLP activa</span></div>
     </div>
     <div class="file-content-panel">
-      <div class="file-content-head"><div><span class="breadcrumb">Corporativo <i class="fa-solid fa-chevron-right"></i> <b id="currentFolderLabel">Todos los archivos</b></span><h3 id="filePanelTitle">Mis archivos</h3></div><select id="fileFolderFilter" class="hidden"><option value="">Todas las carpetas</option></select><div class="flex flex-wrap gap-2"><button onclick="document.getElementById('fileInput').click()" class="primary-btn"><i class="fa-solid fa-file-arrow-up"></i>Seleccionar archivos</button><button onclick="document.getElementById('folderInput').click()" class="secondary-btn"><i class="fa-solid fa-folder-open"></i>Seleccionar carpeta</button></div></div>
-      <div id="dropZone" class="upload-zone compact-upload" onclick="document.getElementById('fileInput').click()"><i class="fa-solid fa-arrow-up-from-bracket"></i><div><b>Arrastra archivos aquí</b><span>o selecciona archivos / una carpeta completa para enviarlos a custodia</span></div><div class="flex flex-wrap gap-2 justify-center"><button type="button" class="secondary-btn" onclick="event.stopPropagation();document.getElementById('fileInput').click()"><i class="fa-solid fa-file"></i>Seleccionar archivos</button><button type="button" class="secondary-btn" onclick="event.stopPropagation();document.getElementById('folderInput').click()"><i class="fa-solid fa-folder-open"></i>Seleccionar carpeta</button></div><input type="file" id="fileInput" class="hidden" multiple onchange="handleFilesSelected(this.files,false)"><input type="file" id="folderInput" class="hidden" webkitdirectory directory multiple onchange="handleFilesSelected(this.files,true)"></div>
+      <div class="file-content-head"><div><span class="breadcrumb">Corporativo <i class="fa-solid fa-chevron-right"></i> <b id="currentFolderLabel">Todos los archivos</b></span><h3 id="filePanelTitle">Mis archivos</h3></div><select id="fileFolderFilter" class="hidden"><option value="">Todas las carpetas</option></select><div class="flex flex-wrap gap-2"><button onclick="document.getElementById('fileInput').click()" class="primary-btn"><i class="fa-solid fa-file-arrow-up"></i>Seleccionar archivos</button><button onclick="seleccionarCarpetaReal()" class="secondary-btn"><i class="fa-solid fa-folder-open"></i>Seleccionar carpeta</button></div></div>
+      <div id="dropZone" class="upload-zone compact-upload" onclick="document.getElementById('fileInput').click()"><i class="fa-solid fa-arrow-up-from-bracket"></i><div><b>Arrastra archivos aquí</b><span>o selecciona archivos / una carpeta completa para enviarlos a custodia</span></div><div class="flex flex-wrap gap-2 justify-center"><button type="button" class="secondary-btn" onclick="event.stopPropagation();document.getElementById('fileInput').click()"><i class="fa-solid fa-file"></i>Seleccionar archivos</button><button type="button" class="secondary-btn" onclick="event.stopPropagation();seleccionarCarpetaReal()"><i class="fa-solid fa-folder-open"></i>Seleccionar carpeta</button></div><input type="file" id="fileInput" class="hidden" multiple onchange="handleFilesSelected(this.files,false)"><input type="file" id="folderInput" class="hidden" webkitdirectory directory multiple onchange="handleFilesSelected(this.files,true)"></div>
       <div id="selectedFilesList" class="mt-3 hidden rounded-lg border border-slate-200 bg-slate-50 p-3"></div>
       <div id="batchActionBar" class="mt-3 hidden flex flex-wrap items-center gap-2"><button onclick="submitUploadBatch()" id="uploadBatchBtn" class="primary-btn" disabled><i class="fa-solid fa-paper-plane"></i>Enviar lote</button><button onclick="clearSelectedBatch()" id="clearSelectionBtn" class="secondary-btn"><i class="fa-solid fa-trash-can"></i>Limpiar</button><button onclick="cancelUploadBatch()" id="cancelUploadBtn" class="secondary-btn hidden" style="color:#dc2626;border-color:#fecaca"><i class="fa-solid fa-ban"></i>Cancelar carga</button><span id="batchSelectionMeta" class="text-[10px] text-slate-500 ml-auto"></span></div>
       <div id="uploadStatus" class="mt-3 text-sm font-semibold hidden"></div>
@@ -3787,6 +3787,67 @@ let dvExplorerFolder = '';
 
 function dvEntryKey(entry){
   return [entry.relativePath, entry.file.size, entry.file.lastModified].join('|');
+}
+
+// Selector real de carpeta para navegadores Chromium (Chrome/Brave/Edge).
+// Permite elegir LA CARPETA directamente y recorre sus subcarpetas.
+async function seleccionarCarpetaReal(){
+  if(dvUploadInProgress) return;
+
+  // API moderna: abre un selector de directorio real.
+  if('showDirectoryPicker' in window){
+    try{
+      const directorio = await window.showDirectoryPicker({ mode: 'read' });
+      const entradas = [];
+
+      async function recorrerDirectorio(handle, rutaBase){
+        for await (const [nombre, hijo] of handle.entries()){
+          if(hijo.kind === 'file'){
+            const file = await hijo.getFile();
+            entradas.push({
+              file,
+              relativePath: `${rutaBase}/${nombre}`
+            });
+          }else if(hijo.kind === 'directory'){
+            await recorrerDirectorio(hijo, `${rutaBase}/${nombre}`);
+          }
+        }
+      }
+
+      await recorrerDirectorio(directorio, directorio.name);
+      entradas.sort((a,b)=>a.relativePath.localeCompare(b.relativePath,'es',{numeric:true,sensitivity:'base'}));
+
+      if(!entradas.length){
+        const status=document.getElementById('uploadStatus');
+        if(status){
+          status.classList.remove('hidden');
+          status.className='mt-3 text-sm font-semibold text-amber-600';
+          status.innerHTML='<i class="fa-solid fa-triangle-exclamation mr-2"></i>La carpeta seleccionada no contiene archivos.';
+        }
+        return;
+      }
+
+      // Una carpeta reemplaza cualquier selección suelta anterior.
+      dvSelectionMode='folder';
+      dvSelectedFolderName=directorio.name || 'Carpeta';
+      dvSelectedEntries=entradas;
+
+      const fi=document.getElementById('fileInput'); if(fi) fi.value='';
+      const fo=document.getElementById('folderInput'); if(fo) fo.value='';
+      renderSelectedFiles();
+      return;
+
+    }catch(error){
+      // Cancelar el selector no es un error.
+      if(error && error.name === 'AbortError') return;
+      console.warn('[DIRECTORY PICKER] Se usará el selector compatible:', error);
+    }
+  }
+
+  // Respaldo para navegadores sin showDirectoryPicker.
+  // Sigue usando webkitdirectory, preservando webkitRelativePath.
+  const fallback=document.getElementById('folderInput');
+  if(fallback) fallback.click();
 }
 
 handleFilesSelected = function(fileList, fromFolder=false){
