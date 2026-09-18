@@ -7,7 +7,7 @@ import requests
 from uuid import UUID, uuid4
 from typing import List
 
-from fastapi import FastAPI, File, UploadFile, Request, Form, HTTPException
+from fastapi import FastAPI, File, UploadFile, Request, Form, HTTPException, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
@@ -1774,12 +1774,26 @@ def obtener_nombre_correlativo(nombre_original: str) -> str:
 
 
 # ============================================================
+# NOTIFICACIÓN TELEGRAM EN SEGUNDO PLANO
+# ============================================================
+
+def notificar_menu_pendientes_background():
+    for chat_id in AUTHORIZED_CHAT_IDS:
+        try:
+            resultado = mostrar_menu_usuarios(chat_id)
+            print(f"[TELEGRAM BATCH BG] chat={chat_id} resultado={resultado}")
+        except Exception as error:
+            print(f"[TELEGRAM BATCH BG ERROR] chat={chat_id}: {error}")
+
+
+# ============================================================
 # SUBIR VARIOS ARCHIVOS / CARPETA COMPLETA
 # ============================================================
 
 @app.post("/upload-batch")
 async def registrar_lote_custodia(
     request: Request,
+    background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
     relative_paths: List[str] = Form(default=[]),
     carpeta: str = Form("PLANOS"),
@@ -1838,11 +1852,15 @@ async def registrar_lote_custodia(
         lote_uuid = str(uuid4())
 
     # --------------------------------------------------------
-    # WEBHOOK TELEGRAM (una sola vez por lote)
+    # WEBHOOK TELEGRAM
     # --------------------------------------------------------
-    base_url_actual = obtener_base_url_request(request)
-    estado_webhook = configurar_webhook_url(base_url_actual)
-    print("[WEBHOOK BATCH]", estado_webhook)
+    # Ya se configura al iniciar Railway. No lo verificamos en cada lote
+    # para no mantener abierta la petición del navegador innecesariamente.
+    estado_webhook = {
+        "ok": True,
+        "changed": False,
+        "source": "startup"
+    }
 
     procesados = []
     errores = []
@@ -1945,24 +1963,15 @@ async def registrar_lote_custodia(
             })
 
     # --------------------------------------------------------
-    # TELEGRAM: UNA SOLA NOTIFICACIÓN AL TERMINAR EL LOTE
+    # TELEGRAM: NOTIFICAR DESPUÉS DE RESPONDER AL NAVEGADOR
     # --------------------------------------------------------
+    # Así un retraso de Telegram no provoca un 502 visual aunque el lote
+    # ya haya sido registrado correctamente en Supabase/RAM.
     resultados_telegram = []
     enviados_correctamente = 0
 
     if procesados:
-        for chat_id in AUTHORIZED_CHAT_IDS:
-            resultado = mostrar_menu_usuarios(chat_id)
-            ok = bool(resultado.get("ok"))
-
-            if ok:
-                enviados_correctamente += 1
-
-            resultados_telegram.append({
-                "chat_id": chat_id,
-                "ok": ok,
-                "description": resultado.get("description", "OK"),
-            })
+        background_tasks.add_task(notificar_menu_pendientes_background)
 
     if not procesados and errores:
         raise HTTPException(
@@ -1996,6 +2005,7 @@ async def registrar_lote_custodia(
         "errores": errores,
         "telegram_enviados": enviados_correctamente,
         "telegram": resultados_telegram,
+        "telegram_notificacion": "en_cola" if procesados else "no_aplica",
         "webhook": estado_webhook,
     }
 
