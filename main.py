@@ -573,6 +573,22 @@ def telegram_request(
             }
 
 
+        # Telegram responde HTTP 400 cuando se intenta editar un mensaje
+        # con exactamente el mismo contenido/botones. Para la navegación del
+        # panel esto no representa un fallo real.
+        if (
+            metodo == "editMessageText"
+            and response.status_code == 400
+            and "message is not modified"
+            in str(data.get("description", "")).lower()
+        ):
+            print("[TELEGRAM] editMessageText sin cambios; se considera OK")
+            return {
+                "ok": True,
+                "unchanged": True,
+                "description": "Sin cambios",
+            }
+
         print(
             f"[TELEGRAM] {metodo} "
             f"HTTP={response.status_code} "
@@ -597,6 +613,180 @@ def telegram_request(
         }
 
 
+
+
+# ============================================================
+# PANEL PRINCIPAL INLINE DE TELEGRAM
+# ============================================================
+
+def quitar_teclado_inferior(chat_id):
+    """Retira cualquier ReplyKeyboard antiguo que haya quedado en Telegram.
+
+    Versiones anteriores del bot mostraban un teclado persistente abajo.
+    El panel actual usa exclusivamente botones inline dentro del mensaje.
+    """
+    resultado = telegram_request(
+        "sendMessage",
+        {
+            "chat_id": chat_id,
+            "text": "Actualizando panel de custodia…",
+            "reply_markup": {"remove_keyboard": True},
+            "disable_notification": True,
+        },
+    )
+
+    # El mensaje solo sirve para retirar el teclado; si Telegram devuelve su ID,
+    # se elimina para no ensuciar el chat.
+    try:
+        message_id = (resultado.get("result") or {}).get("message_id")
+        if resultado.get("ok") and message_id:
+            telegram_request(
+                "deleteMessage",
+                {"chat_id": chat_id, "message_id": message_id},
+            )
+    except Exception as error:
+        print("[TELEGRAM REMOVE KEYBOARD]", error)
+
+    return resultado
+
+
+def obtener_resumen_panel():
+    """Resumen simple para el panel principal del custodio."""
+    try:
+        respuesta = (
+            supabase
+            .table("auditoria_custodia")
+            .select("estado,solicitante_id,lote_id,ruta_relativa")
+            .execute()
+        )
+        registros = respuesta.data or []
+    except Exception as error:
+        print("[PANEL RESUMEN ERROR]", error)
+        return {
+            "pendientes": 0,
+            "aprobados": 0,
+            "rechazados": 0,
+            "usuarios_pendientes": 0,
+            "carpetas_pendientes": 0,
+            "archivos_sueltos_pendientes": 0,
+        }
+
+    pendientes = [r for r in registros if r.get("estado") == "PENDIENTE"]
+    aprobados = sum(1 for r in registros if r.get("estado") == "APROBADO")
+    rechazados = sum(1 for r in registros if r.get("estado") == "RECHAZADO")
+
+    usuarios = {
+        str(r.get("solicitante_id"))
+        for r in pendientes
+        if r.get("solicitante_id")
+    }
+
+    carpetas = set()
+    archivos_sueltos = 0
+
+    for registro in pendientes:
+        lote_id = str(registro.get("lote_id") or "").strip()
+        ruta = str(registro.get("ruta_relativa") or "").replace("\\", "/").strip("/")
+        if lote_id and "/" in ruta:
+            carpetas.add(lote_id)
+        else:
+            archivos_sueltos += 1
+
+    return {
+        "pendientes": len(pendientes),
+        "aprobados": aprobados,
+        "rechazados": rechazados,
+        "usuarios_pendientes": len(usuarios),
+        "carpetas_pendientes": len(carpetas),
+        "archivos_sueltos_pendientes": archivos_sueltos,
+    }
+
+
+def mostrar_panel_principal(chat_id, message_id=None):
+    resumen = obtener_resumen_panel()
+
+    texto = (
+        "🛡️ DataVault DLP - GM Ingenieros\n\n"
+        "Panel de custodia\n\n"
+        f"👥 Usuarios con pendientes: {resumen['usuarios_pendientes']}\n"
+        f"📁 Carpetas pendientes: {resumen['carpetas_pendientes']}\n"
+        f"📄 Archivos sueltos: {resumen['archivos_sueltos_pendientes']}\n"
+        f"🟡 Documentos pendientes: {resumen['pendientes']}"
+    )
+
+    payload = {
+        "chat_id": chat_id,
+        "text": texto,
+        "reply_markup": {
+            "inline_keyboard": [
+                [
+                    {
+                        "text": "👥 Usuarios",
+                        "callback_data": "panel:usuarios",
+                    },
+                    {
+                        "text": "🔄 Actualizar",
+                        "callback_data": "panel:actualizar",
+                    },
+                ],
+                [
+                    {
+                        "text": "📊 Estado",
+                        "callback_data": "panel:estado",
+                    }
+                ],
+            ]
+        },
+    }
+
+    if message_id:
+        payload["message_id"] = message_id
+        return telegram_request("editMessageText", payload)
+
+    return telegram_request("sendMessage", payload)
+
+
+def mostrar_estado_panel(chat_id, message_id):
+    resumen = obtener_resumen_panel()
+
+    texto = (
+        "📊 ESTADO DATAVAULT\n\n"
+        f"🟡 Pendientes: {resumen['pendientes']}\n"
+        f"🟢 Aprobados: {resumen['aprobados']}\n"
+        f"🔴 Rechazados: {resumen['rechazados']}\n\n"
+        f"👥 Usuarios con pendientes: {resumen['usuarios_pendientes']}\n"
+        f"📁 Carpetas pendientes: {resumen['carpetas_pendientes']}\n"
+        f"📄 Archivos sueltos: {resumen['archivos_sueltos_pendientes']}"
+    )
+
+    return telegram_request(
+        "editMessageText",
+        {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": texto,
+            "reply_markup": {
+                "inline_keyboard": [
+                    [
+                        {
+                            "text": "👥 Usuarios",
+                            "callback_data": "panel:usuarios",
+                        },
+                        {
+                            "text": "🔄 Actualizar",
+                            "callback_data": "panel:estado",
+                        },
+                    ],
+                    [
+                        {
+                            "text": "🏠 Panel",
+                            "callback_data": "panel:inicio",
+                        }
+                    ],
+                ]
+            },
+        },
+    )
 
 
 # ============================================================
@@ -2064,14 +2254,30 @@ async def recibir_respuesta_telegram(request: Request):
 
         texto_lower = texto.lower()
 
-        # /start, /menu y /pendientes abren directamente el panel.
+        # /start y /menu muestran el panel INLINE. También retiramos
+        # cualquier teclado inferior que haya quedado de versiones antiguas.
         if (
             texto_lower.startswith("/start")
             or texto_lower.startswith("/menu")
-            or texto_lower.startswith("/pendientes")
         ):
+            quitar_teclado_inferior(chat_id)
+            mostrar_panel_principal(chat_id)
+            return {"status": "panel_principal"}
+
+        # /pendientes abre directamente los usuarios pendientes.
+        if texto_lower.startswith("/pendientes"):
             mostrar_menu_usuarios(chat_id)
             return {"status": "menu_usuarios"}
+
+        # Compatibilidad temporal: si Telegram todavía muestra el teclado viejo,
+        # estos textos siguen funcionando hasta que /start lo retire.
+        if texto in ("👥 Usuarios", "🔄 Actualizar"):
+            mostrar_menu_usuarios(chat_id)
+            return {"status": "menu_usuarios"}
+
+        if texto == "📊 Estado":
+            mostrar_panel_principal(chat_id)
+            return {"status": "panel_principal"}
 
         if texto_lower.startswith("/id"):
             respuesta = (
@@ -2079,9 +2285,12 @@ async def recibir_respuesta_telegram(request: Request):
                 f"{user_id}"
             )
         elif texto_lower.startswith("/estado"):
+            resumen = obtener_resumen_panel()
             respuesta = (
-                "🟢 DataVault DLP activo.\n\n"
-                "Tu cuenta está autorizada."
+                "📊 ESTADO DATAVAULT\n\n"
+                f"🟡 Pendientes: {resumen['pendientes']}\n"
+                f"🟢 Aprobados: {resumen['aprobados']}\n"
+                f"🔴 Rechazados: {resumen['rechazados']}"
             )
         else:
             respuesta = (
@@ -2128,6 +2337,33 @@ async def recibir_respuesta_telegram(request: Request):
         print(
             f"[TELEGRAM CALLBACK] user={user_id} data={action_data}"
         )
+
+        # ----------------------------------------------------
+        # PANEL PRINCIPAL INLINE
+        # ----------------------------------------------------
+        if action_data in ("panel:inicio", "panel:actualizar"):
+            telegram_request(
+                "answerCallbackQuery",
+                {"callback_query_id": callback_id},
+            )
+            mostrar_panel_principal(chat_id, message_id)
+            return {"status": "panel_principal"}
+
+        if action_data == "panel:usuarios":
+            telegram_request(
+                "answerCallbackQuery",
+                {"callback_query_id": callback_id},
+            )
+            mostrar_menu_usuarios(chat_id, message_id)
+            return {"status": "menu_usuarios"}
+
+        if action_data == "panel:estado":
+            telegram_request(
+                "answerCallbackQuery",
+                {"callback_query_id": callback_id},
+            )
+            mostrar_estado_panel(chat_id, message_id)
+            return {"status": "panel_estado"}
 
         # ----------------------------------------------------
         # NAVEGACIÓN: MENÚ DE USUARIOS
