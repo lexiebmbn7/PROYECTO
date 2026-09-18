@@ -736,7 +736,7 @@
                         </th>
 
                         <th class="p-3">
-                            Hash SHA-256
+                            Hash / Contenido
                         </th>
 
                         <th class="p-3">
@@ -1410,224 +1410,452 @@
 
 
     // =======================================================
-    // CARGAR AUDITORÍA
+    // CARGAR AUDITORÍA - VISTA AGRUPADA POR CARPETAS
     // =======================================================
 
-    async function loadAuditData() {
-        const {
-            data,
-            error
-        } =
-            await supabaseClient
-                .from(
-                    'auditoria_custodia'
-                )
-                .select(
-                    '*'
-                )
-                .order('fecha_solicitud', { ascending: false })
-                .limit(
-                    10
-                );
-        if (error) {
-            console.error(
-                "Error al consultar Supabase:",
-                error
-            );
-            return;
-        }
-        const tbody =
-            document
-                .getElementById(
-                    'auditTableBody'
-                );
-        tbody.innerHTML =
-            '';
-        if (
-            !data ||
-            data.length === 0
-        ) {
-            tbody.innerHTML = `
+    function estadoVisual(estado) {
+        const valor = String(estado || 'PENDIENTE').toUpperCase();
 
-                <tr>
-
-                    <td
-                        colspan="4"
-                        class="
-                            p-4
-                            text-center
-                            text-gray-500
-                        "
-                    >
-                        No existen registros.
-                    </td>
-
-                </tr>
-
-            `;
-
-            return;
-
+        if (valor === 'APROBADO') {
+            return {
+                texto: 'APROBADO',
+                clase: 'bg-green-500/20 text-green-400 border-green-500/30'
+            };
         }
 
+        if (valor === 'RECHAZADO') {
+            return {
+                texto: 'RECHAZADO',
+                clase: 'bg-red-500/20 text-red-400 border-red-500/30'
+            };
+        }
 
-        data.forEach(
-            row => {
+        if (valor === 'PARCIAL') {
+            return {
+                texto: 'PARCIAL',
+                clase: 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+            };
+        }
 
-                let badgeClass =
-                    "bg-yellow-500/20 " +
-                    "text-yellow-400 " +
-                    "border-yellow-500/30";
-
-
-                if (
-                    row.estado ===
-                    "APROBADO"
-                ) {
-
-                    badgeClass =
-                        "bg-green-500/20 " +
-                        "text-green-400 " +
-                        "border-green-500/30";
-
-                }
+        return {
+            texto: 'PENDIENTE',
+            clase: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
+        };
+    }
 
 
-                if (
-                    row.estado ===
-                    "RECHAZADO"
-                ) {
+    function badgeEstadoHtml(estado) {
+        const info = estadoVisual(estado);
 
-                    badgeClass =
-                        "bg-red-500/20 " +
-                        "text-red-400 " +
-                        "border-red-500/30";
-
-                }
-
-
-                const nombre =
-                    escapeHtml(
-                        row.nombre_archivo ||
-                        'Sin nombre'
-                    );
+        return `
+            <span
+                class="
+                    px-2.5 py-1 rounded-full text-xs border
+                    ${info.clase}
+                "
+            >
+                ${info.texto}
+            </span>
+        `;
+    }
 
 
-                const usuario =
-                    escapeHtml(
-
-                        row.usuario_solicitante ||
-
-                        currentDisplayName ||
-
-                        currentUserEmail ||
-
-                        'Usuario desconocido'
-
-                    );
-
-
-                const estado =
-                    escapeHtml(
-                        row.estado ||
-                        'PENDIENTE'
-                    );
-
-
-                const hashCompleto =
-                    row.hash_sha256 ||
-                    '';
-
-
-                const hashCorto =
-                    hashCompleto
-
-                        ?
-
-                        escapeHtml(
-                            hashCompleto.substring(
-                                0,
-                                16
-                            )
-                        ) + '...'
-
-                        :
-
-                        'N/A';
-
-
-                tbody.innerHTML += `
-
-                    <tr
-                        class="
-                            border-b
-                            border-gray-700/50
-                            hover:bg-gray-700/30
-                            transition
-                        "
-                    >
-
-                        <td
-                            class="
-                                p-3
-                                font-medium
-                                text-white
-                            "
-                        >
-                            ${nombre}
-                        </td>
-
-
-                        <td
-                            class="
-                                p-3
-                                text-gray-400
-                            "
-                        >
-                            ${usuario}
-                        </td>
-
-
-                        <td
-                            class="
-                                p-3
-                                font-mono
-                                text-xs
-                                text-blue-300
-                            "
-                            title="${escapeHtml(hashCompleto)}"
-                        >
-                            ${hashCorto}
-                        </td>
-
-
-                        <td
-                            class="p-3"
-                        >
-
-                            <span
-                                class="
-                                    px-2.5
-                                    py-1
-                                    rounded-full
-                                    text-xs
-                                    border
-                                    ${badgeClass}
-                                "
-                            >
-                                ${estado}
-                            </span>
-
-                        </td>
-
-                    </tr>
-
-                `;
-
-            }
-
+    function estadoGrupo(rows) {
+        const estados = new Set(
+            rows.map(row => String(row.estado || 'PENDIENTE').toUpperCase())
         );
 
+        if (estados.size === 1) {
+            return Array.from(estados)[0];
+        }
+
+        return 'PARCIAL';
+    }
+
+
+    function rutaNormalizadaAuditoria(row) {
+        return String(row.ruta_relativa || '')
+            .replace(/\\/g, '/')
+            .replace(/^\/+|\/+$/g, '');
+    }
+
+
+    function esRegistroDeCarpeta(row) {
+        const ruta = rutaNormalizadaAuditoria(row);
+        return Boolean(row.lote_id && ruta.includes('/'));
+    }
+
+
+    function nombreCarpetaRaiz(rows) {
+        for (const row of rows) {
+            const ruta = rutaNormalizadaAuditoria(row);
+            if (ruta.includes('/')) {
+                return ruta.split('/')[0] || 'Carpeta';
+            }
+        }
+        return 'Carpeta';
+    }
+
+
+    function crearArbolCarpeta(rows) {
+        const raiz = {
+            carpetas: {},
+            archivos: []
+        };
+
+        const nombreRaiz = nombreCarpetaRaiz(rows);
+
+        rows.forEach(row => {
+            let partes = rutaNormalizadaAuditoria(row)
+                .split('/')
+                .filter(Boolean);
+
+            if (partes[0] === nombreRaiz) {
+                partes = partes.slice(1);
+            }
+
+            if (!partes.length) {
+                partes = [row.nombre_archivo || 'Archivo'];
+            }
+
+            const nombreArchivo = partes.pop() || row.nombre_archivo || 'Archivo';
+            let nodo = raiz;
+
+            partes.forEach(nombreCarpeta => {
+                if (!nodo.carpetas[nombreCarpeta]) {
+                    nodo.carpetas[nombreCarpeta] = {
+                        carpetas: {},
+                        archivos: []
+                    };
+                }
+
+                nodo = nodo.carpetas[nombreCarpeta];
+            });
+
+            nodo.archivos.push({
+                row,
+                nombre: nombreArchivo
+            });
+        });
+
+        return raiz;
+    }
+
+
+    function renderArchivoArbol(item) {
+        const row = item.row;
+        const hash = String(row.hash_sha256 || '');
+        const hashCorto = hash ? escapeHtml(hash.substring(0, 12)) + '...' : 'N/A';
+
+        return `
+            <div
+                class="
+                    flex items-center justify-between gap-3
+                    py-2 px-3 rounded-lg
+                    bg-gray-900/30 border border-gray-700/40
+                "
+            >
+                <div class="min-w-0 flex items-center gap-2">
+                    <span>📄</span>
+                    <span class="truncate text-gray-200">
+                        ${escapeHtml(item.nombre)}
+                    </span>
+                </div>
+
+                <div class="flex items-center gap-3 shrink-0">
+                    <span
+                        class="hidden md:inline font-mono text-[11px] text-blue-300"
+                        title="${escapeHtml(hash)}"
+                    >
+                        ${hashCorto}
+                    </span>
+                    ${badgeEstadoHtml(row.estado)}
+                </div>
+            </div>
+        `;
+    }
+
+
+    function renderNodoArbol(nodo, nivel = 0) {
+        let html = '';
+
+        Object.keys(nodo.carpetas)
+            .sort((a, b) => a.localeCompare(b))
+            .forEach(nombre => {
+                const hijo = nodo.carpetas[nombre];
+                const totalInterno = contarArchivosArbol(hijo);
+
+                html += `
+                    <details
+                        class="
+                            rounded-lg border border-gray-700/50
+                            bg-gray-800/50 overflow-hidden
+                        "
+                    >
+                        <summary
+                            class="
+                                cursor-pointer select-none
+                                px-3 py-2 text-gray-200
+                                hover:bg-gray-700/40 transition
+                            "
+                        >
+                            📁 ${escapeHtml(nombre)}
+                            <span class="ml-2 text-xs text-gray-500">
+                                ${totalInterno} archivo(s)
+                            </span>
+                        </summary>
+
+                        <div class="p-2 pl-4 space-y-2">
+                            ${renderNodoArbol(hijo, nivel + 1)}
+                        </div>
+                    </details>
+                `;
+            });
+
+        nodo.archivos
+            .sort((a, b) => a.nombre.localeCompare(b.nombre))
+            .forEach(item => {
+                html += renderArchivoArbol(item);
+            });
+
+        return html;
+    }
+
+
+    function contarArchivosArbol(nodo) {
+        let total = nodo.archivos.length;
+
+        Object.values(nodo.carpetas).forEach(hijo => {
+            total += contarArchivosArbol(hijo);
+        });
+
+        return total;
+    }
+
+
+    function idDetalleCarpeta(loteId) {
+        return 'audit-folder-' + String(loteId || '')
+            .replace(/[^a-zA-Z0-9_-]/g, '');
+    }
+
+
+    function toggleAuditFolder(loteId) {
+        const detalle = document.getElementById(idDetalleCarpeta(loteId));
+        const icono = document.getElementById(idDetalleCarpeta(loteId) + '-icon');
+
+        if (!detalle) {
+            return;
+        }
+
+        const ahoraOculto = !detalle.classList.contains('hidden');
+        detalle.classList.toggle('hidden', ahoraOculto);
+
+        if (icono) {
+            icono.textContent = ahoraOculto ? '▶' : '▼';
+        }
+    }
+
+
+    function filaArchivoSuelto(row) {
+        const nombre = escapeHtml(row.nombre_archivo || 'Sin nombre');
+        const usuario = escapeHtml(
+            row.solicitante_nombre ||
+            row.usuario_solicitante ||
+            currentDisplayName ||
+            currentUserEmail ||
+            'Usuario desconocido'
+        );
+        const hashCompleto = String(row.hash_sha256 || '');
+        const hashCorto = hashCompleto
+            ? escapeHtml(hashCompleto.substring(0, 16)) + '...'
+            : 'N/A';
+
+        return `
+            <tr
+                class="
+                    border-b border-gray-700/50
+                    hover:bg-gray-700/30 transition
+                "
+            >
+                <td class="p-3 font-medium text-white">
+                    📄 ${nombre}
+                </td>
+
+                <td class="p-3 text-gray-400">
+                    ${usuario}
+                </td>
+
+                <td
+                    class="p-3 font-mono text-xs text-blue-300"
+                    title="${escapeHtml(hashCompleto)}"
+                >
+                    ${hashCorto}
+                </td>
+
+                <td class="p-3">
+                    ${badgeEstadoHtml(row.estado)}
+                </td>
+            </tr>
+        `;
+    }
+
+
+    function filasCarpeta(rows, loteId) {
+        const nombreRaiz = nombreCarpetaRaiz(rows);
+        const usuario = escapeHtml(
+            rows[0]?.solicitante_nombre ||
+            rows[0]?.usuario_solicitante ||
+            currentDisplayName ||
+            currentUserEmail ||
+            'Usuario desconocido'
+        );
+        const totalBytes = rows.reduce(
+            (suma, row) => suma + Number(row.tamano_bytes || 0),
+            0
+        );
+        const estado = estadoGrupo(rows);
+        const detalleId = idDetalleCarpeta(loteId);
+        const arbol = crearArbolCarpeta(rows);
+
+        return `
+            <tr
+                class="
+                    border-b border-gray-700/50
+                    hover:bg-gray-700/30 transition
+                "
+            >
+                <td class="p-3 font-medium text-white">
+                    <button
+                        type="button"
+                        onclick="toggleAuditFolder('${escapeHtml(String(loteId))}')"
+                        class="
+                            flex items-center gap-2 text-left
+                            hover:text-blue-300 transition
+                        "
+                    >
+                        <span id="${detalleId}-icon">▶</span>
+                        <span>📁 ${escapeHtml(nombreRaiz)}</span>
+                        <span class="text-xs text-gray-500">
+                            ${rows.length} archivo(s)
+                        </span>
+                    </button>
+                </td>
+
+                <td class="p-3 text-gray-400">
+                    ${usuario}
+                </td>
+
+                <td class="p-3 text-xs text-blue-300">
+                    ${rows.length} archivo(s) · ${formatearBytes(totalBytes)}
+                </td>
+
+                <td class="p-3">
+                    ${badgeEstadoHtml(estado)}
+                </td>
+            </tr>
+
+            <tr
+                id="${detalleId}"
+                class="hidden bg-gray-900/30"
+            >
+                <td colspan="4" class="p-3 md:p-4">
+                    <div
+                        class="
+                            rounded-xl border border-gray-700
+                            bg-gray-900/40 p-3
+                        "
+                    >
+                        <div class="mb-3 flex items-center justify-between gap-3">
+                            <div>
+                                <div class="font-semibold text-gray-100">
+                                    📂 ${escapeHtml(nombreRaiz)}
+                                </div>
+                                <div class="text-xs text-gray-500 mt-1">
+                                    Lote ${escapeHtml(String(loteId))}
+                                </div>
+                            </div>
+                            <div class="text-xs text-gray-400">
+                                ${formatearBytes(totalBytes)}
+                            </div>
+                        </div>
+
+                        <div class="space-y-2">
+                            ${renderNodoArbol(arbol)}
+                        </div>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }
+
+
+    async function loadAuditData() {
+        const { data, error } = await supabaseClient
+            .from('auditoria_custodia')
+            .select('*')
+            .order('fecha_solicitud', { ascending: false })
+            .limit(500);
+
+        if (error) {
+            console.error('Error al consultar Supabase:', error);
+            return;
+        }
+
+        const tbody = document.getElementById('auditTableBody');
+        tbody.innerHTML = '';
+
+        if (!data || data.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="4" class="p-4 text-center text-gray-500">
+                        No existen registros.
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        const grupos = [];
+        const carpetasPorLote = new Map();
+
+        data.forEach(row => {
+            if (esRegistroDeCarpeta(row)) {
+                const loteId = String(row.lote_id);
+
+                if (!carpetasPorLote.has(loteId)) {
+                    const grupo = {
+                        tipo: 'carpeta',
+                        loteId,
+                        rows: [],
+                        fecha: row.fecha_solicitud || ''
+                    };
+                    carpetasPorLote.set(loteId, grupo);
+                    grupos.push(grupo);
+                }
+
+                carpetasPorLote.get(loteId).rows.push(row);
+            } else {
+                grupos.push({
+                    tipo: 'archivo',
+                    row,
+                    fecha: row.fecha_solicitud || ''
+                });
+            }
+        });
+
+        grupos.sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
+
+        // Mostrar los 12 eventos/unidades más recientes. Una carpeta completa
+        // cuenta como una sola unidad visual, aunque tenga decenas de archivos.
+        const visibles = grupos.slice(0, 12);
+
+        visibles.forEach(grupo => {
+            if (grupo.tipo === 'carpeta') {
+                tbody.innerHTML += filasCarpeta(grupo.rows, grupo.loteId);
+            } else {
+                tbody.innerHTML += filaArchivoSuelto(grupo.row);
+            }
+        });
     }
 
 
