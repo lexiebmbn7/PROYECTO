@@ -522,7 +522,7 @@
                 mb-1
             "
         >
-            Cargar Archivo Sensible a Custodia
+            Cargar Archivos o Carpetas a Custodia
         </h3>
 
 
@@ -533,49 +533,102 @@
                 mb-4
             "
         >
-            Procesamiento Zero-Disk (RAM)
-            con hash SHA-256 automático
+            Carga por lotes Zero-Disk (RAM)
+            con hash SHA-256 por archivo
         </p>
 
 
+        <!-- Selección acumulativa de archivos -->
         <input
             type="file"
             id="fileInput"
             class="hidden"
-            onchange="uploadFile(this.files[0])"
+            multiple
+            onchange="agregarSeleccion(this.files, false)"
         >
 
-
-        <button
-            onclick="
-                document
-                    .getElementById('fileInput')
-                    .click()
-            "
-            class="
-                bg-blue-600
-                hover:bg-blue-500
-                px-5
-                py-2
-                rounded-lg
-                font-medium
-                text-sm
-                transition
-                text-white
-            "
+        <!-- Selección de una carpeta completa -->
+        <input
+            type="file"
+            id="folderInput"
+            class="hidden"
+            webkitdirectory
+            directory
+            multiple
+            onchange="agregarSeleccion(this.files, true)"
         >
-            Seleccionar Archivo
-        </button>
 
+        <div class="flex flex-wrap justify-center gap-2">
+
+            <button
+                id="selectFilesBtn"
+                onclick="document.getElementById('fileInput').click()"
+                class="bg-blue-600 hover:bg-blue-500 px-5 py-2 rounded-lg font-medium text-sm transition text-white"
+            >
+                <i class="fa-solid fa-file-circle-plus mr-2"></i>
+                Seleccionar archivos
+            </button>
+
+            <button
+                id="selectFolderBtn"
+                onclick="document.getElementById('folderInput').click()"
+                class="bg-indigo-600 hover:bg-indigo-500 px-5 py-2 rounded-lg font-medium text-sm transition text-white"
+            >
+                <i class="fa-solid fa-folder-open mr-2"></i>
+                Seleccionar carpeta
+            </button>
+
+        </div>
+
+        <div
+            id="selectionSummary"
+            class="hidden mt-4 w-full max-w-3xl mx-auto bg-gray-900/60 border border-gray-700 rounded-lg p-4 text-left"
+        >
+            <div class="flex flex-wrap justify-between gap-2 items-center">
+                <div>
+                    <div id="selectionCount" class="font-semibold text-gray-100"></div>
+                    <div id="selectionSize" class="text-xs text-gray-400 mt-1"></div>
+                </div>
+
+                <div class="flex flex-wrap gap-2">
+                    <button
+                        id="sendBatchBtn"
+                        onclick="uploadBatch()"
+                        class="bg-green-600 hover:bg-green-500 px-4 py-2 rounded-lg font-medium text-sm transition text-white"
+                    >
+                        <i class="fa-solid fa-paper-plane mr-2"></i>
+                        Enviar lote
+                    </button>
+
+                    <button
+                        id="clearSelectionBtn"
+                        onclick="limpiarSeleccion()"
+                        class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg font-medium text-sm transition text-white"
+                    >
+                        <i class="fa-solid fa-trash-can mr-2"></i>
+                        Limpiar
+                    </button>
+
+                    <button
+                        id="cancelUploadBtn"
+                        onclick="cancelarCarga()"
+                        class="hidden bg-red-600 hover:bg-red-500 px-4 py-2 rounded-lg font-medium text-sm transition text-white"
+                    >
+                        <i class="fa-solid fa-ban mr-2"></i>
+                        Cancelar carga
+                    </button>
+                </div>
+            </div>
+
+            <div
+                id="selectionPreview"
+                class="mt-3 text-xs text-gray-400 max-h-36 overflow-auto space-y-1"
+            ></div>
+        </div>
 
         <div
             id="uploadStatus"
-            class="
-                mt-4
-                text-sm
-                font-semibold
-                hidden
-            "
+            class="mt-4 text-sm font-semibold hidden"
         >
         </div>
 
@@ -1017,67 +1070,201 @@
 
 
     // =======================================================
-    // SUBIR ARCHIVO
+    // CARGA POR LOTES / CARPETAS
     // =======================================================
 
-    async function uploadFile(file) {
+    let selectedEntries = [];
+    let uploadController = null;
+    let uploadInProgress = false;
 
-        if (!file) {
 
+    function claveEntrada(entry) {
+        return [
+            entry.relativePath,
+            entry.file.size,
+            entry.file.lastModified
+        ].join('|');
+    }
+
+
+    function agregarSeleccion(fileList, desdeCarpeta) {
+
+        if (uploadInProgress || !fileList || !fileList.length) {
             return;
-
         }
 
-
-        const statusDiv =
-            document
-                .getElementById(
-                    'uploadStatus'
-                );
-
-
-        const fileInput =
-            document
-                .getElementById(
-                    'fileInput'
-                );
-
-
-        statusDiv.classList.remove(
-            'hidden'
+        const existentes = new Map(
+            selectedEntries.map(entry => [claveEntrada(entry), entry])
         );
 
+        Array.from(fileList).forEach(file => {
+            const relativePath = (
+                desdeCarpeta && file.webkitRelativePath
+                    ? file.webkitRelativePath
+                    : file.name
+            );
 
-        statusDiv.className =
-            "mt-4 text-sm text-yellow-400";
+            const entry = {
+                file,
+                relativePath
+            };
+
+            existentes.set(claveEntrada(entry), entry);
+        });
+
+        selectedEntries = Array.from(existentes.values());
+
+        // Permite volver a seleccionar el mismo input más adelante.
+        document.getElementById('fileInput').value = '';
+        document.getElementById('folderInput').value = '';
+
+        renderSeleccion();
+    }
 
 
-        statusDiv.innerHTML =
+    function formatearBytes(bytes) {
+        if (!Number.isFinite(bytes) || bytes <= 0) {
+            return '0 B';
+        }
+
+        const unidades = ['B', 'KB', 'MB', 'GB'];
+        let valor = bytes;
+        let indice = 0;
+
+        while (valor >= 1024 && indice < unidades.length - 1) {
+            valor /= 1024;
+            indice++;
+        }
+
+        return `${valor.toFixed(indice === 0 ? 0 : 2)} ${unidades[indice]}`;
+    }
+
+
+    function renderSeleccion() {
+
+        const summary = document.getElementById('selectionSummary');
+        const count = document.getElementById('selectionCount');
+        const size = document.getElementById('selectionSize');
+        const preview = document.getElementById('selectionPreview');
+
+        if (!selectedEntries.length) {
+            summary.classList.add('hidden');
+            preview.innerHTML = '';
+            return;
+        }
+
+        const totalBytes = selectedEntries.reduce(
+            (suma, entry) => suma + entry.file.size,
+            0
+        );
+
+        count.textContent = `${selectedEntries.length} archivo(s) seleccionado(s)`;
+        size.textContent = `Tamaño total: ${formatearBytes(totalBytes)}`;
+
+        const limiteVista = 12;
+        const visibles = selectedEntries.slice(0, limiteVista);
+
+        preview.innerHTML = visibles.map(entry => (
+            `<div class="flex justify-between gap-3">` +
+            `<span class="truncate">📄 ${escapeHtml(entry.relativePath)}</span>` +
+            `<span class="whitespace-nowrap">${formatearBytes(entry.file.size)}</span>` +
+            `</div>`
+        )).join('');
+
+        if (selectedEntries.length > limiteVista) {
+            preview.innerHTML += (
+                `<div class="pt-1 text-blue-300">` +
+                `+ ${selectedEntries.length - limiteVista} archivo(s) más...` +
+                `</div>`
+            );
+        }
+
+        summary.classList.remove('hidden');
+    }
+
+
+    function limpiarSeleccion() {
+
+        if (uploadInProgress) {
+            return;
+        }
+
+        selectedEntries = [];
+        document.getElementById('fileInput').value = '';
+        document.getElementById('folderInput').value = '';
+
+        const statusDiv = document.getElementById('uploadStatus');
+        statusDiv.classList.add('hidden');
+        statusDiv.innerHTML = '';
+
+        renderSeleccion();
+    }
+
+
+    function setEstadoCarga(cargando) {
+
+        uploadInProgress = cargando;
+
+        const sendBtn = document.getElementById('sendBatchBtn');
+        const clearBtn = document.getElementById('clearSelectionBtn');
+        const cancelBtn = document.getElementById('cancelUploadBtn');
+        const selectFilesBtn = document.getElementById('selectFilesBtn');
+        const selectFolderBtn = document.getElementById('selectFolderBtn');
+
+        [sendBtn, clearBtn, selectFilesBtn, selectFolderBtn].forEach(btn => {
+            if (btn) {
+                btn.disabled = cargando;
+                btn.classList.toggle('opacity-50', cargando);
+                btn.classList.toggle('cursor-not-allowed', cargando);
+            }
+        });
+
+        if (cancelBtn) {
+            cancelBtn.classList.toggle('hidden', !cargando);
+        }
+    }
+
+
+    function cancelarCarga() {
+
+        if (!uploadController) {
+            return;
+        }
+
+        uploadController.abort();
+        uploadController = null;
+
+        const statusDiv = document.getElementById('uploadStatus');
+        statusDiv.className = 'mt-4 text-sm font-semibold text-yellow-400';
+        statusDiv.innerHTML = (
+            '<i class="fa-solid fa-ban mr-2"></i>' +
+            'Carga cancelada. Si el servidor ya alcanzó a registrar algún archivo, ' +
+            'ese registro se conservará para mantener la trazabilidad.'
+        );
+
+        setEstadoCarga(false);
+    }
+
+
+    async function uploadBatch() {
+
+        if (!selectedEntries.length || uploadInProgress) {
+            return;
+        }
+
+        const statusDiv = document.getElementById('uploadStatus');
+
+        statusDiv.classList.remove('hidden');
+        statusDiv.className = 'mt-4 text-sm font-semibold text-yellow-400';
+        statusDiv.innerHTML = (
             '<i class="fa-solid fa-spinner fa-spin mr-2"></i>' +
-            'Procesando en RAM, registrando y notificando a Telegram...';
-
-
-        const formData =
-            new FormData();
-
-
-        formData.append(
-            'file',
-            file
+            `Procesando lote de ${selectedEntries.length} archivo(s) en RAM...`
         );
 
-
-        formData.append(
-            'carpeta',
-            'PLANOS'
-        );
-
+        setEstadoCarga(true);
+        uploadController = new AbortController();
 
         try {
-
-            // Obtener una sesión vigente justo antes de subir.
-            // FastAPI validará este token contra Supabase y tomará
-            // de allí el UID, nombre y correo reales del usuario.
             const { data: sessionData, error: sessionError } =
                 await supabaseClient.auth.getSession();
 
@@ -1085,132 +1272,94 @@
                 throw sessionError;
             }
 
-            const accessToken =
-                sessionData?.session?.access_token;
+            const accessToken = sessionData?.session?.access_token;
 
             if (!accessToken) {
-                throw new Error(
-                    'Tu sesión expiró. Inicia sesión nuevamente.'
-                );
+                throw new Error('Tu sesión expiró. Inicia sesión nuevamente.');
             }
 
-            const response =
-                await fetch(
+            const formData = new FormData();
 
-                    `${API_URL}/upload`,
+            selectedEntries.forEach(entry => {
+                formData.append('files', entry.file, entry.file.name);
+                formData.append('relative_paths', entry.relativePath);
+            });
 
-                    {
-                        method:
-                            'POST',
+            formData.append('carpeta', 'PLANOS');
 
-                        headers: {
-                            'Authorization':
-                                `Bearer ${accessToken}`
-                        },
-
-                        body:
-                            formData
-                    }
-
-                );
-
+            const response = await fetch(
+                `${API_URL}/upload-batch`,
+                {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`
+                    },
+                    body: formData,
+                    signal: uploadController.signal
+                }
+            );
 
             let data = {};
 
-
             try {
-
-                data =
-                    await response.json();
-
+                data = await response.json();
             } catch (_) {
-
             }
 
-
-            console.log(
-                "RESPUESTA /upload:",
-                data
-            );
-
+            console.log('RESPUESTA /upload-batch:', data);
 
             if (!response.ok) {
+                let mensaje = `Error HTTP ${response.status}`;
 
-                let mensaje =
-                    `Error HTTP ${response.status}`;
-
-
-                if (
-                    typeof data.detail ===
-                    'string'
-                ) {
-
-                    mensaje =
-                        data.detail;
-
+                if (typeof data.detail === 'string') {
+                    mensaje = data.detail;
+                } else if (data.detail && typeof data.detail === 'object') {
+                    mensaje = data.detail.mensaje || mensaje;
                 }
 
-                else if (
-                    data.detail &&
-                    typeof data.detail ===
-                    'object' &&
-                    data.detail.mensaje
-                ) {
-
-                    mensaje =
-                        data.detail.mensaje;
-
-                }
-
-
-                throw new Error(
-                    mensaje
-                );
-
+                throw new Error(mensaje);
             }
 
+            const registrados = data.total_registrados ?? 0;
+            const errores = data.total_errores ?? 0;
 
-            statusDiv.className =
-                "mt-4 text-sm text-green-400";
+            statusDiv.className = (
+                errores > 0
+                    ? 'mt-4 text-sm font-semibold text-yellow-400'
+                    : 'mt-4 text-sm font-semibold text-green-400'
+            );
 
-
-            statusDiv.innerHTML =
+            statusDiv.innerHTML = (
                 '<i class="fa-solid fa-circle-check mr-2"></i>' +
-                `¡Enviado a custodia! Telegram notificó a ` +
-                `${data.telegram_enviados || 0} custodio(s).`;
+                `Lote ${escapeHtml(data.lote_id || '')}: ` +
+                `${registrados} archivo(s) registrado(s)` +
+                (errores ? `, ${errores} con observaciones.` : '.')
+            );
 
+            selectedEntries = [];
+            renderSeleccion();
 
             await loadAuditData();
 
-
         } catch (err) {
 
-            console.error(
-                "UPLOAD ERROR:",
-                err
+            if (err && err.name === 'AbortError') {
+                // cancelarCarga() ya informa al usuario.
+                return;
+            }
+
+            console.error('BATCH UPLOAD ERROR:', err);
+
+            statusDiv.className = 'mt-4 text-sm font-semibold text-red-400';
+            statusDiv.innerHTML = (
+                '<i class="fa-solid fa-circle-xmark mr-2"></i>' +
+                'Error: ' + escapeHtml(err.message || 'Error desconocido')
             );
 
-
-            statusDiv.className =
-                "mt-4 text-sm text-red-400";
-
-
-            statusDiv.innerHTML =
-                '<i class="fa-solid fa-circle-xmark mr-2"></i>' +
-                'Error: ' +
-                escapeHtml(
-                    err.message ||
-                    'Error desconocido'
-                );
-
-
         } finally {
-
-            fileInput.value =
-                "";
-
+            uploadController = null;
+            setEstadoCarga(false);
         }
-
     }
 
 
