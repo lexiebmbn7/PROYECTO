@@ -4214,7 +4214,11 @@ window.addEventListener('DOMContentLoaded',()=>{
     document.querySelectorAll(`[data-nav="${name}"]`).forEach(el=>el.classList.toggle('role-hidden',!visible));
   }
   function renameNav(name,label){
-    document.querySelectorAll(`[data-nav="${name}"]`).forEach(el=>{const s=el.querySelector('span');if(s)s.textContent=label;});
+    document.querySelectorAll(`[data-nav="${name}"]`).forEach(el=>{
+      const s = el.querySelector(':scope > span.sidebar-full')
+        || el.querySelector(':scope > span:not(.dv-svg-icon):not(.top-badge)');
+      if(s) s.textContent = label;
+    });
   }
   function findCardByTitle(title){
     return [...document.querySelectorAll('#view-inicio .dashboard-card')].find(c=>norm(c.querySelector('h3')?.textContent)===norm(title));
