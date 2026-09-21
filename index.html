@@ -4174,7 +4174,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 \n<script id="datavault-role-v3">
 /* =========================================================
    EXPERIENCIA POR ROL
-   - subordinado: Inicio | Archivos | Operaciones | Mis solicitudes
+   - subordinado: Inicio | Archivos | Mis solicitudes
    - jefe/admin: Inicio | Usuarios | Aprobaciones | Archivos | Reglas DLP | Reportes | Auditoría | Configuración
    IMPORTANTE: esto organiza la interfaz. La seguridad definitiva debe reforzarse con RLS/backend.
    ========================================================= */
@@ -4240,7 +4240,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     const admin=isAdmin();
     const allowed=admin
       ? new Set(['inicio','usuarios','cola','gestor','reglas','reportes','auditoria','configuracion'])
-      : new Set(['inicio','gestor','operaciones','cola']);
+      : new Set(['inicio','gestor','cola']);
     ['inicio','gestor','operaciones','reglas','reportes','auditoria','configuracion','usuarios','cola'].forEach(n=>setNavVisible(n,allowed.has(n)));
     renameNav('cola',admin?'Aprobaciones':'Mis solicitudes');
 
@@ -4276,7 +4276,13 @@ window.addEventListener('DOMContentLoaded',()=>{
     if(colaTitle)colaTitle.textContent=admin?'Aprobaciones':'Mis solicitudes';
     if(colaDesc)colaDesc.textContent=admin?'Revisa las cargas pendientes por usuario. La decisión final sigue disponible en Telegram.':'Consulta el estado de tus cargas y operaciones solicitadas.';
     const nueva=document.querySelector('#view-cola .page-title .primary-btn');
-    if(nueva)nueva.classList.toggle('role-hidden',admin);
+    if(nueva){
+      nueva.classList.toggle('role-hidden',admin);
+      if(!admin){
+        nueva.setAttribute('onclick', "showView('gestor')");
+        nueva.innerHTML='<i class="fa-solid fa-folder-open"></i>Ir a archivos';
+      }
+    }
 
     updateTopbarResponsive?.();
   }
@@ -4295,7 +4301,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     const admin=isAdmin();
     const allowed=admin
       ? ['inicio','usuarios','cola','gestor','reglas','reportes','auditoria','configuracion']
-      : ['inicio','gestor','operaciones','cola'];
+      : ['inicio','gestor','cola'];
     if(!allowed.includes(name)) name='inicio';
     baseShowView(name);
     applyRoleExperience();
@@ -4440,18 +4446,129 @@ window.addEventListener('DOMContentLoaded',()=>{
   window.closeAdminUserDetail=function(){document.getElementById('adminUserDetail')?.classList.add('hidden');};
   window.openAdminUserFiles=function(key){adminUserFilter=key;showView('gestor');setTimeout(()=>{const s=document.getElementById('adminFileUserFilter');if(s)s.value=key;loadFilesView();},0);};
 
-  // Realtime: refresca la experiencia visible sin depender de solicitudes_lote.
-  const baseListen=listenRealtime;
+  // =======================================================
+  // REALTIME UNIFICADO
+  // Una sola suscripción para auditoria_custodia.
+  // Refresca Archivos, Mis solicitudes/Aprobaciones, Inicio y Usuarios
+  // sin F5 ni cambiar de vista.
+  // =======================================================
+  let dvRealtimeTimer = null;
+  let dvRealtimeBusy = false;
+  let dvRealtimePending = false;
+
+  async function refrescarSistemaRealtime(){
+    // Agrupa INSERT/UPDATE múltiples del mismo lote en una sola actualización.
+    clearTimeout(dvRealtimeTimer);
+    dvRealtimeTimer = setTimeout(async()=>{
+      if(dvRealtimeBusy){
+        dvRealtimePending = true;
+        return;
+      }
+
+      dvRealtimeBusy = true;
+      try{
+        // 1. Base común: auditoría + dashboard + datos del usuario actual.
+        await loadAudit();
+
+        // 2. Mis solicitudes / Aprobaciones.
+        await loadCola();
+
+        // 3. Si el explorador está abierto, reconstruir inventario y árbol.
+        if(document.getElementById('view-gestor')?.classList.contains('active')){
+          await loadFilesView();
+          if(typeof dvRenderDynamicFolders === 'function') dvRenderDynamicFolders();
+          if(typeof filterFiles === 'function') filterFiles();
+        }
+
+        // 4. Dashboard del rol actual.
+        if(document.getElementById('view-inicio')?.classList.contains('active')){
+          await loadRoleHome();
+        }
+
+        // 5. Panel de usuarios del administrador.
+        if(isAdmin() && document.getElementById('view-usuarios')?.classList.contains('active')){
+          await loadAdminUsers();
+        }
+
+        console.log('[DATAVAULT REALTIME] interfaz actualizada');
+      }catch(err){
+        console.error('[DATAVAULT REALTIME ERROR]', err);
+      }finally{
+        dvRealtimeBusy = false;
+        if(dvRealtimePending){
+          dvRealtimePending = false;
+          refrescarSistemaRealtime();
+        }
+      }
+    }, 250);
+  }
+
   listenRealtime=function(){
-    try{baseListen();}catch(e){console.warn(e);}
-    if(!window.__dvRoleAuditChannel){
-      window.__dvRoleAuditChannel=supabaseClient.channel('role_ui_audit').on('postgres_changes',{event:'*',schema:'public',table:'auditoria_custodia'},()=>{loadAudit();loadCola();if(isAdmin()&&document.getElementById('view-usuarios')?.classList.contains('active'))loadAdminUsers();}).subscribe();
+    // Elimina canales viejos que otras versiones del HTML hayan creado.
+    if(auditRealtimeChannel){
+      try{supabaseClient.removeChannel(auditRealtimeChannel);}catch(_){}
+      auditRealtimeChannel = null;
     }
+    if(colaRealtimeChannel){
+      try{supabaseClient.removeChannel(colaRealtimeChannel);}catch(_){}
+      colaRealtimeChannel = null;
+    }
+    if(window.__dvRoleAuditChannel){
+      try{supabaseClient.removeChannel(window.__dvRoleAuditChannel);}catch(_){}
+      window.__dvRoleAuditChannel = null;
+    }
+    if(window.__dvRealtimeMainChannel) return;
+
+    window.__dvRealtimeMainChannel = supabaseClient
+      .channel('datavault_auditoria_realtime_v1')
+      .on(
+        'postgres_changes',
+        {
+          event:'*',
+          schema:'public',
+          table:'auditoria_custodia'
+        },
+        payload=>{
+          console.log('[DATAVAULT REALTIME]', payload.eventType, payload.new || payload.old || '');
+          refrescarSistemaRealtime();
+        }
+      )
+      .subscribe(status=>{
+        console.log('[DATAVAULT REALTIME STATUS]', status);
+        // Estados normales: SUBSCRIBED, CHANNEL_ERROR, TIMED_OUT, CLOSED.
+      });
   };
 
   // Refresco posterior al ingreso/sesión restaurada.
   const baseEnter=enterApp;
-  enterApp=function(){baseEnter();applyRoleExperience();setTimeout(()=>{loadAudit();loadCola();if(isAdmin())loadAdminUsers();},80);};
+  enterApp=function(){
+    baseEnter();
+    applyRoleExperience();
+    // baseEnter puede haber creado un canal anterior; aquí dejamos solo el unificado.
+    setTimeout(async()=>{
+      listenRealtime();
+      await loadAudit();
+      await loadCola();
+      if(document.getElementById('view-gestor')?.classList.contains('active')) await loadFilesView();
+      if(isAdmin()) await loadAdminUsers();
+    },80);
+  };
+
+  // Limpieza correcta al cerrar sesión para que al volver a entrar no queden
+  // suscripciones duplicadas.
+  const roleLogoutBase=handleLogout;
+  handleLogout=async function(){
+    clearTimeout(dvRealtimeTimer);
+    if(window.__dvRealtimeMainChannel){
+      try{await supabaseClient.removeChannel(window.__dvRealtimeMainChannel);}catch(_){}
+      window.__dvRealtimeMainChannel = null;
+    }
+    if(window.__dvRoleAuditChannel){
+      try{await supabaseClient.removeChannel(window.__dvRoleAuditChannel);}catch(_){}
+      window.__dvRoleAuditChannel = null;
+    }
+    return roleLogoutBase();
+  };
 
   document.addEventListener('DOMContentLoaded',()=>{ensureAdminFileFilter();applyRoleExperience();});
   window.addEventListener('load',()=>setTimeout(applyRoleExperience,100));
