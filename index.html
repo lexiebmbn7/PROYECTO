@@ -5190,5 +5190,219 @@ window.addEventListener('DOMContentLoaded',()=>{
 })();
 </script>
 
+
+
+<script id="datavault-initial-hydration-v2">
+/* =========================================================
+   FIX V2 · CARGA INICIAL INDEPENDIENTE
+   Evita que Inicio quede en 0 / "Cargando registros..."
+   hasta navegar a otra vista.
+   ========================================================= */
+(function(){
+  let dvHydrationSeq = 0;
+  let dvHydrationBusy = false;
+  let dvHydrationQueued = false;
+  let dvHydrationChannel = null;
+
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const norm = v => String(v ?? '').trim().toLowerCase();
+
+  function isAdminRole(){
+    return ['jefe','admin','administrador'].includes(norm(currentRole));
+  }
+
+  function rowBelongsToCurrentUser(r, user){
+    const uid = String(user?.id || '').trim();
+    const mail = norm(user?.email || currentUserEmail);
+    const name = norm(user?.user_metadata?.full_name || currentDisplayName);
+
+    if(uid && String(r?.solicitante_id || '').trim() === uid) return true;
+    if(mail && norm(r?.solicitante_correo || r?.correo) === mail) return true;
+
+    const rowName = norm(r?.solicitante_nombre || r?.usuario_solicitante || r?.usuario);
+    return !!name && rowName === name;
+  }
+
+  function setHomeLoading(){
+    document.querySelectorAll('#view-inicio .metric-value').forEach(el => {
+      if(el.textContent === '0' || el.textContent === '—' || el.textContent === '') el.textContent = '…';
+    });
+    const body = document.getElementById('inicioTableBody');
+    if(body && (!body.children.length || /Cargando registros/i.test(body.textContent || ''))){
+      body.innerHTML = '<tr><td colspan="4" class="p-6 text-center text-slate-400"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Cargando registros...</td></tr>';
+    }
+  }
+
+  function setHomeError(message){
+    const body = document.getElementById('inicioTableBody');
+    if(body){
+      body.innerHTML = `<tr><td colspan="4" class="p-6 text-center text-red-500">No se pudieron cargar los datos: ${escapeHtml(message || 'error desconocido')}</td></tr>`;
+    }
+  }
+
+  function renderHomeDirect(rows){
+    const approved = rows.filter(r => String(r.estado || '').toUpperCase() === 'APROBADO').length;
+    const pending  = rows.filter(r => String(r.estado || '').toUpperCase() === 'PENDIENTE').length;
+    const rejected = rows.filter(r => String(r.estado || '').toUpperCase() === 'RECHAZADO').length;
+
+    const cards = [...document.querySelectorAll('#view-inicio .grid.grid-cols-2.xl\\:grid-cols-4 .dashboard-card')];
+    const values = isAdminRole()
+      ? [
+          ['Archivos protegidos', rows.length, 'Registros corporativos'],
+          ['Solicitudes pendientes', pending, 'Requieren revisión'],
+          ['Usuarios con actividad', new Set(rows.map(r => r.solicitante_id || r.solicitante_correo || r.solicitante_nombre).filter(Boolean)).size, 'Con cargas registradas'],
+          ['Rechazados', rejected, 'Eventos bloqueados']
+        ]
+      : [
+          ['Mis archivos', rows.length, 'En custodia'],
+          ['Pendientes', pending, 'Esperando aprobación'],
+          ['Aprobados', approved, 'Transferidos'],
+          ['Rechazados', rejected, 'No autorizados']
+        ];
+
+    cards.slice(0,4).forEach((card, i) => {
+      const label = card.querySelector('.metric-label');
+      const value = card.querySelector('.metric-value');
+      const trend = card.querySelector('.metric-trend');
+      if(label) label.textContent = values[i][0];
+      if(value) value.textContent = values[i][1];
+      if(trend) trend.textContent = values[i][2];
+    });
+
+    const recent = document.getElementById('inicioTableBody');
+    if(recent){
+      const visible = rows.slice(0,6);
+      recent.innerHTML = visible.length
+        ? visible.map(r => {
+            const user = r.solicitante_nombre || r.usuario_solicitante || currentDisplayName || 'Usuario';
+            const action = r.lote_id ? 'Carga de carpeta' : 'Carga de archivo';
+            return `<tr><td>${formatShortDate(r.fecha_solicitud)}</td><td>${escapeHtml(user)}</td><td>${escapeHtml(action)}</td><td>${statusPill(r.estado || 'PENDIENTE')}</td></tr>`;
+          }).join('')
+        : '<tr><td colspan="4" class="p-6 text-center text-slate-400">No existen registros.</td></tr>';
+    }
+
+    const welcome = document.getElementById('dashWelcome');
+    if(welcome) welcome.textContent = currentDisplayName || (isAdminRole() ? 'Administrador' : 'Usuario');
+  }
+
+  async function fetchInitialRows(){
+    const { data: sessionData, error: sessionError } = await supabaseClient.auth.getSession();
+    if(sessionError) throw sessionError;
+    const session = sessionData?.session;
+    if(!session?.user) throw new Error('No hay sesión activa de Supabase.');
+
+    const user = session.user;
+    if(!currentUser || currentUser.id !== user.id){
+      setSessionFromUser(user);
+    }
+
+    const { data, error } = await supabaseClient
+      .from('auditoria_custodia')
+      .select('*')
+      .order('fecha_solicitud', { ascending:false })
+      .limit(1000);
+
+    if(error) throw error;
+    const all = Array.isArray(data) ? data : [];
+    return isAdminRole() ? all : all.filter(r => rowBelongsToCurrentUser(r, user));
+  }
+
+  async function hydrateNow(reason='manual'){
+    const seq = ++dvHydrationSeq;
+    if(dvHydrationBusy){
+      dvHydrationQueued = true;
+      return;
+    }
+
+    dvHydrationBusy = true;
+    setHomeLoading();
+
+    try{
+      const rows = await fetchInitialRows();
+      if(seq !== dvHydrationSeq) return;
+
+      renderHomeDirect(rows);
+
+      // Actualiza también las vistas existentes sin depender de que el usuario navegue.
+      try{ if(typeof loadCola === 'function') await loadCola(); }catch(e){ console.warn('[HYDRATION loadCola]', e); }
+      try{
+        if(document.getElementById('view-gestor')?.classList.contains('active') && typeof loadFilesView === 'function'){
+          await loadFilesView();
+        }
+      }catch(e){ console.warn('[HYDRATION loadFilesView]', e); }
+
+      console.log('[DATAVAULT HYDRATION V2] OK', reason, rows.length);
+    }catch(err){
+      console.error('[DATAVAULT HYDRATION V2 ERROR]', reason, err);
+      setHomeError(err?.message || String(err));
+    }finally{
+      dvHydrationBusy = false;
+      if(dvHydrationQueued){
+        dvHydrationQueued = false;
+        setTimeout(() => hydrateNow('queued'), 60);
+      }
+    }
+  }
+
+  function connectHydrationRealtime(){
+    if(dvHydrationChannel){
+      try{supabaseClient.removeChannel(dvHydrationChannel);}catch(_){}
+      dvHydrationChannel = null;
+    }
+
+    dvHydrationChannel = supabaseClient
+      .channel('datavault_hydration_v2')
+      .on('postgres_changes', {event:'*', schema:'public', table:'auditoria_custodia'}, () => hydrateNow('realtime-auditoria'))
+      .on('postgres_changes', {event:'*', schema:'public', table:'solicitudes_operacion'}, () => hydrateNow('realtime-operacion'))
+      .subscribe(status => console.log('[DATAVAULT HYDRATION REALTIME]', status));
+  }
+
+  async function boot(){
+    // Reintentos cortos: cubren restauración de sesión, render y Railway frío.
+    setHomeLoading();
+    await sleep(80);
+    await hydrateNow('boot-80ms');
+    await sleep(350);
+
+    const body = document.getElementById('inicioTableBody');
+    if(body && /Cargando registros|No se pudieron cargar/i.test(body.textContent || '')){
+      await hydrateNow('boot-retry-430ms');
+    }
+
+    connectHydrationRealtime();
+  }
+
+  // Sesión restaurada al recargar la página.
+  document.addEventListener('DOMContentLoaded', () => {
+    boot();
+    setTimeout(() => hydrateNow('boot-backup-1200ms'), 1200);
+  });
+
+  // Login nuevo / refresh del token.
+  supabaseClient.auth.onAuthStateChange((event, session) => {
+    if(session?.user && ['SIGNED_IN','INITIAL_SESSION','TOKEN_REFRESHED','USER_UPDATED'].includes(event)){
+      setTimeout(() => hydrateNow('auth-'+event), 50);
+      setTimeout(connectHydrationRealtime, 120);
+    }
+    if(event === 'SIGNED_OUT'){
+      if(dvHydrationChannel){
+        try{supabaseClient.removeChannel(dvHydrationChannel);}catch(_){}
+        dvHydrationChannel = null;
+      }
+    }
+  });
+
+  // Cuando se vuelve a Inicio, refresca inmediatamente, sin depender de otra vista.
+  const baseShow = window.showView || showView;
+  window.showView = showView = function(name){
+    const result = baseShow(name);
+    if(name === 'inicio') setTimeout(() => hydrateNow('show-inicio'), 20);
+    return result;
+  };
+
+  window.dvForceInitialHydration = hydrateNow;
+})();
+</script>
+
 </body>
 </html>
