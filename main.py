@@ -2765,38 +2765,50 @@ def vincular_drive_legacy(request: Request):
     return {"status": "ok", "vinculados": vinculados, "omitidos": omitidos}
 
 
+
 @app.post("/drive/reconcile")
 def reconciliar_drive(request: Request):
-    """Sincroniza eliminaciones/movimientos hechos directamente en Drive.
+    """Sincroniza el inventario de DataVault con Google Drive.
 
-    Solo funciona para elementos aprobados después de instalar las columnas
-    drive_file_id/drive_folder_id. Los registros históricos sin ID de Drive no
-    se adivinan por nombre para evitar asociar duplicados incorrectamente.
+    - Subordinado: revisa únicamente sus archivos/carpetas aprobados.
+    - Jefe/Admin: revisa los archivos/carpetas aprobados de todos los usuarios.
+    - Si un elemento fue borrado directamente en Drive, marca en_drive=False y
+      estado_archivo=ELIMINADO_EXTERNAMENTE sin borrar la auditoría histórica.
+    - Si un elemento fue movido directamente en Drive, actualiza su ubicación.
     """
     usuario = obtener_usuario_supabase_desde_request(request)
     service = obtener_servicio_google_drive()
+    es_admin = str(usuario.get("rol") or "").lower() == "jefe"
 
-    consulta = (
+    query = (
         supabase
         .table("auditoria_custodia")
         .select(
             "id,lote_id,estado,estado_archivo,en_drive,drive_file_id,drive_folder_id,"
             "drive_parent_id,ubicacion_drive,solicitante_id"
         )
-        .eq("solicitante_id", usuario["id"])
         .eq("estado", "APROBADO")
-        .execute()
     )
+
+    # El subordinado solo puede reconciliar su propio inventario.
+    # El jefe/admin puede reconciliar el inventario corporativo completo.
+    if not es_admin:
+        query = query.eq("solicitante_id", usuario["id"])
+
+    consulta = query.execute()
     filas = consulta.data or []
+
     cambios = 0
     revisados = 0
 
-    # Carpetas: una comprobación por drive_folder_id.
+    # Agrupar carpetas para hacer una sola consulta a Drive por folder_id.
     carpetas = {}
     sueltos = []
+
     for fila in filas:
         folder_id = str(fila.get("drive_folder_id") or "").strip()
         file_id = str(fila.get("drive_file_id") or "").strip()
+
         if folder_id:
             carpetas.setdefault(folder_id, []).append(fila)
         elif file_id:
@@ -2805,80 +2817,163 @@ def reconciliar_drive(request: Request):
     def comprobar(file_id: str):
         nonlocal revisados
         revisados += 1
+
         try:
             return obtener_archivo_drive(service, file_id), None
         except Exception as error:
             texto = str(error)
+
             if "404" in texto or "File not found" in texto:
                 return None, "missing"
+
             print("[DRIVE RECONCILE ERROR]", file_id, error)
             return None, "error"
 
+    def update_folder(folder_id: str, values: dict):
+        q = (
+            supabase
+            .table("auditoria_custodia")
+            .update(values)
+            .eq("drive_folder_id", folder_id)
+        )
+
+        if not es_admin:
+            q = q.eq("solicitante_id", usuario["id"])
+
+        return q.execute()
+
+    def update_row(row_id: str, values: dict):
+        q = (
+            supabase
+            .table("auditoria_custodia")
+            .update(values)
+            .eq("id", row_id)
+        )
+
+        if not es_admin:
+            q = q.eq("solicitante_id", usuario["id"])
+
+        return q.execute()
+
+    # ========================================================
+    # CARPETAS
+    # ========================================================
     for folder_id, grupo in carpetas.items():
         meta, err = comprobar(folder_id)
+
         if err == "error":
             continue
+
+        # Eliminado manualmente desde Drive.
         if err == "missing" or (meta and meta.get("trashed")):
-            supabase.table("auditoria_custodia").update({
-                "en_drive": False,
-                "estado_archivo": "ELIMINADO_EXTERNAMENTE",
-                "fecha_eliminacion": ahora_iso(),
-                "fecha_ultima_operacion": ahora_iso(),
-            }).eq("drive_folder_id", folder_id).eq("solicitante_id", usuario["id"]).execute()
+            update_folder(
+                folder_id,
+                {
+                    "en_drive": False,
+                    "estado_archivo": "ELIMINADO_EXTERNAMENTE",
+                    "fecha_eliminacion": ahora_iso(),
+                    "fecha_ultima_operacion": ahora_iso(),
+                }
+            )
             cambios += 1
             continue
 
+        # Sigue existiendo: asegurar que el inventario refleje su estado activo.
         padres = meta.get("parents") or []
         parent_id = str(padres[0]) if padres else ""
         anterior = str(grupo[0].get("drive_parent_id") or "")
+
+        values = {}
+
+        if grupo[0].get("en_drive") is not True:
+            values["en_drive"] = True
+
+        if str(grupo[0].get("estado_archivo") or "").upper() != "ACTIVO":
+            values["estado_archivo"] = "ACTIVO"
+
         if parent_id and parent_id != anterior:
             parent_name = "DRIVE PROYECTO"
+
             if parent_id != GOOGLE_FOLDER_ID:
                 try:
-                    parent_name = obtener_archivo_drive(service, parent_id).get("name") or parent_name
+                    parent_name = (
+                        obtener_archivo_drive(service, parent_id).get("name")
+                        or parent_name
+                    )
                 except Exception:
                     pass
-            supabase.table("auditoria_custodia").update({
+
+            values.update({
                 "drive_parent_id": parent_id,
                 "ubicacion_drive": parent_name,
-                "fecha_ultima_operacion": ahora_iso(),
-            }).eq("drive_folder_id", folder_id).eq("solicitante_id", usuario["id"]).execute()
+            })
+
+        if values:
+            values["fecha_ultima_operacion"] = ahora_iso()
+            update_folder(folder_id, values)
             cambios += 1
 
+    # ========================================================
+    # ARCHIVOS SUELTOS
+    # ========================================================
     for fila in sueltos:
-        file_id = str(fila.get("drive_file_id") or "")
+        file_id = str(fila.get("drive_file_id") or "").strip()
         meta, err = comprobar(file_id)
+
         if err == "error":
             continue
+
+        # Eliminado manualmente desde Drive.
         if err == "missing" or (meta and meta.get("trashed")):
-            supabase.table("auditoria_custodia").update({
-                "en_drive": False,
-                "estado_archivo": "ELIMINADO_EXTERNAMENTE",
-                "fecha_eliminacion": ahora_iso(),
-                "fecha_ultima_operacion": ahora_iso(),
-            }).eq("id", fila["id"]).eq("solicitante_id", usuario["id"]).execute()
+            update_row(
+                fila["id"],
+                {
+                    "en_drive": False,
+                    "estado_archivo": "ELIMINADO_EXTERNAMENTE",
+                    "fecha_eliminacion": ahora_iso(),
+                    "fecha_ultima_operacion": ahora_iso(),
+                }
+            )
             cambios += 1
             continue
 
         padres = meta.get("parents") or []
         parent_id = str(padres[0]) if padres else ""
         anterior = str(fila.get("drive_parent_id") or "")
+
+        values = {}
+
+        if fila.get("en_drive") is not True:
+            values["en_drive"] = True
+
+        if str(fila.get("estado_archivo") or "").upper() != "ACTIVO":
+            values["estado_archivo"] = "ACTIVO"
+
         if parent_id and parent_id != anterior:
             parent_name = "DRIVE PROYECTO"
+
             if parent_id != GOOGLE_FOLDER_ID:
                 try:
-                    parent_name = obtener_archivo_drive(service, parent_id).get("name") or parent_name
+                    parent_name = (
+                        obtener_archivo_drive(service, parent_id).get("name")
+                        or parent_name
+                    )
                 except Exception:
                     pass
-            supabase.table("auditoria_custodia").update({
+
+            values.update({
                 "drive_parent_id": parent_id,
                 "ubicacion_drive": parent_name,
-                "fecha_ultima_operacion": ahora_iso(),
-            }).eq("id", fila["id"]).eq("solicitante_id", usuario["id"]).execute()
+            })
+
+        if values:
+            values["fecha_ultima_operacion"] = ahora_iso()
+            update_row(fila["id"], values)
             cambios += 1
 
     return {
         "status": "ok",
+        "scope": "GLOBAL" if es_admin else "USUARIO",
         "revisados": revisados,
         "cambios": cambios,
     }
