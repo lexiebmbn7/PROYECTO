@@ -4,6 +4,7 @@ import mimetypes
 import os
 import threading
 import requests
+from datetime import datetime, timezone
 from uuid import UUID, uuid4
 from typing import List
 
@@ -151,12 +152,19 @@ def obtener_servicio_google_drive():
     )
 
 
-def crear_carpeta_google_drive(service, nombre: str, parent_id: str):
+def crear_carpeta_google_drive(
+    service,
+    nombre: str,
+    parent_id: str,
+    app_properties: dict | None = None,
+):
     metadata = {
         "name": nombre,
         "mimeType": "application/vnd.google-apps.folder",
         "parents": [parent_id],
     }
+    if app_properties:
+        metadata["appProperties"] = app_properties
 
     respuesta = (
         service
@@ -181,6 +189,7 @@ def subir_archivo_google_drive_en_carpeta(
     nombre_archivo: str,
     contenido_bytes: bytes,
     parent_id: str,
+    app_properties: dict | None = None,
 ):
     if not contenido_bytes:
         raise RuntimeError(f"El archivo {nombre_archivo} está vacío")
@@ -203,6 +212,7 @@ def subir_archivo_google_drive_en_carpeta(
             body={
                 "name": nombre_archivo,
                 "parents": [parent_id],
+                **({"appProperties": app_properties} if app_properties else {}),
             },
             media_body=media,
             fields="id,name",
@@ -220,7 +230,8 @@ def subir_archivo_google_drive_en_carpeta(
 
 def subir_a_google_drive(
     nombre_archivo: str,
-    contenido_bytes: bytes
+    contenido_bytes: bytes,
+    auditoria_id: str | None = None,
 ):
     """Sube un archivo individual directamente desde RAM a Google Drive."""
 
@@ -239,6 +250,10 @@ def subir_a_google_drive(
             nombre_archivo,
             contenido_bytes,
             GOOGLE_FOLDER_ID,
+            app_properties=(
+                {"datavault_auditoria_id": str(auditoria_id)}
+                if auditoria_id else None
+            ),
         )
 
         print(
@@ -315,10 +330,15 @@ def subir_lote_carpeta_a_drive(documentos: list):
 
     try:
         service = obtener_servicio_google_drive()
+        lote_id_actual = str(documentos[0].get("lote_id") or "")
         carpeta_raiz_id = crear_carpeta_google_drive(
             service,
             nombre_carpeta,
             GOOGLE_FOLDER_ID,
+            app_properties={
+                "datavault_lote_id": lote_id_actual,
+                "datavault_tipo": "carpeta_lote",
+            },
         )
 
         # Cache de subcarpetas ya creadas dentro de esta carpeta nueva.
@@ -358,6 +378,10 @@ def subir_lote_carpeta_a_drive(documentos: list):
                 nombre_drive,
                 item["ram"]["contenido"],
                 parent_id,
+                app_properties={
+                    "datavault_auditoria_id": str(item["documento"].get("id") or ""),
+                    "datavault_lote_id": str(item["documento"].get("lote_id") or ""),
+                },
             )
             archivos_drive.append(archivo_drive_id)
 
@@ -507,6 +531,7 @@ def obtener_usuario_supabase_desde_request(request: Request) -> dict:
     solicitante_id = str(usuario.get("id") or "").strip()
     solicitante_correo = str(usuario.get("email") or "").strip()
     metadata = usuario.get("user_metadata") or {}
+    app_metadata = usuario.get("app_metadata") or {}
 
     solicitante_nombre = str(
         metadata.get("full_name")
@@ -514,6 +539,16 @@ def obtener_usuario_supabase_desde_request(request: Request) -> dict:
         or solicitante_correo
         or "Usuario desconocido"
     ).strip()
+
+    rol = str(
+        app_metadata.get("rol")
+        or app_metadata.get("role")
+        or metadata.get("rol")
+        or metadata.get("role")
+        or "subordinado"
+    ).strip().lower()
+    if rol in ("admin", "administrador"):
+        rol = "jefe"
 
     if not solicitante_id:
         raise HTTPException(
@@ -524,8 +559,319 @@ def obtener_usuario_supabase_desde_request(request: Request) -> dict:
     return {
         "id": solicitante_id,
         "nombre": solicitante_nombre,
-        "correo": solicitante_correo
+        "correo": solicitante_correo,
+        "rol": rol,
     }
+
+
+# ============================================================
+# OPERACIONES GOOGLE DRIVE / SINCRONIZACIÓN
+# ============================================================
+
+def ahora_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def obtener_archivo_drive(service, file_id: str):
+    return (
+        service
+        .files()
+        .get(
+            fileId=file_id,
+            fields="id,name,mimeType,parents,trashed",
+            supportsAllDrives=True,
+        )
+        .execute()
+    )
+
+
+def listar_carpetas_drive_raiz():
+    service = obtener_servicio_google_drive()
+    consulta = (
+        f"'{GOOGLE_FOLDER_ID}' in parents and "
+        "mimeType='application/vnd.google-apps.folder' and trashed=false"
+    )
+    respuesta = (
+        service
+        .files()
+        .list(
+            q=consulta,
+            fields="files(id,name,parents)",
+            orderBy="name",
+            pageSize=200,
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True,
+        )
+        .execute()
+    )
+    return respuesta.get("files") or []
+
+
+def validar_destino_drive(destino_id: str):
+    destino_id = str(destino_id or "").strip()
+    if not destino_id or destino_id == GOOGLE_FOLDER_ID:
+        return {
+            "id": GOOGLE_FOLDER_ID,
+            "name": "DRIVE PROYECTO",
+        }
+
+    for carpeta in listar_carpetas_drive_raiz():
+        if str(carpeta.get("id")) == destino_id:
+            return {
+                "id": str(carpeta.get("id")),
+                "name": str(carpeta.get("name") or "Carpeta"),
+            }
+
+    raise HTTPException(
+        status_code=400,
+        detail="La carpeta destino no pertenece al directorio autorizado de DataVault.",
+    )
+
+
+def mover_objeto_google_drive(file_id: str, destino_id: str):
+    service = obtener_servicio_google_drive()
+    actual = obtener_archivo_drive(service, file_id)
+    if actual.get("trashed"):
+        raise RuntimeError("El elemento ya está en la papelera de Google Drive.")
+
+    padres = [str(x) for x in (actual.get("parents") or []) if x]
+    if destino_id in padres and len(padres) == 1:
+        return actual
+
+    remove_parents = ",".join([p for p in padres if p != destino_id])
+    kwargs = {
+        "fileId": file_id,
+        "addParents": destino_id,
+        "fields": "id,name,parents,trashed",
+        "supportsAllDrives": True,
+    }
+    if remove_parents:
+        kwargs["removeParents"] = remove_parents
+
+    return service.files().update(**kwargs).execute()
+
+
+def enviar_a_papelera_google_drive(file_id: str):
+    service = obtener_servicio_google_drive()
+    return (
+        service
+        .files()
+        .update(
+            fileId=file_id,
+            body={"trashed": True},
+            fields="id,name,trashed",
+            supportsAllDrives=True,
+        )
+        .execute()
+    )
+
+
+def obtener_objeto_operable(usuario_id: str, objeto_tipo: str, auditoria_id=None, lote_id=None):
+    objeto_tipo = str(objeto_tipo or "").upper().strip()
+
+    if objeto_tipo == "CARPETA":
+        if not lote_id:
+            raise HTTPException(status_code=400, detail="Falta lote_id.")
+        respuesta = (
+            supabase
+            .table("auditoria_custodia")
+            .select("*")
+            .eq("lote_id", str(lote_id))
+            .eq("solicitante_id", usuario_id)
+            .execute()
+        )
+        filas = respuesta.data or []
+        if not filas:
+            raise HTTPException(status_code=404, detail="No se encontró la carpeta del usuario.")
+        if any(str(f.get("estado") or "").upper() != "APROBADO" for f in filas):
+            raise HTTPException(status_code=409, detail="Solo se pueden operar carpetas aprobadas.")
+        if any(str(f.get("estado_archivo") or "").upper().startswith("ELIMINADO") for f in filas):
+            raise HTTPException(status_code=409, detail="La carpeta ya fue eliminada.")
+        drive_id = str(filas[0].get("drive_folder_id") or "").strip()
+        if not drive_id:
+            raise HTTPException(
+                status_code=409,
+                detail="Esta carpeta es anterior al registro de IDs de Drive. Carga una carpeta nueva para operar sobre ella.",
+            )
+        nombre = obtener_carpeta_desde_ruta(filas[0].get("ruta_relativa")) or "Carpeta"
+        return {
+            "tipo": "CARPETA",
+            "drive_id": drive_id,
+            "nombre": nombre,
+            "filas": filas,
+            "lote_id": str(lote_id),
+            "auditoria_id": None,
+            "ubicacion": filas[0].get("ubicacion_drive") or "DRIVE PROYECTO",
+        }
+
+    if objeto_tipo == "ARCHIVO":
+        if not auditoria_id:
+            raise HTTPException(status_code=400, detail="Falta auditoria_id.")
+        respuesta = (
+            supabase
+            .table("auditoria_custodia")
+            .select("*")
+            .eq("id", str(auditoria_id))
+            .eq("solicitante_id", usuario_id)
+            .limit(1)
+            .execute()
+        )
+        if not respuesta.data:
+            raise HTTPException(status_code=404, detail="No se encontró el archivo del usuario.")
+        fila = respuesta.data[0]
+        if str(fila.get("estado") or "").upper() != "APROBADO":
+            raise HTTPException(status_code=409, detail="Solo se pueden operar archivos aprobados.")
+        if str(fila.get("estado_archivo") or "").upper().startswith("ELIMINADO"):
+            raise HTTPException(status_code=409, detail="El archivo ya fue eliminado.")
+        drive_id = str(fila.get("drive_file_id") or "").strip()
+        if not drive_id:
+            raise HTTPException(
+                status_code=409,
+                detail="Este archivo es anterior al registro de IDs de Drive. Carga un archivo nuevo para operar sobre él.",
+            )
+        return {
+            "tipo": "ARCHIVO",
+            "drive_id": drive_id,
+            "nombre": fila.get("nombre_archivo") or "Archivo",
+            "filas": [fila],
+            "lote_id": None,
+            "auditoria_id": str(auditoria_id),
+            "ubicacion": fila.get("ubicacion_drive") or "DRIVE PROYECTO",
+        }
+
+    raise HTTPException(status_code=400, detail="objeto_tipo inválido.")
+
+
+def actualizar_auditoria_operacion(objeto: dict, cambios: dict):
+    query = supabase.table("auditoria_custodia").update(cambios)
+    if objeto["tipo"] == "CARPETA":
+        query = query.eq("lote_id", objeto["lote_id"])
+    else:
+        query = query.eq("id", objeto["auditoria_id"])
+    return query.execute()
+
+
+def notificar_solicitud_operacion_telegram(solicitud: dict):
+    if not TELEGRAM_TOKEN or not AUTHORIZED_CHAT_IDS:
+        return
+
+    tipo = str(solicitud.get("tipo_operacion") or "").upper()
+    icono = "↔️" if tipo == "MOVER" else "🗑️"
+    destino = solicitud.get("carpeta_destino_nombre") or "—"
+    texto = (
+        "🛡️ DataVault DLP - GM Ingenieros\n\n"
+        f"{icono} SOLICITUD DE {tipo}\n\n"
+        f"👤 Usuario: {solicitud.get('solicitante_nombre') or 'Usuario'}\n"
+        f"📄 Objeto: {solicitud.get('nombre_objeto') or 'Archivo/Carpeta'}\n"
+        f"📌 Tipo: {solicitud.get('objeto_tipo') or '—'}\n"
+        f"📂 Origen: {solicitud.get('carpeta_origen') or 'DRIVE PROYECTO'}\n"
+    )
+    if tipo == "MOVER":
+        texto += f"➡️ Destino: {destino}\n"
+    texto += "\n¿Autorizar operación?"
+
+    botones = {
+        "inline_keyboard": [
+            [
+                {"text": "✅ Aprobar", "callback_data": f"opap:{solicitud['id']}"},
+                {"text": "❌ Rechazar", "callback_data": f"opre:{solicitud['id']}"},
+            ]
+        ]
+    }
+
+    for chat_id in AUTHORIZED_CHAT_IDS:
+        try:
+            telegram_request(
+                "sendMessage",
+                {"chat_id": chat_id, "text": texto, "reply_markup": botones},
+            )
+        except Exception as error:
+            print("[TELEGRAM OPERACION ERROR]", error)
+
+
+def procesar_solicitud_operacion(solicitud_id: str, aprobar: bool, resuelto_por: str):
+    with DECISION_LOCK:
+        respuesta = (
+            supabase
+            .table("solicitudes_operacion")
+            .select("*")
+            .eq("id", solicitud_id)
+            .limit(1)
+            .execute()
+        )
+        if not respuesta.data:
+            raise RuntimeError("La solicitud no existe.")
+
+        solicitud = respuesta.data[0]
+        if str(solicitud.get("estado") or "").upper() != "PENDIENTE":
+            return solicitud, False
+
+        if not aprobar:
+            actualizado = (
+                supabase
+                .table("solicitudes_operacion")
+                .update({
+                    "estado": "RECHAZADO",
+                    "fecha_resolucion": ahora_iso(),
+                    "resuelto_por": str(resuelto_por),
+                    "resultado": "Operación rechazada por el custodio.",
+                })
+                .eq("id", solicitud_id)
+                .eq("estado", "PENDIENTE")
+                .execute()
+            )
+            return (actualizado.data or [solicitud])[0], True
+
+        objeto = obtener_objeto_operable(
+            str(solicitud.get("solicitante_id") or ""),
+            solicitud.get("objeto_tipo"),
+            auditoria_id=solicitud.get("auditoria_id"),
+            lote_id=solicitud.get("lote_id"),
+        )
+
+        tipo = str(solicitud.get("tipo_operacion") or "").upper()
+        cambios = {"fecha_ultima_operacion": ahora_iso()}
+
+        if tipo == "ELIMINAR":
+            enviar_a_papelera_google_drive(objeto["drive_id"])
+            cambios.update({
+                "en_drive": False,
+                "estado_archivo": "ELIMINADO",
+                "fecha_eliminacion": ahora_iso(),
+            })
+            resultado_texto = "Elemento enviado a la papelera de Google Drive."
+
+        elif tipo == "MOVER":
+            destino = validar_destino_drive(solicitud.get("carpeta_destino_id"))
+            if destino["id"] == objeto["drive_id"]:
+                raise RuntimeError("Una carpeta no puede moverse dentro de sí misma.")
+            mover_objeto_google_drive(objeto["drive_id"], destino["id"])
+            cambios.update({
+                "en_drive": True,
+                "estado_archivo": "ACTIVO",
+                "drive_parent_id": destino["id"],
+                "ubicacion_drive": destino["name"],
+            })
+            resultado_texto = f"Elemento movido a {destino['name']}."
+        else:
+            raise RuntimeError("Tipo de operación no soportado.")
+
+        actualizar_auditoria_operacion(objeto, cambios)
+
+        actualizado = (
+            supabase
+            .table("solicitudes_operacion")
+            .update({
+                "estado": "APROBADO",
+                "fecha_resolucion": ahora_iso(),
+                "resuelto_por": str(resuelto_por),
+                "resultado": resultado_texto,
+            })
+            .eq("id", solicitud_id)
+            .eq("estado", "PENDIENTE")
+            .execute()
+        )
+        return (actualizado.data or [solicitud])[0], True
 
 
 # ============================================================
@@ -2216,6 +2562,329 @@ async def registrar_lote_custodia(
 
 
 # ============================================================
+# OPERACIONES SOLICITADAS DESDE LA WEB
+# ============================================================
+
+@app.get("/drive-folders")
+def obtener_carpetas_drive(request: Request):
+    obtener_usuario_supabase_desde_request(request)
+    if not google_drive_configurado():
+        raise HTTPException(status_code=503, detail="Google Drive no está configurado.")
+    carpetas = listar_carpetas_drive_raiz()
+    return {
+        "folders": [
+            {"id": GOOGLE_FOLDER_ID, "name": "DRIVE PROYECTO", "root": True},
+            *[{"id": c.get("id"), "name": c.get("name"), "root": False} for c in carpetas],
+        ]
+    }
+
+
+@app.post("/operations/request")
+async def solicitar_operacion(request: Request, background_tasks: BackgroundTasks):
+    usuario = obtener_usuario_supabase_desde_request(request)
+    payload = await request.json()
+
+    tipo = str(payload.get("tipo_operacion") or "").upper().strip()
+    objeto_tipo = str(payload.get("objeto_tipo") or "").upper().strip()
+    if tipo not in ("MOVER", "ELIMINAR"):
+        raise HTTPException(status_code=400, detail="tipo_operacion inválido.")
+    if objeto_tipo not in ("ARCHIVO", "CARPETA"):
+        raise HTTPException(status_code=400, detail="objeto_tipo inválido.")
+
+    objeto = obtener_objeto_operable(
+        usuario["id"],
+        objeto_tipo,
+        auditoria_id=payload.get("auditoria_id"),
+        lote_id=payload.get("lote_id"),
+    )
+
+    destino = None
+    if tipo == "MOVER":
+        destino = validar_destino_drive(payload.get("carpeta_destino_id"))
+        if destino["id"] == objeto["drive_id"]:
+            raise HTTPException(status_code=400, detail="Una carpeta no puede moverse dentro de sí misma.")
+
+    # Evita solicitudes repetidas pendientes para el mismo objeto.
+    pendientes = (
+        supabase
+        .table("solicitudes_operacion")
+        .select("id,tipo_operacion,objeto_tipo,auditoria_id,lote_id,estado")
+        .eq("solicitante_id", usuario["id"])
+        .eq("estado", "PENDIENTE")
+        .execute()
+    ).data or []
+
+    for item in pendientes:
+        mismo = (
+            objeto_tipo == "CARPETA" and str(item.get("lote_id") or "") == str(objeto.get("lote_id") or "")
+        ) or (
+            objeto_tipo == "ARCHIVO" and str(item.get("auditoria_id") or "") == str(objeto.get("auditoria_id") or "")
+        )
+        if mismo:
+            raise HTTPException(
+                status_code=409,
+                detail="Ya existe una operación pendiente para este elemento.",
+            )
+
+    registro = {
+        "tipo_operacion": tipo,
+        "objeto_tipo": objeto_tipo,
+        "auditoria_id": objeto.get("auditoria_id"),
+        "lote_id": objeto.get("lote_id"),
+        "solicitante_id": usuario["id"],
+        "solicitante_nombre": usuario["nombre"],
+        "solicitante_correo": usuario["correo"],
+        "nombre_objeto": objeto["nombre"],
+        "carpeta_origen": objeto.get("ubicacion") or "DRIVE PROYECTO",
+        "carpeta_destino_id": destino["id"] if destino else None,
+        "carpeta_destino_nombre": destino["name"] if destino else None,
+        "estado": "PENDIENTE",
+    }
+
+    respuesta = supabase.table("solicitudes_operacion").insert(registro).execute()
+    if not respuesta.data:
+        raise HTTPException(status_code=500, detail="No se pudo registrar la solicitud.")
+
+    solicitud = respuesta.data[0]
+    background_tasks.add_task(notificar_solicitud_operacion_telegram, solicitud)
+
+    return {
+        "status": "ok",
+        "mensaje": "Solicitud registrada y enviada al custodio.",
+        "solicitud": solicitud,
+    }
+
+
+@app.post("/drive/backfill-legacy")
+def vincular_drive_legacy(request: Request):
+    """Vincula registros APROBADOS antiguos cuando el nombre en Drive es único.
+
+    Nunca adivina entre duplicados: si hay 0 o más de 1 coincidencias, se omite.
+    Esto permite migrar gradualmente el historial previo a drive_file_id / drive_folder_id.
+    """
+    usuario = obtener_usuario_supabase_desde_request(request)
+    service = obtener_servicio_google_drive()
+
+    consulta = (
+        supabase
+        .table("auditoria_custodia")
+        .select(
+            "id,lote_id,nombre_archivo,ruta_relativa,estado,estado_archivo,"
+            "drive_file_id,drive_folder_id,solicitante_id"
+        )
+        .eq("solicitante_id", usuario["id"])
+        .eq("estado", "APROBADO")
+        .execute()
+    )
+    filas = consulta.data or []
+    vinculados = 0
+    omitidos = 0
+
+    def esc_drive(valor: str) -> str:
+        return str(valor or "").replace("\\", "\\\\").replace("'", "\\'")
+
+    # Carpetas por lote.
+    lotes = {}
+    sueltos = []
+    for fila in filas:
+        if fila.get("lote_id") and obtener_carpeta_desde_ruta(fila.get("ruta_relativa")):
+            lotes.setdefault(str(fila.get("lote_id")), []).append(fila)
+        else:
+            sueltos.append(fila)
+
+    for lote_id, grupo in lotes.items():
+        if str(grupo[0].get("drive_folder_id") or "").strip():
+            continue
+        nombre = obtener_carpeta_desde_ruta(grupo[0].get("ruta_relativa"))
+        q = (
+            f"'{GOOGLE_FOLDER_ID}' in parents and "
+            f"name='{esc_drive(nombre)}' and "
+            "mimeType='application/vnd.google-apps.folder'"
+        )
+        encontrados = (
+            service.files().list(
+                q=q,
+                fields="files(id,name,trashed,parents)",
+                pageSize=20,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+            ).execute().get("files") or []
+        )
+        if len(encontrados) != 1:
+            omitidos += 1
+            continue
+        meta = encontrados[0]
+        cambios = {
+            "drive_folder_id": meta["id"],
+            "drive_parent_id": GOOGLE_FOLDER_ID,
+            "ubicacion_drive": nombre,
+            "en_drive": not bool(meta.get("trashed")),
+            "estado_archivo": "ELIMINADO_EXTERNAMENTE" if meta.get("trashed") else "ACTIVO",
+            "fecha_ultima_operacion": ahora_iso(),
+        }
+        if meta.get("trashed"):
+            cambios["fecha_eliminacion"] = ahora_iso()
+        supabase.table("auditoria_custodia").update(cambios).eq("lote_id", lote_id).eq("solicitante_id", usuario["id"]).execute()
+        vinculados += 1
+
+    for fila in sueltos:
+        if str(fila.get("drive_file_id") or "").strip():
+            continue
+        nombre = str(fila.get("nombre_archivo") or "").strip()
+        if not nombre:
+            omitidos += 1
+            continue
+        q = f"'{GOOGLE_FOLDER_ID}' in parents and name='{esc_drive(nombre)}'"
+        encontrados = (
+            service.files().list(
+                q=q,
+                fields="files(id,name,mimeType,trashed,parents)",
+                pageSize=20,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+            ).execute().get("files") or []
+        )
+        encontrados = [x for x in encontrados if x.get("mimeType") != "application/vnd.google-apps.folder"]
+        if len(encontrados) != 1:
+            omitidos += 1
+            continue
+        meta = encontrados[0]
+        cambios = {
+            "drive_file_id": meta["id"],
+            "drive_parent_id": GOOGLE_FOLDER_ID,
+            "ubicacion_drive": "DRIVE PROYECTO",
+            "en_drive": not bool(meta.get("trashed")),
+            "estado_archivo": "ELIMINADO_EXTERNAMENTE" if meta.get("trashed") else "ACTIVO",
+            "fecha_ultima_operacion": ahora_iso(),
+        }
+        if meta.get("trashed"):
+            cambios["fecha_eliminacion"] = ahora_iso()
+        supabase.table("auditoria_custodia").update(cambios).eq("id", fila["id"]).eq("solicitante_id", usuario["id"]).execute()
+        vinculados += 1
+
+    return {"status": "ok", "vinculados": vinculados, "omitidos": omitidos}
+
+
+@app.post("/drive/reconcile")
+def reconciliar_drive(request: Request):
+    """Sincroniza eliminaciones/movimientos hechos directamente en Drive.
+
+    Solo funciona para elementos aprobados después de instalar las columnas
+    drive_file_id/drive_folder_id. Los registros históricos sin ID de Drive no
+    se adivinan por nombre para evitar asociar duplicados incorrectamente.
+    """
+    usuario = obtener_usuario_supabase_desde_request(request)
+    service = obtener_servicio_google_drive()
+
+    consulta = (
+        supabase
+        .table("auditoria_custodia")
+        .select(
+            "id,lote_id,estado,estado_archivo,en_drive,drive_file_id,drive_folder_id,"
+            "drive_parent_id,ubicacion_drive,solicitante_id"
+        )
+        .eq("solicitante_id", usuario["id"])
+        .eq("estado", "APROBADO")
+        .execute()
+    )
+    filas = consulta.data or []
+    cambios = 0
+    revisados = 0
+
+    # Carpetas: una comprobación por drive_folder_id.
+    carpetas = {}
+    sueltos = []
+    for fila in filas:
+        folder_id = str(fila.get("drive_folder_id") or "").strip()
+        file_id = str(fila.get("drive_file_id") or "").strip()
+        if folder_id:
+            carpetas.setdefault(folder_id, []).append(fila)
+        elif file_id:
+            sueltos.append(fila)
+
+    def comprobar(file_id: str):
+        nonlocal revisados
+        revisados += 1
+        try:
+            return obtener_archivo_drive(service, file_id), None
+        except Exception as error:
+            texto = str(error)
+            if "404" in texto or "File not found" in texto:
+                return None, "missing"
+            print("[DRIVE RECONCILE ERROR]", file_id, error)
+            return None, "error"
+
+    for folder_id, grupo in carpetas.items():
+        meta, err = comprobar(folder_id)
+        if err == "error":
+            continue
+        if err == "missing" or (meta and meta.get("trashed")):
+            supabase.table("auditoria_custodia").update({
+                "en_drive": False,
+                "estado_archivo": "ELIMINADO_EXTERNAMENTE",
+                "fecha_eliminacion": ahora_iso(),
+                "fecha_ultima_operacion": ahora_iso(),
+            }).eq("drive_folder_id", folder_id).eq("solicitante_id", usuario["id"]).execute()
+            cambios += 1
+            continue
+
+        padres = meta.get("parents") or []
+        parent_id = str(padres[0]) if padres else ""
+        anterior = str(grupo[0].get("drive_parent_id") or "")
+        if parent_id and parent_id != anterior:
+            parent_name = "DRIVE PROYECTO"
+            if parent_id != GOOGLE_FOLDER_ID:
+                try:
+                    parent_name = obtener_archivo_drive(service, parent_id).get("name") or parent_name
+                except Exception:
+                    pass
+            supabase.table("auditoria_custodia").update({
+                "drive_parent_id": parent_id,
+                "ubicacion_drive": parent_name,
+                "fecha_ultima_operacion": ahora_iso(),
+            }).eq("drive_folder_id", folder_id).eq("solicitante_id", usuario["id"]).execute()
+            cambios += 1
+
+    for fila in sueltos:
+        file_id = str(fila.get("drive_file_id") or "")
+        meta, err = comprobar(file_id)
+        if err == "error":
+            continue
+        if err == "missing" or (meta and meta.get("trashed")):
+            supabase.table("auditoria_custodia").update({
+                "en_drive": False,
+                "estado_archivo": "ELIMINADO_EXTERNAMENTE",
+                "fecha_eliminacion": ahora_iso(),
+                "fecha_ultima_operacion": ahora_iso(),
+            }).eq("id", fila["id"]).eq("solicitante_id", usuario["id"]).execute()
+            cambios += 1
+            continue
+
+        padres = meta.get("parents") or []
+        parent_id = str(padres[0]) if padres else ""
+        anterior = str(fila.get("drive_parent_id") or "")
+        if parent_id and parent_id != anterior:
+            parent_name = "DRIVE PROYECTO"
+            if parent_id != GOOGLE_FOLDER_ID:
+                try:
+                    parent_name = obtener_archivo_drive(service, parent_id).get("name") or parent_name
+                except Exception:
+                    pass
+            supabase.table("auditoria_custodia").update({
+                "drive_parent_id": parent_id,
+                "ubicacion_drive": parent_name,
+                "fecha_ultima_operacion": ahora_iso(),
+            }).eq("id", fila["id"]).eq("solicitante_id", usuario["id"]).execute()
+            cambios += 1
+
+    return {
+        "status": "ok",
+        "revisados": revisados,
+        "cambios": cambios,
+    }
+
+
+# ============================================================
 # WEBHOOK TELEGRAM
 # ============================================================
 
@@ -2437,6 +3106,94 @@ async def recibir_respuesta_telegram(request: Request):
             return {"status": "detalle_documento"}
 
         # ----------------------------------------------------
+        # DECISIÓN: MOVER / ELIMINAR SOLICITADO DESDE LA WEB
+        # ----------------------------------------------------
+        if action_data.startswith("opap:") or action_data.startswith("opre:"):
+            prefijo, solicitud_raw = action_data.split(":", 1)
+            try:
+                solicitud_id = str(UUID(solicitud_raw.strip()))
+            except (ValueError, TypeError, AttributeError):
+                telegram_request(
+                    "answerCallbackQuery",
+                    {
+                        "callback_query_id": callback_id,
+                        "text": "❌ ID de solicitud inválido.",
+                        "show_alert": True,
+                    },
+                )
+                return {"status": "callback_error"}
+
+            aprobar_operacion = prefijo == "opap"
+            try:
+                solicitud, cambio = procesar_solicitud_operacion(
+                    solicitud_id,
+                    aprobar_operacion,
+                    str(user_id),
+                )
+            except Exception as error:
+                print("[OPERACION CALLBACK ERROR]", error)
+                telegram_request(
+                    "answerCallbackQuery",
+                    {
+                        "callback_query_id": callback_id,
+                        "text": f"❌ No se pudo procesar: {error}"[:200],
+                        "show_alert": True,
+                    },
+                )
+                return {"status": "operation_callback_error", "error": str(error)}
+
+            estado_final = str(solicitud.get("estado") or "").upper()
+            if not cambio:
+                telegram_request(
+                    "answerCallbackQuery",
+                    {
+                        "callback_query_id": callback_id,
+                        "text": f"⚠️ La solicitud ya fue procesada: {estado_final}",
+                        "show_alert": True,
+                    },
+                )
+                return {"status": "operation_already_processed"}
+
+            telegram_request(
+                "answerCallbackQuery",
+                {
+                    "callback_query_id": callback_id,
+                    "text": f"Operación actualizada a: {estado_final}",
+                },
+            )
+
+            tipo = solicitud.get("tipo_operacion") or "OPERACIÓN"
+            icono = "✅" if estado_final == "APROBADO" else "❌"
+            texto = (
+                "🛡️ DataVault DLP - GM Ingenieros\n\n"
+                f"{icono} {tipo}: {estado_final}\n\n"
+                f"👤 Usuario: {solicitud.get('solicitante_nombre') or 'Usuario'}\n"
+                f"📄 Objeto: {solicitud.get('nombre_objeto') or 'Archivo/Carpeta'}\n"
+                f"📌 Tipo: {solicitud.get('objeto_tipo') or '—'}\n"
+            )
+            if solicitud.get("carpeta_destino_nombre"):
+                texto += f"➡️ Destino: {solicitud.get('carpeta_destino_nombre')}\n"
+            if solicitud.get("resultado"):
+                texto += f"\n📝 {solicitud.get('resultado')}\n"
+            texto += f"\n👤 Procesado por Telegram ID: {user_id}"
+
+            if chat_id and message_id:
+                telegram_request(
+                    "editMessageText",
+                    {
+                        "chat_id": chat_id,
+                        "message_id": message_id,
+                        "text": texto,
+                    },
+                )
+
+            return {
+                "status": "operation_processed",
+                "estado": estado_final,
+                "solicitud_id": solicitud_id,
+            }
+
+        # ----------------------------------------------------
         # NAVEGACIÓN: DETALLE DE UNA CARPETA / LOTE
         # ----------------------------------------------------
         if action_data.startswith("lot:"):
@@ -2559,7 +3316,16 @@ async def recibir_respuesta_telegram(request: Request):
                         resultado_lote = (
                             supabase
                             .table("auditoria_custodia")
-                            .update({"estado": "APROBADO"})
+                            .update({
+                                "estado": "APROBADO",
+                                "drive_folder_id": drive_lote["folder_id"],
+                                "drive_parent_id": GOOGLE_FOLDER_ID,
+                                "ubicacion_drive": drive_lote["folder_name"],
+                                "en_drive": True,
+                                "estado_archivo": "ACTIVO",
+                                "fecha_transferencia": ahora_iso(),
+                                "fecha_ultima_operacion": ahora_iso(),
+                            })
                             .eq("lote_id", lote_id)
                             .eq("estado", "PENDIENTE")
                             .execute()
@@ -2786,6 +3552,7 @@ async def recibir_respuesta_telegram(request: Request):
                     drive_id = subir_a_google_drive(
                         archivo_ram["nombre"],
                         archivo_ram["contenido"],
+                        auditoria_id=id_auditoria_str,
                     )
 
                     if not drive_id:
@@ -2809,7 +3576,16 @@ async def recibir_respuesta_telegram(request: Request):
                     resultado_update = (
                         supabase
                         .table("auditoria_custodia")
-                        .update({"estado": "APROBADO"})
+                        .update({
+                            "estado": "APROBADO",
+                            "drive_file_id": drive_id,
+                            "drive_parent_id": GOOGLE_FOLDER_ID,
+                            "ubicacion_drive": "DRIVE PROYECTO",
+                            "en_drive": True,
+                            "estado_archivo": "ACTIVO",
+                            "fecha_transferencia": ahora_iso(),
+                            "fecha_ultima_operacion": ahora_iso(),
+                        })
                         .eq("id", auditoria_id)
                         .eq("estado", "PENDIENTE")
                         .execute()
