@@ -4774,5 +4774,421 @@ window.addEventListener('DOMContentLoaded',()=>{
 })();
 </script>
 
+
+<script id="datavault-initial-hydration-fix">
+/* =========================================================
+   CARGA INICIAL ROBUSTA
+   Realtime solo escucha CAMBIOS nuevos. Al abrir la app hay
+   que hidratar primero los datos existentes de Supabase.
+   Este bloque evita que Inicio se quede en 0 / "Cargando..."
+   hasta cambiar de vista.
+   ========================================================= */
+(function(){
+  const enterAnterior = window.enterApp || enterApp;
+  let secuenciaEntrada = 0;
+  let hidratando = false;
+
+  function marcarInicioCargando(){
+    document.querySelectorAll('#view-inicio .metric-value').forEach(el=>{
+      el.textContent = '…';
+    });
+    const body=document.getElementById('inicioTableBody');
+    if(body){
+      body.innerHTML='<tr><td colspan="4" class="p-6 text-center text-slate-400"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Cargando registros...</td></tr>';
+    }
+  }
+
+  function inicioSigueCargando(){
+    const body=document.getElementById('inicioTableBody');
+    return !!body && /Cargando registros/i.test(body.textContent||'');
+  }
+
+  async function esperarSesionLista(){
+    // getSession asegura que el cliente de Supabase ya tenga disponible
+    // el JWT antes de consultar auditoria_custodia.
+    for(let intento=0; intento<4; intento++){
+      const {data,error}=await supabaseClient.auth.getSession();
+      if(error) throw error;
+      if(data?.session?.user){
+        const usuario=data.session.user;
+        if(!currentUser || currentUser.id!==usuario.id){
+          setSessionFromUser(usuario);
+        }
+        return usuario;
+      }
+      await new Promise(r=>setTimeout(r,120));
+    }
+    throw new Error('No se encontró una sesión activa de Supabase.');
+  }
+
+  async function cargarEstadoInicial(seq){
+    if(hidratando) return;
+    hidratando=true;
+    try{
+      // Esperamos dos frames para que la vista Inicio y los KPIs ya existan
+      // y estén visibles antes de escribir sus valores.
+      await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+      if(seq!==secuenciaEntrada) return;
+
+      await esperarSesionLista();
+      if(seq!==secuenciaEntrada) return;
+
+      // IMPORTANTE: primero cargamos datos históricos.
+      // loadAudit() también actualiza el dashboard del rol actual.
+      await loadAudit();
+      if(seq!==secuenciaEntrada) return;
+
+      // Después construimos Mis solicitudes / Aprobaciones.
+      await loadCola();
+      if(seq!==secuenciaEntrada) return;
+
+      // Si por alguna razón el usuario entró directamente al explorador.
+      if(document.getElementById('view-gestor')?.classList.contains('active')){
+        await loadFilesView();
+      }
+
+      // Realtime queda para los cambios que ocurran DESPUÉS de esta carga.
+      if(typeof listenRealtime==='function') listenRealtime();
+
+      console.log('[DATAVAULT INICIO] carga inicial completada');
+    }catch(err){
+      console.error('[DATAVAULT INICIO ERROR]',err);
+      const body=document.getElementById('inicioTableBody');
+      if(body && inicioSigueCargando()){
+        body.innerHTML='<tr><td colspan="4" class="p-6 text-center text-red-400">No se pudieron cargar los datos iniciales.</td></tr>';
+      }
+    }finally{
+      hidratando=false;
+    }
+  }
+
+  // Sustituimos la entrada final, pero conservamos todo lo que ya hacía
+  // el HTML (mostrar app, roles, navegación, etc.).
+  window.enterApp = enterApp = function(){
+    const seq=++secuenciaEntrada;
+
+    // Ejecuta la lógica existente de entrada.
+    enterAnterior();
+
+    // En vez de mostrar 0 mientras llegan los datos, mostramos estado de carga.
+    marcarInicioCargando();
+
+    // Carga inmediata y ordenada.
+    cargarEstadoInicial(seq);
+
+    // Respaldo: si una consulta inicial fue interrumpida por el arranque de
+    // sesión o por otra llamada simultánea, se reintenta una sola vez.
+    setTimeout(()=>{
+      if(seq===secuenciaEntrada && inicioSigueCargando()){
+        cargarEstadoInicial(seq);
+      }
+    },900);
+  };
+})();
+</script>
+
+
+
+<style id="datavault-operations-v1-css">
+.dv-op-actions{display:flex;gap:6px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
+.dv-op-btn{border:1px solid #d8e1e6;background:#fff;color:#385264;border-radius:7px;padding:6px 9px;font-size:9px;font-weight:700;white-space:nowrap;cursor:pointer}
+.dv-op-btn:hover{background:#f4f8fa;border-color:#b8c8d1}
+.dv-op-btn.delete{color:#b42318;border-color:#fecaca;background:#fff7f7}
+.dv-op-btn.delete:hover{background:#feecec}
+.dv-op-btn:disabled{opacity:.45;cursor:not-allowed}
+.dv-op-legacy{font-size:8px;color:#94a3b8;white-space:nowrap}
+#dvOperationModal{position:fixed;inset:0;z-index:9999;background:rgba(8,22,32,.5);display:flex;align-items:center;justify-content:center;padding:18px}
+#dvOperationModal.dv-hidden{display:none!important}
+.dv-op-modal-card{width:min(520px,96vw);background:#fff;border-radius:15px;box-shadow:0 24px 70px rgba(15,23,42,.25);border:1px solid #e2e8f0;overflow:hidden}
+.dv-op-modal-head{padding:18px 20px;border-bottom:1px solid #edf1f4;display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.dv-op-modal-body{padding:20px}
+.dv-op-toast{position:fixed;right:22px;bottom:22px;z-index:10000;background:#173647;color:#fff;padding:11px 14px;border-radius:10px;box-shadow:0 12px 30px rgba(15,23,42,.25);font-size:12px;font-weight:700;max-width:360px}
+@media(max-width:900px){.dv-op-actions{justify-content:flex-start}.dv-op-btn{font-size:10px}}
+</style>
+
+<script id="datavault-operations-v1">
+/* =========================================================
+   OPERACIONES INTEGRADAS EN ARCHIVOS
+   - Mover / Eliminar se solicitan desde Archivos.
+   - El custodio aprueba por Telegram.
+   - Google Drive ejecuta la operación.
+   - Supabase actualiza y Realtime refresca la web.
+   - Cambios manuales en Drive se reconcilian cada 10 s.
+   ========================================================= */
+(function(){
+  let dvOpsRequestCache=[];
+  let dvOpsUploadUnits=[];
+  let dvOpsSyncTimer=null;
+  let dvOpsSyncBusy=false;
+  let dvCurrentMove=null;
+
+  const norm=v=>String(v??'').trim().toLowerCase();
+  const isAdmin=()=>['jefe','admin','administrador'].includes(norm(currentRole));
+  const myUid=()=>String(currentUser?.id||'').trim();
+  const rowMine=r=>{
+    if(myUid() && String(r?.solicitante_id||'').trim()===myUid()) return true;
+    if(currentUserEmail && norm(r?.solicitante_correo)===norm(currentUserEmail)) return true;
+    return !!currentDisplayName && norm(r?.solicitante_nombre||r?.usuario_solicitante)===norm(currentDisplayName);
+  };
+  const deleted=r=>/^ELIMINADO/.test(String(r?.estado_archivo||'').toUpperCase());
+  const rowState=r=>deleted(r)?'ELIMINADO':String(r?.estado||'PENDIENTE').toUpperCase();
+  const groupState=rows=>{
+    if(rows.some(deleted)) return rows.every(deleted)?'ELIMINADO':'PARCIAL';
+    return typeof dvGroupState==='function'?dvGroupState(rows):String(rows?.[0]?.estado||'PENDIENTE').toUpperCase();
+  };
+  const stateClass=s=>{
+    s=String(s||'').toUpperCase();
+    if(s==='APROBADO')return 'status-approved';
+    if(s==='PENDIENTE')return 'status-pending';
+    return 'status-rejected';
+  };
+
+  async function authHeaders(json=true){
+    const {data,error}=await supabaseClient.auth.getSession();
+    if(error) throw error;
+    const token=data?.session?.access_token;
+    if(!token) throw new Error('Sesión expirada. Vuelve a iniciar sesión.');
+    const h={Authorization:`Bearer ${token}`};
+    if(json)h['Content-Type']='application/json';
+    return h;
+  }
+
+  function toast(msg){
+    const old=document.getElementById('dvOpToast');if(old)old.remove();
+    const el=document.createElement('div');el.id='dvOpToast';el.className='dv-op-toast';el.textContent=msg;document.body.appendChild(el);
+    setTimeout(()=>el.remove(),3500);
+  }
+
+  function ensureTableHeader(){
+    const tr=document.querySelector('#view-gestor .file-table-wrap thead tr');
+    if(tr && !tr.querySelector('[data-dv-op-head]')){
+      const th=document.createElement('th');th.dataset.dvOpHead='1';th.textContent='Acciones';tr.appendChild(th);
+    }
+    const loading=document.querySelector('#filesTableBody td[colspan="5"]');if(loading)loading.colSpan=6;
+  }
+
+  function ensureModal(){
+    if(document.getElementById('dvOperationModal'))return;
+    const modal=document.createElement('div');
+    modal.id='dvOperationModal';modal.className='dv-hidden';
+    modal.innerHTML=`<div class="dv-op-modal-card">
+      <div class="dv-op-modal-head"><div><p class="text-[10px] uppercase tracking-widest text-slate-400 font-bold">Solicitud de movimiento</p><h3 class="text-lg font-extrabold text-slate-800 mt-1" id="dvMoveTitle">Mover elemento</h3><p class="text-xs text-slate-500 mt-1">La operación se ejecutará solo después de la aprobación del custodio.</p></div><button type="button" class="icon-btn" onclick="dvCloseMoveModal()"><i class="fa-solid fa-xmark"></i></button></div>
+      <div class="dv-op-modal-body space-y-4">
+        <div><label class="field-label">Destino en Google Drive</label><select id="dvMoveDestination" class="input-modern w-full"><option>Cargando...</option></select></div>
+        <div id="dvMoveMessage" class="text-xs text-slate-500"></div>
+        <div class="flex justify-end gap-2"><button type="button" class="secondary-btn" onclick="dvCloseMoveModal()">Cancelar</button><button type="button" class="primary-btn" id="dvMoveSubmit" onclick="dvSubmitMoveRequest()"><i class="fa-solid fa-paper-plane"></i>Solicitar movimiento</button></div>
+      </div>
+    </div>`;
+    modal.addEventListener('click',e=>{if(e.target===modal)dvCloseMoveModal();});
+    document.body.appendChild(modal);
+  }
+
+  window.dvCloseMoveModal=function(){document.getElementById('dvOperationModal')?.classList.add('dv-hidden');dvCurrentMove=null;};
+
+  function operationButtons(kind, id, rowsOrRow){
+    if(isAdmin()) return '<span class="dv-op-legacy">Supervisión</span>';
+    const rows=Array.isArray(rowsOrRow)?rowsOrRow:[rowsOrRow];
+    const approved=rows.every(r=>String(r?.estado||'').toUpperCase()==='APROBADO') && !rows.some(deleted);
+    const linked=kind==='CARPETA' ? !!String(rows[0]?.drive_folder_id||'').trim() : !!String(rows[0]?.drive_file_id||'').trim();
+    if(!approved) return '<span class="dv-op-legacy">Disponible al aprobar</span>';
+    if(!linked) return '<span class="dv-op-legacy" title="Registro histórico sin ID de Drive">Sin vínculo Drive</span>';
+    const safe=escapeHtml(String(id));
+    return `<div class="dv-op-actions"><button class="dv-op-btn" onclick="event.stopPropagation();dvRequestMove('${kind}','${safe}')"><i class="fa-solid fa-arrows-turn-right mr-1"></i>Mover</button><button class="dv-op-btn delete" onclick="event.stopPropagation();dvRequestDelete('${kind}','${safe}')"><i class="fa-solid fa-trash mr-1"></i>Eliminar</button></div>`;
+  }
+
+  function opsLooseRow(r){
+    const display=rowState(r);
+    return `<tr><td><div class="flex items-center gap-2"><div class="h-7 w-7 rounded-md bg-[#edf3f5] text-[#6c8698] flex items-center justify-center"><i class="fa-solid ${dvIconFor(r.nombre_archivo)} text-[10px]"></i></div><div><p class="font-semibold text-[#1f2b31] text-[9px]">${escapeHtml(r.nombre_archivo||'Sin nombre')}</p><p class="dv-unit-sub">${escapeHtml(r.solicitante_nombre||r.usuario_solicitante||'—')}</p></div></div></td><td class="text-[8px] text-slate-500">${escapeHtml(r.ubicacion_drive||'Archivo suelto')}</td><td><span class="integrity-ok"><i class="fa-solid fa-fingerprint"></i> Verificado</span></td><td><span class="status-pill ${stateClass(display)}">${escapeHtml(display)}</span></td><td class="text-[8px] text-slate-400">${dvDate(r.fecha_ultima_operacion||r.fecha_solicitud)}</td><td>${operationButtons('ARCHIVO',r.id,r)}</td></tr>`;
+  }
+
+  function opsFolderRows(rows,loteId){
+    const root=dvRoot(rows[0])||'Carpeta';const total=rows.reduce((s,r)=>s+Number(r.tamano_bytes||0),0);const state=groupState(rows);const id=dvFolderDetailId(loteId);const tree=dvBuildTree(rows);const last=rows.map(r=>r.fecha_ultima_operacion||r.fecha_solicitud||'').sort().reverse()[0];
+    return `<tr class="dv-folder-summary"><td><button class="dv-folder-toggle" onclick="toggleDvFolder('${escapeHtml(String(loteId))}')"><span class="dv-caret" id="${id}-icon">▶</span><i class="fa-solid fa-folder text-amber-500"></i><span>${escapeHtml(root)}</span><span class="dv-folder-chip">${rows.length} archivo(s)</span></button></td><td class="text-[8px] text-slate-500">${escapeHtml(rows[0]?.ubicacion_drive||'Carpeta / lote')}</td><td><span class="integrity-ok"><i class="fa-solid fa-fingerprint"></i> ${formatBytes(total)}</span></td><td><span class="status-pill ${stateClass(state)}">${escapeHtml(state)}</span></td><td class="text-[8px] text-slate-400">${dvDate(last)}</td><td>${operationButtons('CARPETA',loteId,rows)}</td></tr><tr id="${id}" class="hidden dv-folder-detail"><td colspan="6"><div class="dv-folder-panel"><div class="flex flex-wrap justify-between gap-2 mb-2"><div><b class="text-[11px] text-slate-700"><i class="fa-solid fa-folder-open mr-2 text-amber-500"></i>${escapeHtml(root)}</b><div class="text-[8px] text-slate-400 mt-1">Lote ${escapeHtml(String(loteId))}</div></div><span class="text-[9px] text-slate-500">${rows.length} archivo(s) · ${formatBytes(total)}</span></div><div class="dv-tree">${dvRenderTree(tree)}</div></div></td></tr>`;
+  }
+
+  // Render final del Explorador con acciones integradas.
+  renderFilesTable=function(rows){
+    ensureTableHeader();
+    const body=document.getElementById('filesTableBody');if(!body)return;
+    const units=dvGroupedUnits(rows||[]);const count=document.getElementById('fileCountLabel');if(count)count.textContent=`${units.length} unidad${units.length===1?'':'es'} visuales · ${(rows||[]).length} archivo(s)`;
+    if(!units.length){body.innerHTML='<tr><td colspan="6" class="p-8 text-center text-slate-400">No hay archivos registrados.</td></tr>';return;}
+    body.innerHTML=units.map(u=>u.type==='folder'?opsFolderRows(u.rows,u.id):opsLooseRow(u.row)).join('');
+  };
+
+  // Papelera muestra eliminados. El resto del explorador oculta eliminados.
+  filterFiles=function(){
+    const q=(document.getElementById('fileSearch')?.value||'').toLowerCase().trim();
+    let rows=(auditCache||[]).filter(r=>!q||[r.nombre_archivo,r.solicitante_nombre,r.usuario_solicitante,r.hash_sha256,r.ruta_relativa,r.ubicacion_drive].some(v=>String(v||'').toLowerCase().includes(q)));
+    if(dvExplorerFolder==='__TRASH__') rows=rows.filter(deleted);
+    else {
+      rows=rows.filter(r=>!deleted(r));
+      if(dvExplorerFolder==='__SHARED__' && typeof isSharedFile==='function')rows=rows.filter(isSharedFile);
+      else if(dvExplorerFolder)rows=rows.filter(r=>dvRoot(r)===dvExplorerFolder);
+    }
+    renderFilesTable(rows);
+  };
+
+  window.dvRequestMove=async function(kind,id){
+    try{
+      ensureModal();
+      dvCurrentMove={kind,id};
+      const modal=document.getElementById('dvOperationModal');modal.classList.remove('dv-hidden');
+      document.getElementById('dvMoveTitle').textContent=kind==='CARPETA'?'Mover carpeta':'Mover archivo';
+      const sel=document.getElementById('dvMoveDestination');sel.innerHTML='<option>Cargando...</option>';
+      document.getElementById('dvMoveMessage').textContent='Consultando carpetas disponibles en Drive...';
+      const res=await fetch(`${API_URL}/drive-folders`,{headers:await authHeaders(false)});
+      const data=await res.json().catch(()=>({}));
+      if(!res.ok)throw new Error(data.detail||`Error HTTP ${res.status}`);
+      const folders=Array.isArray(data.folders)?data.folders:[];
+      sel.innerHTML=folders.map(f=>`<option value="${escapeHtml(f.id)}">${escapeHtml(f.name)}</option>`).join('');
+      document.getElementById('dvMoveMessage').textContent='Se creará una solicitud PENDIENTE y el custodio la resolverá por Telegram.';
+    }catch(err){dvCloseMoveModal();alert('No se pudieron cargar los destinos: '+(err.message||err));}
+  };
+
+  window.dvSubmitMoveRequest=async function(){
+    if(!dvCurrentMove)return;
+    const btn=document.getElementById('dvMoveSubmit');const sel=document.getElementById('dvMoveDestination');
+    try{
+      btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Enviando...';
+      const payload={tipo_operacion:'MOVER',objeto_tipo:dvCurrentMove.kind,carpeta_destino_id:sel.value};
+      if(dvCurrentMove.kind==='CARPETA')payload.lote_id=dvCurrentMove.id;else payload.auditoria_id=dvCurrentMove.id;
+      const res=await fetch(`${API_URL}/operations/request`,{method:'POST',headers:await authHeaders(),body:JSON.stringify(payload)});
+      const data=await res.json().catch(()=>({}));
+      if(!res.ok)throw new Error(typeof data.detail==='string'?data.detail:`Error HTTP ${res.status}`);
+      dvCloseMoveModal();toast('Solicitud de movimiento enviada al custodio.');await loadCola();
+    }catch(err){alert('No se pudo solicitar el movimiento: '+(err.message||err));}
+    finally{if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i>Solicitar movimiento';}}
+  };
+
+  window.dvRequestDelete=async function(kind,id){
+    const texto=kind==='CARPETA'?'esta carpeta completa':'este archivo';
+    if(!confirm(`¿Solicitar eliminación de ${texto}? El custodio deberá aprobarla antes de enviarla a la papelera de Google Drive.`))return;
+    try{
+      const payload={tipo_operacion:'ELIMINAR',objeto_tipo:kind};
+      if(kind==='CARPETA')payload.lote_id=id;else payload.auditoria_id=id;
+      const res=await fetch(`${API_URL}/operations/request`,{method:'POST',headers:await authHeaders(),body:JSON.stringify(payload)});
+      const data=await res.json().catch(()=>({}));
+      if(!res.ok)throw new Error(typeof data.detail==='string'?data.detail:`Error HTTP ${res.status}`);
+      toast('Solicitud de eliminación enviada al custodio.');await loadCola();
+    }catch(err){alert('No se pudo solicitar la eliminación: '+(err.message||err));}
+  };
+
+  function requestMine(r){return !myUid() || String(r?.solicitante_id||'')===myUid();}
+  function opLabel(r){return String(r.tipo_operacion||'').toUpperCase()==='MOVER'?'Mover':'Eliminar';}
+
+  async function queryRequests(){
+    try{
+      let q=supabaseClient.from('solicitudes_operacion').select('*').order('fecha_solicitud',{ascending:false}).limit(500);
+      if(!isAdmin() && myUid())q=q.eq('solicitante_id',myUid());
+      const {data,error}=await q;if(error)throw error;dvOpsRequestCache=Array.isArray(data)?data:[];
+    }catch(err){console.warn('[DATAVAULT OPERACIONES] solicitudes_operacion no disponible:',err);dvOpsRequestCache=[];}
+  }
+
+  function uploadUnitMine(u){const r=u.type==='folder'?u.rows[0]:u.row;return rowMine(r);}
+  function renderUnifiedRequests(){
+    const tbody=document.getElementById('colaContainer');if(!tbody)return;
+    const q=norm(document.getElementById('solSearch')?.value||'');const stateFilter=String(document.getElementById('solStateFilter')?.value||'').toUpperCase();
+    let uploads=dvOpsUploadUnits.filter(u=>isAdmin()||uploadUnitMine(u));
+    let ops=dvOpsRequestCache.filter(r=>isAdmin()||requestMine(r));
+
+    const rows=[];
+    uploads.forEach((u,i)=>{const isF=u.type==='folder',r=isF?u.rows[0]:u.row,state=groupState(isF?u.rows:[r]),name=isF?(dvRoot(r)||'Carpeta'):(r.nombre_archivo||'Archivo');rows.push({kind:'UPLOAD',id:isF?u.id:r.id,type:isF?'Carga de carpeta':'Carga de archivo',origin:name,dest:'Google Drive',user:r.solicitante_nombre||r.usuario_solicitante||'—',date:u.date,state,action:isAdmin()&&state==='PENDIENTE'?'Resolver en Telegram':'—'});});
+    ops.forEach(r=>rows.push({kind:'OP',id:r.id,type:opLabel(r),origin:r.nombre_objeto||r.carpeta_origen||'—',dest:r.tipo_operacion==='MOVER'?(r.carpeta_destino_nombre||'—'):'Papelera',user:r.solicitante_nombre||'—',date:r.fecha_solicitud,state:String(r.estado||'PENDIENTE').toUpperCase(),action:isAdmin()&&String(r.estado).toUpperCase()==='PENDIENTE'?'Resolver en Telegram':'—'}));
+    rows.sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
+    const filtered=rows.filter(r=>(!q||norm([r.id,r.type,r.origin,r.dest,r.user].join(' ')).includes(q))&&(!stateFilter||r.state===stateFilter));
+    tbody.innerHTML=filtered.length?filtered.map(r=>`<tr><td>#${escapeHtml(String(r.id||'').slice(-8))}</td><td>${escapeHtml(r.type)}</td><td>${escapeHtml(r.origin)}</td><td>${escapeHtml(r.dest)}</td><td>${escapeHtml(r.user)}</td><td>${formatShortDate(r.date)}</td><td>${statusPill(r.state)}</td><td>${r.action==='—'?'—':`<span class="text-[9px] text-blue-600 font-semibold"><i class="fa-brands fa-telegram mr-1"></i>${r.action}</span>`}</td></tr>`).join(''):'<tr><td colspan="8" class="p-8 text-center text-slate-400">No se encontraron solicitudes.</td></tr>';
+    const pending=rows.filter(r=>r.state==='PENDIENTE').length;
+    const sum=document.getElementById('solSummary');if(sum)sum.textContent=`${rows.length} solicitud(es) · ${pending} pendiente(s)`;
+    const mini=document.getElementById('solPendingMini');if(mini)mini.textContent=pending;
+    updateKpis({pendientes:pending});
+
+    // Corrige también la tarjeta Pendientes del subordinado después de loadRoleHome().
+    if(!isAdmin()){
+      const cards=[...document.querySelectorAll('#view-inicio .grid.grid-cols-2.xl\\:grid-cols-4 .dashboard-card')];
+      const pendingCard=cards.find(c=>/Pendientes/i.test(c.querySelector('.metric-label')?.textContent||''));
+      const value=pendingCard?.querySelector('.metric-value');if(value)value.textContent=pending;
+    }
+  }
+
+  loadCola=async function(){
+    const [{data,error}]=await Promise.all([supabaseClient.from('auditoria_custodia').select('*').order('fecha_solicitud',{ascending:false}).limit(1000),queryRequests()]);
+    if(error){console.error('[DATAVAULT SOLICITUDES] auditoria:',error);return;}
+    const rows=Array.isArray(data)?data:[];dvOpsUploadUnits=dvGroupedUnits(rows);renderUnifiedRequests();
+  };
+  filterSolicitudesUI=renderUnifiedRequests;
+
+  // Realtime para las dos tablas que cambian la interfaz.
+  let refreshTimer=null;
+  async function refreshAll(){
+    clearTimeout(refreshTimer);
+    refreshTimer=setTimeout(async()=>{
+      try{
+        await loadAudit();
+        await loadCola();
+        if(document.getElementById('view-gestor')?.classList.contains('active'))await loadFilesView();
+        if(isAdmin() && typeof loadAdminUsers==='function' && document.getElementById('view-usuarios')?.classList.contains('active'))await loadAdminUsers();
+      }catch(err){console.error('[DATAVAULT REALTIME REFRESH]',err);}
+    },180);
+  }
+
+  listenRealtime=function(){
+    const olds=[auditRealtimeChannel,colaRealtimeChannel,window.__dvRoleAuditChannel,window.__dvRealtimeMainChannel,window.__dvOpsRealtime];
+    olds.forEach(ch=>{if(ch){try{supabaseClient.removeChannel(ch);}catch(_){}}});
+    auditRealtimeChannel=null;colaRealtimeChannel=null;window.__dvRoleAuditChannel=null;window.__dvRealtimeMainChannel=null;window.__dvOpsRealtime=null;
+    window.__dvOpsRealtime=supabaseClient.channel('datavault_operaciones_realtime_v1')
+      .on('postgres_changes',{event:'*',schema:'public',table:'auditoria_custodia'},refreshAll)
+      .on('postgres_changes',{event:'*',schema:'public',table:'solicitudes_operacion'},refreshAll)
+      .subscribe(status=>console.log('[DATAVAULT REALTIME]',status));
+  };
+
+  async function backfillLegacyDriveIds(){
+    if(!currentUser || sessionStorage.getItem('dv_legacy_backfill_done')==='1') return;
+    try{
+      const res=await fetch(`${API_URL}/drive/backfill-legacy`,{method:'POST',headers:await authHeaders(false)});
+      if(res.ok){
+        const data=await res.json().catch(()=>({}));
+        sessionStorage.setItem('dv_legacy_backfill_done','1');
+        if(Number(data.vinculados||0)>0) console.log('[DRIVE LEGACY LINK]',data);
+      }
+    }catch(err){console.warn('[DRIVE LEGACY LINK]',err.message||err);}
+  }
+
+  async function reconcileDrive(){
+    if(dvOpsSyncBusy || !currentUser)return;
+    dvOpsSyncBusy=true;
+    try{
+      const res=await fetch(`${API_URL}/drive/reconcile`,{method:'POST',headers:await authHeaders(false)});
+      if(!res.ok)return;
+      const data=await res.json().catch(()=>({}));
+      if(Number(data.cambios||0)>0){console.log('[DRIVE SYNC]',data);await refreshAll();}
+    }catch(err){console.warn('[DRIVE SYNC]',err.message||err);}
+    finally{dvOpsSyncBusy=false;}
+  }
+
+  function startDriveSync(){
+    clearInterval(dvOpsSyncTimer);
+    setTimeout(async()=>{await backfillLegacyDriveIds();await reconcileDrive();},1200);
+    dvOpsSyncTimer=setInterval(reconcileDrive,10000);
+  }
+
+  const finalEnter=enterApp;
+  enterApp=function(){
+    finalEnter();
+    ensureTableHeader();ensureModal();
+    setTimeout(()=>{listenRealtime();startDriveSync();loadCola();},500);
+  };
+
+  const finalLogout=handleLogout;
+  handleLogout=async function(){
+    clearInterval(dvOpsSyncTimer);dvOpsSyncTimer=null;
+    if(window.__dvOpsRealtime){try{await supabaseClient.removeChannel(window.__dvOpsRealtime);}catch(_){}window.__dvOpsRealtime=null;}
+    return finalLogout();
+  };
+
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&currentUser)reconcileDrive();});
+  document.addEventListener('DOMContentLoaded',()=>{ensureTableHeader();ensureModal();});
+})();
+</script>
+
 </body>
 </html>
