@@ -5404,5 +5404,461 @@ window.addEventListener('DOMContentLoaded',()=>{
 })();
 </script>
 
+
+<script id="datavault-dashboard-inventory-v3">
+/* =========================================================
+   DASHBOARD V3 · INVENTARIO ACTUAL + AUDITORÍA HISTÓRICA
+
+   SUBORDINADO
+   - Mis archivos = archivos APROBADOS que siguen activos en Drive.
+   - Pendientes = cargas + operaciones pendientes del usuario.
+   - Aprobados / Rechazados = historial del usuario.
+   - Actividad reciente = historial del usuario.
+
+   ADMIN
+   - Archivos protegidos = inventario activo global.
+   - Solicitudes pendientes = cargas + operaciones pendientes globales.
+   - Usuarios con actividad = usuarios con registros.
+   - Rechazados = historial global.
+   - Actividad reciente = historial global.
+
+   La auditoría NO se borra al eliminar un archivo.
+   ========================================================= */
+(function(){
+  let dvDashChannel = null;
+  let dvDashTimer = null;
+  let dvDashBusy = false;
+  let dvDashQueued = false;
+
+  const norm = v => String(v ?? '').trim().toLowerCase();
+  const upper = v => String(v ?? '').trim().toUpperCase();
+
+  function isAdmin(){
+    return ['jefe','admin','administrador'].includes(norm(currentRole));
+  }
+
+  function rowMine(r){
+    const uid = String(currentUser?.id || '').trim();
+    const email = norm(currentUserEmail || currentUser?.email);
+    const name = norm(currentDisplayName || currentUser?.user_metadata?.full_name);
+
+    if(uid && String(r?.solicitante_id || '').trim() === uid) return true;
+    if(email && norm(r?.solicitante_correo) === email) return true;
+
+    const rowName = norm(
+      r?.solicitante_nombre ||
+      r?.usuario_solicitante ||
+      r?.usuario
+    );
+
+    return !!name && rowName === name;
+  }
+
+  function isDeleted(r){
+    const estadoArchivo = upper(r?.estado_archivo);
+    return (
+      r?.en_drive === false ||
+      estadoArchivo.startsWith('ELIMINADO') ||
+      !!r?.fecha_eliminacion
+    );
+  }
+
+  function isActiveInventory(r){
+    // Un registro rechazado o pendiente nunca forma parte del inventario.
+    if(upper(r?.estado) !== 'APROBADO') return false;
+
+    // Si Drive/Supabase confirmó eliminación, sale del inventario.
+    if(isDeleted(r)) return false;
+
+    // Compatibilidad con aprobaciones antiguas:
+    // en_drive puede ser NULL hasta que /drive/backfill-legacy o
+    // /drive/reconcile termine de enlazarlas.
+    return r?.en_drive !== false;
+  }
+
+  function rowUserKey(r){
+    return String(
+      r?.solicitante_id ||
+      r?.solicitante_correo ||
+      r?.solicitante_nombre ||
+      r?.usuario_solicitante ||
+      ''
+    ).trim();
+  }
+
+  function pendingUploadUnits(rows){
+    const seenLots = new Set();
+    let total = 0;
+
+    for(const r of rows){
+      if(upper(r?.estado) !== 'PENDIENTE') continue;
+
+      const lote = String(r?.lote_id || '').trim();
+
+      if(lote){
+        if(!seenLots.has(lote)){
+          seenLots.add(lote);
+          total++;
+        }
+      }else{
+        total++;
+      }
+    }
+
+    return total;
+  }
+
+  function pendingOperationCount(rows){
+    return rows.filter(r => upper(r?.estado) === 'PENDIENTE').length;
+  }
+
+  function setCard(card, labelText, valueText, trendText){
+    if(!card) return;
+
+    const label = card.querySelector('.metric-label');
+    const value = card.querySelector('.metric-value');
+    const trend = card.querySelector('.metric-trend');
+
+    if(label) label.textContent = labelText;
+    if(value) value.textContent = valueText;
+    if(trend) trend.textContent = trendText;
+  }
+
+  function actionForAudit(r){
+    if(r?.fecha_eliminacion || upper(r?.estado_archivo).startsWith('ELIMINADO')){
+      return 'Eliminación';
+    }
+
+    if(r?.lote_id) return 'Carga de carpeta';
+    return 'Carga de archivo';
+  }
+
+  function resultPillForAudit(r){
+    if(isDeleted(r)){
+      return '<span class="status-pill status-rejected">Eliminado</span>';
+    }
+
+    const estado = upper(r?.estado || 'PENDIENTE');
+    return statusPill(estado);
+  }
+
+  function renderRecent(rows){
+    const body = document.getElementById('inicioTableBody');
+    if(!body) return;
+
+    const visible = [...rows]
+      .sort((a,b) =>
+        String(
+          b?.fecha_ultima_operacion ||
+          b?.fecha_solicitud ||
+          ''
+        ).localeCompare(
+          String(
+            a?.fecha_ultima_operacion ||
+            a?.fecha_solicitud ||
+            ''
+          )
+        )
+      )
+      .slice(0, 6);
+
+    body.innerHTML = visible.length
+      ? visible.map(r => {
+          const fecha =
+            r?.fecha_ultima_operacion ||
+            r?.fecha_solicitud;
+
+          const usuario =
+            r?.solicitante_nombre ||
+            r?.usuario_solicitante ||
+            r?.solicitante_correo ||
+            'Usuario';
+
+          return `
+            <tr>
+              <td>${formatShortDate(fecha)}</td>
+              <td>${escapeHtml(usuario)}</td>
+              <td>${escapeHtml(actionForAudit(r))}</td>
+              <td>${resultPillForAudit(r)}</td>
+            </tr>
+          `;
+        }).join('')
+      : '<tr><td colspan="4" class="p-6 text-center text-slate-400">No existen registros.</td></tr>';
+  }
+
+  async function fetchDashboardData(){
+    const auditReq = supabaseClient
+      .from('auditoria_custodia')
+      .select('*')
+      .order('fecha_solicitud', {ascending:false})
+      .limit(2000);
+
+    let opsReq = supabaseClient
+      .from('solicitudes_operacion')
+      .select('*')
+      .order('fecha_solicitud', {ascending:false})
+      .limit(1000);
+
+    if(!isAdmin() && currentUser?.id){
+      opsReq = opsReq.eq('solicitante_id', currentUser.id);
+    }
+
+    const [
+      {data:auditData, error:auditError},
+      {data:opsData, error:opsError}
+    ] = await Promise.all([auditReq, opsReq]);
+
+    if(auditError) throw auditError;
+
+    // Si todavía no existe la tabla de operaciones, el dashboard principal
+    // sigue funcionando con auditoria_custodia.
+    if(opsError){
+      console.warn('[DASHBOARD operaciones]', opsError);
+    }
+
+    let audit = Array.isArray(auditData) ? auditData : [];
+    let ops = Array.isArray(opsData) ? opsData : [];
+
+    if(!isAdmin()){
+      audit = audit.filter(rowMine);
+      ops = ops.filter(r =>
+        !currentUser?.id ||
+        String(r?.solicitante_id || '') === String(currentUser.id)
+      );
+    }
+
+    return {audit, ops};
+  }
+
+  function renderDashboard(audit, ops){
+    const active = audit.filter(isActiveInventory);
+    const approved = audit.filter(r => upper(r?.estado) === 'APROBADO').length;
+    const rejected = audit.filter(r => upper(r?.estado) === 'RECHAZADO').length;
+
+    const pendingUploads = pendingUploadUnits(audit);
+    const pendingOps = pendingOperationCount(ops);
+    const pendingTotal = pendingUploads + pendingOps;
+
+    const cards = [
+      ...document.querySelectorAll(
+        '#view-inicio .grid.grid-cols-2.xl\\:grid-cols-4 .dashboard-card'
+      )
+    ];
+
+    if(isAdmin()){
+      setCard(
+        cards[0],
+        'Archivos protegidos',
+        active.length,
+        'Inventario activo en Drive'
+      );
+
+      setCard(
+        cards[1],
+        'Solicitudes pendientes',
+        pendingTotal,
+        'Requieren revisión'
+      );
+
+      setCard(
+        cards[2],
+        'Usuarios con actividad',
+        new Set(audit.map(rowUserKey).filter(Boolean)).size,
+        'Con cargas registradas'
+      );
+
+      setCard(
+        cards[3],
+        'Rechazados',
+        rejected,
+        'Eventos bloqueados'
+      );
+    }else{
+      setCard(
+        cards[0],
+        'Mis archivos',
+        active.length,
+        'Actualmente en custodia'
+      );
+
+      setCard(
+        cards[1],
+        'Pendientes',
+        pendingTotal,
+        'Esperando aprobación'
+      );
+
+      setCard(
+        cards[2],
+        'Aprobados',
+        approved,
+        'Historial aprobado'
+      );
+
+      setCard(
+        cards[3],
+        'Rechazados',
+        rejected,
+        'No autorizados'
+      );
+    }
+
+    // Mantener caches que usan otras vistas del HTML.
+    auditCache = audit;
+
+    // Actividad reciente sigue siendo HISTÓRICA, no inventario.
+    renderRecent(audit);
+
+    const welcome = document.getElementById('dashWelcome');
+    if(welcome){
+      welcome.textContent =
+        currentDisplayName ||
+        (isAdmin() ? 'Administrador' : 'Usuario');
+    }
+
+    // Badges de pendientes.
+    const bell = document.getElementById('bellBadge');
+    const topBell = document.getElementById('topBellBadge');
+
+    [bell, topBell].forEach(el => {
+      if(!el) return;
+
+      if(pendingTotal > 0){
+        el.textContent = pendingTotal;
+        el.classList.remove('hidden');
+      }else{
+        el.classList.add('hidden');
+      }
+    });
+  }
+
+  async function refreshDashboard(reason='manual'){
+    clearTimeout(dvDashTimer);
+
+    dvDashTimer = setTimeout(async () => {
+      if(dvDashBusy){
+        dvDashQueued = true;
+        return;
+      }
+
+      dvDashBusy = true;
+
+      try{
+        const {audit, ops} = await fetchDashboardData();
+        renderDashboard(audit, ops);
+
+        console.log(
+          '[DATAVAULT DASHBOARD V3]',
+          reason,
+          {
+            audit:audit.length,
+            operaciones:ops.length,
+            activos:audit.filter(isActiveInventory).length
+          }
+        );
+      }catch(err){
+        console.error('[DATAVAULT DASHBOARD V3 ERROR]', err);
+
+        const body = document.getElementById('inicioTableBody');
+        if(body && /Cargando/i.test(body.textContent || '')){
+          body.innerHTML = `
+            <tr>
+              <td colspan="4" class="p-6 text-center text-red-500">
+                No se pudieron cargar los datos: ${escapeHtml(err?.message || String(err))}
+              </td>
+            </tr>
+          `;
+        }
+      }finally{
+        dvDashBusy = false;
+
+        if(dvDashQueued){
+          dvDashQueued = false;
+          refreshDashboard('queued');
+        }
+      }
+    }, 80);
+  }
+
+  function connectRealtime(){
+    if(dvDashChannel){
+      try{
+        supabaseClient.removeChannel(dvDashChannel);
+      }catch(_){}
+      dvDashChannel = null;
+    }
+
+    dvDashChannel = supabaseClient
+      .channel('datavault_dashboard_inventory_v3')
+      .on(
+        'postgres_changes',
+        {
+          event:'*',
+          schema:'public',
+          table:'auditoria_custodia'
+        },
+        () => refreshDashboard('realtime-auditoria')
+      )
+      .on(
+        'postgres_changes',
+        {
+          event:'*',
+          schema:'public',
+          table:'solicitudes_operacion'
+        },
+        () => refreshDashboard('realtime-operaciones')
+      )
+      .subscribe(status =>
+        console.log('[DATAVAULT DASHBOARD REALTIME]', status)
+      );
+  }
+
+  function boot(){
+    setTimeout(() => refreshDashboard('boot'), 100);
+    setTimeout(() => refreshDashboard('boot-backup'), 900);
+    setTimeout(connectRealtime, 400);
+  }
+
+  document.addEventListener('DOMContentLoaded', boot);
+
+  supabaseClient.auth.onAuthStateChange((event, session) => {
+    if(session?.user && [
+      'SIGNED_IN',
+      'INITIAL_SESSION',
+      'TOKEN_REFRESHED',
+      'USER_UPDATED'
+    ].includes(event)){
+      setTimeout(
+        () => refreshDashboard('auth-'+event),
+        80
+      );
+      setTimeout(connectRealtime, 200);
+    }
+
+    if(event === 'SIGNED_OUT' && dvDashChannel){
+      try{
+        supabaseClient.removeChannel(dvDashChannel);
+      }catch(_){}
+      dvDashChannel = null;
+    }
+  });
+
+  // Cuando el usuario vuelve a Inicio, consultar de inmediato.
+  const previousShowView = window.showView || showView;
+  window.showView = showView = function(name){
+    const result = previousShowView(name);
+
+    if(name === 'inicio'){
+      refreshDashboard('show-inicio');
+    }
+
+    return result;
+  };
+
+  // Exponer para pruebas desde consola.
+  window.dvRefreshDashboardInventory = refreshDashboard;
+})();
+</script>
+
 </body>
 </html>
