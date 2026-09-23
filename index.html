@@ -2184,12 +2184,12 @@ body {
   <div class="grid grid-cols-1 xl:grid-cols-[1.55fr_.85fr] gap-4">
     <div class="dashboard-card overflow-hidden">
       <div class="section-head">
-        <div><h3>Actividad reciente</h3><p>Últimas operaciones registradas</p></div>
-        <button onclick="showView('auditoria')" class="text-[10px] text-blue-600 font-semibold">Ver auditoría →</button>
+        <div><h3>Actividad reciente</h3><p>Últimos archivos y lotes registrados</p></div>
+        <span class="live-badge"><i class="fa-solid fa-circle text-[5px] mr-1"></i>En vivo</span>
       </div>
       <div class="overflow-x-auto">
-        <table class="data-table"><thead><tr><th>Fecha y hora</th><th>Usuario</th><th>Acción</th><th>Resultado</th></tr></thead>
-        <tbody id="inicioTableBody"><tr><td colspan="4" class="p-6 text-center text-slate-400">Cargando registros...</td></tr></tbody></table>
+        <table class="data-table"><thead><tr><th>Nombre</th><th>Carpeta</th><th>Integridad</th><th>Estado</th><th>Modificado</th></tr></thead>
+        <tbody id="inicioRecentFilesBody"><tr><td colspan="5" class="p-6 text-center text-slate-400">Cargando archivos...</td></tr></tbody></table>
       </div>
     </div>
 
@@ -5542,48 +5542,62 @@ window.addEventListener('DOMContentLoaded',()=>{
     return statusPill(estado);
   }
 
+  function homeRecentFolderDetailId(id){
+    return 'home-recent-folder-' + String(id||'').replace(/[^a-zA-Z0-9_-]/g,'');
+  }
+
+  window.toggleHomeRecentFolder=function(id){
+    const row=document.getElementById(homeRecentFolderDetailId(id));
+    const icon=document.getElementById(homeRecentFolderDetailId(id)+'-icon');
+    if(!row)return;
+    const hidden=row.classList.toggle('hidden');
+    if(icon)icon.textContent=hidden?'▶':'▼';
+  };
+
+  function homeRecentLooseRow(r){
+    return `<tr>
+      <td><div class="flex items-center gap-2"><div class="h-7 w-7 rounded-md bg-[#edf3f5] text-[#6c8698] flex items-center justify-center"><i class="fa-solid ${dvIconFor(r.nombre_archivo)} text-[10px]"></i></div><div><p class="font-semibold text-[#1f2b31] text-[9px]">${escapeHtml(r.nombre_archivo||'Sin nombre')}</p><p class="dv-unit-sub">${escapeHtml(r.solicitante_nombre||r.usuario_solicitante||'—')}</p></div></div></td>
+      <td class="text-[8px] text-slate-500">Archivo suelto</td>
+      <td><span class="integrity-ok"><i class="fa-solid fa-fingerprint"></i> Verificado</span></td>
+      <td><span class="status-pill ${dvStatusClass(r.estado)}">${escapeHtml(r.estado||'PENDIENTE')}</span></td>
+      <td class="text-[8px] text-slate-400">${dvDate(r.fecha_ultima_operacion||r.fecha_solicitud)}</td>
+    </tr>`;
+  }
+
+  function homeRecentFolderRow(rows,loteId){
+    const root=dvRoot(rows[0])||'Carpeta';
+    const total=rows.reduce((s,r)=>s+Number(r.tamano_bytes||0),0);
+    const state=dvGroupState(rows);
+    const id=homeRecentFolderDetailId(loteId);
+    const tree=dvBuildTree(rows);
+    const last=rows.map(r=>r.fecha_ultima_operacion||r.fecha_solicitud||'').sort().reverse()[0];
+    return `<tr class="dv-folder-summary">
+      <td><button class="dv-folder-toggle" onclick="toggleHomeRecentFolder('${escapeHtml(String(loteId))}')"><span class="dv-caret" id="${id}-icon">▶</span><i class="fa-solid fa-folder text-amber-500"></i><span>${escapeHtml(root)}</span><span class="dv-folder-chip">${rows.length} archivo(s)</span></button></td>
+      <td class="text-[8px] text-slate-500">Carpeta / lote</td>
+      <td><span class="integrity-ok"><i class="fa-solid fa-fingerprint"></i> ${formatBytes(total)}</span></td>
+      <td><span class="status-pill ${dvStatusClass(state)}">${escapeHtml(state)}</span></td>
+      <td class="text-[8px] text-slate-400">${dvDate(last)}</td>
+    </tr>
+    <tr id="${id}" class="hidden dv-folder-detail"><td colspan="5"><div class="dv-folder-panel"><div class="flex flex-wrap justify-between gap-2 mb-2"><div><b class="text-[11px] text-slate-700"><i class="fa-solid fa-folder-open mr-2 text-amber-500"></i>${escapeHtml(root)}</b><div class="text-[8px] text-slate-400 mt-1">Lote ${escapeHtml(String(loteId))}</div></div><span class="text-[9px] text-slate-500">${rows.length} archivo(s) · ${formatBytes(total)}</span></div><div class="dv-tree">${dvRenderTree(tree)}</div></div></td></tr>`;
+  }
+
   function renderRecent(rows){
-    const body = document.getElementById('inicioTableBody');
-    if(!body) return;
+    const body=document.getElementById('inicioRecentFilesBody');
+    if(!body)return;
 
-    const visible = [...rows]
-      .sort((a,b) =>
-        String(
-          b?.fecha_ultima_operacion ||
-          b?.fecha_solicitud ||
-          ''
-        ).localeCompare(
-          String(
-            a?.fecha_ultima_operacion ||
-            a?.fecha_solicitud ||
-            ''
-          )
-        )
-      )
-      .slice(0, 6);
+    const units=dvGroupedUnits(rows||[])
+      .sort((a,b)=>String(b.date).localeCompare(String(a.date)))
+      .slice(0,6);
 
-    body.innerHTML = visible.length
-      ? visible.map(r => {
-          const fecha =
-            r?.fecha_ultima_operacion ||
-            r?.fecha_solicitud;
+    if(!units.length){
+      body.innerHTML='<tr><td colspan="5" class="p-6 text-center text-slate-400">No hay archivos registrados.</td></tr>';
+      return;
+    }
 
-          const usuario =
-            r?.solicitante_nombre ||
-            r?.usuario_solicitante ||
-            r?.solicitante_correo ||
-            'Usuario';
-
-          return `
-            <tr>
-              <td>${formatShortDate(fecha)}</td>
-              <td>${escapeHtml(usuario)}</td>
-              <td>${escapeHtml(actionForAudit(r))}</td>
-              <td>${resultPillForAudit(r)}</td>
-            </tr>
-          `;
-        }).join('')
-      : '<tr><td colspan="4" class="p-6 text-center text-slate-400">No existen registros.</td></tr>';
+    body.innerHTML=units.map(u=>u.type==='folder'
+      ? homeRecentFolderRow(u.rows,u.id)
+      : homeRecentLooseRow(u.row)
+    ).join('');
   }
 
   async function fetchDashboardData(){
@@ -5781,7 +5795,7 @@ window.addEventListener('DOMContentLoaded',()=>{
       }catch(err){
         console.error('[DATAVAULT DASHBOARD V3 ERROR]', err);
 
-        const body = document.getElementById('inicioTableBody');
+        const body = document.getElementById('inicioRecentFilesBody');
         if(body && /Cargando/i.test(body.textContent || '')){
           body.innerHTML = `
             <tr>
