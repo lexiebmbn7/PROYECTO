@@ -3433,6 +3433,22 @@ window.addEventListener('DOMContentLoaded',()=>{renderDlpRules();renderConfig();
     const adminLabel=document.getElementById('adminLabel');
     if(adminLabel) adminLabel.classList.toggle('hidden', !jefe);
 
+    // Orden del menú superior para el Jefe: flujo lógico de navegación.
+    const topbarNav = document.querySelector('#topbar .topbar-nav');
+    if(topbarNav){
+      const adminOrder = ['inicio','gestor','cola','operaciones','reglas','reportes','auditoria','usuarios','configuracion'];
+      adminOrder.forEach((navName, index)=>{
+        const btn = topbarNav.querySelector(`[data-nav="${navName}"]`);
+        if(!btn) return;
+        if(jefe){
+          topbarNav.appendChild(btn);
+          btn.style.order = String(index + 1);
+        }else{
+          btn.style.removeProperty('order');
+        }
+      });
+    }
+
     // Reglas DLP: visibles para ambos, pero solo el Jefe puede modificar.
     const reset=document.getElementById('btnResetDlpRules');
     if(reset){
