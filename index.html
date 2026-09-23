@@ -4397,7 +4397,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     body.innerHTML=visible.length?visible.map(r=>`<tr><td>${formatShortDate(r.fecha_solicitud)}</td><td>${escapeHtml(rowName(r))}</td><td>${escapeHtml(r.lote_id?'Carga de carpeta':'Carga de archivo')}</td><td>${statusPill(r.estado)}</td></tr>`).join(''):'<tr><td colspan="4" class="p-6 text-center text-slate-400">No existen registros.</td></tr>';
   }
 
-  async function loadRoleHome(){
+  async function loadRoleHome(){if(typeof window.dvRefreshDashboardInventory==='function'){window.dvRefreshDashboardInventory('legacy-role-home');return;}
     if(!roleAllAudit.length){const {data}=await supabaseClient.from('auditoria_custodia').select('*').order('fecha_solicitud',{ascending:false}).limit(1000);roleAllAudit=Array.isArray(data)?data:[];}
     const rows=isAdmin()?roleAllAudit:roleAllAudit.filter(belongsToMe);
     const approved=rows.filter(r=>r.estado==='APROBADO').length;
