@@ -5673,6 +5673,28 @@ window.addEventListener('DOMContentLoaded',()=>{
         rejected,
         'Eventos bloqueados'
       );
+
+      // Accesos directos desde el dashboard del administrador.
+      if(cards[1]){
+        cards[1].style.cursor='pointer';
+        cards[1].title='Ver solicitudes pendientes';
+        cards[1].onclick=()=>{
+          const filter=document.getElementById('solStateFilter');
+          if(filter)filter.value='PENDIENTE';
+          showView('cola');
+          setTimeout(()=>{ if(typeof filterSolicitudesUI==='function') filterSolicitudesUI(); },120);
+        };
+      }
+      if(cards[3]){
+        cards[3].style.cursor='pointer';
+        cards[3].title='Ver solicitudes rechazadas';
+        cards[3].onclick=()=>{
+          const filter=document.getElementById('solStateFilter');
+          if(filter)filter.value='RECHAZADO';
+          showView('cola');
+          setTimeout(()=>{ if(typeof filterSolicitudesUI==='function') filterSolicitudesUI(); },120);
+        };
+      }
     }else{
       setCard(
         cards[0],
