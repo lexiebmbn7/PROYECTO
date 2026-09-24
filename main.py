@@ -67,6 +67,12 @@ SUPABASE_KEY = os.getenv(
 ).strip()
 
 
+SUPABASE_SERVICE_ROLE_KEY = os.getenv(
+    "SUPABASE_SERVICE_ROLE_KEY",
+    ""
+).strip()
+
+
 PUBLIC_BASE_URL = os.getenv(
     "PUBLIC_BASE_URL",
     ""
@@ -2558,6 +2564,104 @@ async def registrar_lote_custodia(
         "telegram": resultados_telegram,
         "telegram_notificacion": "en_cola" if procesados else "no_aplica",
         "webhook": estado_webhook,
+    }
+
+
+# ============================================================
+# CREAR USUARIOS DESDE EL PANEL DEL ADMINISTRADOR
+# ============================================================
+
+@app.post("/admin/users")
+async def crear_usuario_desde_web(request: Request):
+    """Crea una cuenta de Supabase Auth únicamente para un administrador/jefe.
+
+    La clave de servicio nunca se expone al frontend: solo se usa en el backend
+    para llamar al endpoint administrativo de Supabase Auth.
+    """
+    usuario = obtener_usuario_supabase_desde_request(request)
+    if usuario.get("rol") != "jefe":
+        raise HTTPException(status_code=403, detail="Solo el administrador puede crear usuarios.")
+
+    service_key = SUPABASE_SERVICE_ROLE_KEY or SUPABASE_KEY
+    if not service_key:
+        raise HTTPException(
+            status_code=500,
+            detail="Falta SUPABASE_SERVICE_ROLE_KEY en la configuración del backend."
+        )
+
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="El cuerpo de la solicitud no es JSON válido.")
+
+    nombre = str(payload.get("nombre") or "").strip()
+    email = str(payload.get("email") or "").strip().lower()
+    rol = str(payload.get("rol") or "subordinado").strip().lower()
+    password = str(payload.get("password") or "")
+
+    if not nombre:
+        raise HTTPException(status_code=400, detail="El nombre completo es obligatorio.")
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="Ingresa un correo electrónico válido.")
+    if rol not in ("jefe", "subordinado"):
+        raise HTTPException(status_code=400, detail="El rol debe ser jefe o subordinado.")
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 6 caracteres.")
+    if len(password) > 128:
+        raise HTTPException(status_code=400, detail="La contraseña no puede superar 128 caracteres.")
+
+    supabase_auth_url = f"{SUPABASE_URL}/auth/v1/admin/users"
+    headers = {
+        "apikey": service_key,
+        "Authorization": f"Bearer {service_key}",
+        "Content-Type": "application/json",
+    }
+    body = {
+        "email": email,
+        "password": password,
+        "email_confirm": True,
+        "user_metadata": {
+            "full_name": nombre,
+            "rol": rol,
+        },
+        "app_metadata": {
+            "rol": rol,
+        },
+    }
+
+    try:
+        respuesta = requests.post(
+            supabase_auth_url,
+            headers=headers,
+            json=body,
+            timeout=20,
+        )
+    except requests.RequestException as error:
+        print("[SUPABASE CREATE USER ERROR]", error)
+        raise HTTPException(status_code=503, detail="No se pudo conectar con Supabase Auth.")
+
+    if respuesta.status_code not in (200, 201):
+        try:
+            detalle = respuesta.json()
+        except ValueError:
+            detalle = {}
+        mensaje = str(detalle.get("msg") or detalle.get("message") or detalle.get("error_description") or "")
+        mensaje_lower = mensaje.lower()
+        if "already" in mensaje_lower or "exist" in mensaje_lower or "duplicate" in mensaje_lower:
+            raise HTTPException(status_code=409, detail="Ya existe un usuario con ese correo.")
+        print("[SUPABASE CREATE USER REJECTED]", respuesta.status_code, respuesta.text[:500])
+        raise HTTPException(status_code=502, detail="Supabase no permitió crear el usuario.")
+
+    creado = respuesta.json() or {}
+    return {
+        "status": "ok",
+        "mensaje": "Usuario creado correctamente.",
+        "usuario": {
+            "id": creado.get("id"),
+            "email": creado.get("email") or email,
+            "nombre": nombre,
+            "rol": rol,
+        },
     }
 
 
