@@ -4504,20 +4504,46 @@ window.addEventListener('DOMContentLoaded',()=>{
     }
   };
 
-  // Usuarios del admin: cuentas Auth + actividad real de custodia.
+  // Usuarios del admin: primero carga las cuentas Auth y las muestra de inmediato.
+  // La actividad de custodia se completa en segundo plano para que la tabla no espere
+  // a una consulta pesada de auditoría.
   window.loadAdminUsers=async function(){
     if(!isAdmin())return;
+    const body=document.getElementById('adminUsersBody');
     try{
       const headers=await authHeaders(true);
-      const [authRes,auditRes]=await Promise.all([
-        fetch(`${API_URL}/admin/users`,{headers}),
-        supabaseClient.from('auditoria_custodia').select('*').order('fecha_solicitud',{ascending:false}).limit(2000)
-      ]);
+      const authRes=await fetch(`${API_URL}/admin/users`,{headers});
       const authData=await authRes.json().catch(()=>({}));
       if(!authRes.ok) throw new Error(authData?.detail || 'No se pudo cargar la lista de usuarios.');
-      const {data,error}=auditRes;
+
+      const authUsers=Array.isArray(authData?.usuarios)?authData.usuarios:[];
+      adminUsersCache=authUsers.map(u=>({
+        key:String(u.id||'').trim(),
+        id:String(u.id||'').trim(),
+        name:String(u.nombre||u.email||'Usuario'),
+        email:String(u.email||''),
+        rol:String(u.rol||'subordinado'),
+        rows:[],
+        last:u.last_sign_in_at||u.created_at||''
+      })).filter(u=>u.id);
+
+      document.getElementById('admUsersTotal').textContent=adminUsersCache.length;
+      document.getElementById('admFilesTotal').textContent='—';
+      document.getElementById('admPendingTotal').textContent='—';
+      document.getElementById('admRejectedTotal').textContent='—';
+      renderAdminUsers();
+      populateAdminFileFilter();
+
+      // La actividad se carga después de mostrar las cuentas.
+      const {data,error}=await supabaseClient
+        .from('auditoria_custodia')
+        .select('solicitante_id,solicitante_correo,solicitante_nombre,usuario_solicitante,nombre_archivo,ruta_relativa,carpeta,hash_sha256,estado,fecha_solicitud')
+        .order('fecha_solicitud',{ascending:false})
+        .limit(2000);
+
       if(error) throw error;
       roleAllAudit=Array.isArray(data)?data:[];
+
       const activityMap=new Map();
       roleAllAudit.forEach(r=>{
         const k=userKey(r);
@@ -4527,27 +4553,24 @@ window.addEventListener('DOMContentLoaded',()=>{
         u.rows.push(r);
         if(String(r.fecha_solicitud||'')>String(u.last||''))u.last=r.fecha_solicitud;
       });
-      const authUsers=Array.isArray(authData?.usuarios)?authData.usuarios:[];
-      const merged=new Map();
-      authUsers.forEach(u=>{
-        const id=String(u.id||'').trim();
-        if(!id)return;
-        const a=activityMap.get(id)||{rows:[],last:''};
-        merged.set(id,{key:id,id,name:String(u.nombre||u.email||'Usuario'),email:String(u.email||''),rol:String(u.rol||'subordinado'),rows:a.rows,last:a.last||u.last_sign_in_at||u.created_at||''});
+
+      const merged=adminUsersCache.map(u=>{
+        const a=activityMap.get(u.id)||activityMap.get(norm(u.email))||{rows:[],last:''};
+        return {...u,rows:a.rows,last:a.last||u.last};
       });
-      activityMap.forEach((a,k)=>{
-        if(merged.has(k))return;
-        merged.set(k,{key:k,id:k,name:rowName(a.rows[0])||'Usuario',email:rowEmail(a.rows[0])||'',rol:'subordinado',rows:a.rows,last:a.last});
-      });
-      adminUsersCache=[...merged.values()].sort((a,b)=>String(b.last).localeCompare(String(a.last)));
-      document.getElementById('admUsersTotal').textContent=adminUsersCache.length;
+      adminUsersCache=merged;
       document.getElementById('admFilesTotal').textContent=roleAllAudit.length;
       document.getElementById('admPendingTotal').textContent=roleAllAudit.filter(r=>r.estado==='PENDIENTE').length;
       document.getElementById('admRejectedTotal').textContent=roleAllAudit.filter(r=>r.estado==='RECHAZADO').length;
-      renderAdminUsers();populateAdminFileFilter();
+      renderAdminUsers();
+      populateAdminFileFilter();
     }catch(error){
       console.error('USUARIOS ADMIN:',error);
-      toast(error?.message || 'No se pudo cargar la lista de usuarios.');
+      if(body && !adminUsersCache.length){
+        body.innerHTML='<tr><td colspan="8" class="p-8 text-center text-red-400">No se pudo cargar la lista de usuarios.</td></tr>';
+      }else{
+        toast(error?.message || 'No se pudo actualizar la actividad de usuarios.');
+      }
     }
   };
   window.renderAdminUsers=function(){
