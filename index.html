@@ -5092,6 +5092,25 @@ window.addEventListener('DOMContentLoaded',()=>{
   function requestMine(r){return !myUid() || String(r?.solicitante_id||'')===myUid();}
   function opLabel(r){return String(r.tipo_operacion||'').toUpperCase()==='MOVER'?'Mover':'Eliminar';}
 
+  window.cancelPendingUpload=async function(id,kind){
+    if(!isAdmin())return;
+    const esCarpeta=String(kind||'').toUpperCase()==='CARPETA';
+    const texto=esCarpeta?'esta carpeta y todos sus archivos pendientes':'este archivo pendiente';
+    if(!confirm(`¿Cancelar ${texto}? Esta acción lo marcará como rechazado y ya no se enviará a Google Drive.`))return;
+    try{
+      const payload={objeto_tipo:esCarpeta?'CARPETA':'ARCHIVO'};
+      if(esCarpeta)payload.lote_id=id;else payload.auditoria_id=id;
+      const res=await fetch(`${API_URL}/custody/cancel`,{method:'POST',headers:await authHeaders(),body:JSON.stringify(payload)});
+      const data=await res.json().catch(()=>({}));
+      if(!res.ok)throw new Error(typeof data.detail==='string'?data.detail:`Error HTTP ${res.status}`);
+      toast(esCarpeta?`Carpeta cancelada (${Number(data.cancelados||0)} archivo(s)).`:'Archivo cancelado.');
+      await loadCola();
+      if(typeof loadRoleHome==='function')await loadRoleHome();
+    }catch(err){
+      alert('No se pudo cancelar la carga: '+(err.message||err));
+    }
+  };
+
   async function queryRequests(){
     try{
       let q=supabaseClient.from('solicitudes_operacion').select('*').order('fecha_solicitud',{ascending:false}).limit(500);
@@ -5112,7 +5131,12 @@ window.addEventListener('DOMContentLoaded',()=>{
     ops.forEach(r=>rows.push({kind:'OP',id:r.id,type:opLabel(r),origin:r.nombre_objeto||r.carpeta_origen||'—',dest:r.tipo_operacion==='MOVER'?(r.carpeta_destino_nombre||'—'):'Papelera',user:r.solicitante_nombre||'—',date:r.fecha_solicitud,state:String(r.estado||'PENDIENTE').toUpperCase(),action:isAdmin()&&String(r.estado).toUpperCase()==='PENDIENTE'?'Resolver en Telegram':'—'}));
     rows.sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
     const filtered=rows.filter(r=>(!q||norm([r.id,r.type,r.origin,r.dest,r.user].join(' ')).includes(q))&&(!stateFilter||r.state===stateFilter));
-    tbody.innerHTML=filtered.length?filtered.map(r=>`<tr><td>#${escapeHtml(String(r.id||'').slice(-8))}</td><td>${escapeHtml(r.type)}</td><td>${escapeHtml(r.origin)}</td><td>${escapeHtml(r.dest)}</td><td>${escapeHtml(r.user)}</td><td>${formatShortDate(r.date)}</td><td>${statusPill(r.state)}</td><td>${r.action==='—'?'—':`<span class="text-[9px] text-blue-600 font-semibold"><i class="fa-brands fa-telegram mr-1"></i>${r.action}</span>`}</td></tr>`).join(''):'<tr><td colspan="8" class="p-8 text-center text-slate-400">No se encontraron solicitudes.</td></tr>';
+    tbody.innerHTML=filtered.length?filtered.map(r=>{
+      const cancelBtn=isAdmin()&&r.kind==='UPLOAD'&&r.state==='PENDIENTE'
+        ? `<button type="button" class="secondary-btn danger-outline !px-2 !py-1 !text-[9px]" onclick="cancelPendingUpload('${escapeHtml(String(r.id||''))}','${r.type==='Carga de carpeta'?'CARPETA':'ARCHIVO'}')"><i class="fa-solid fa-ban"></i> Cancelar</button>`
+        : (r.action==='—'?'—':`<span class="text-[9px] text-blue-600 font-semibold"><i class="fa-brands fa-telegram mr-1"></i>${r.action}</span>`);
+      return `<tr><td>#${escapeHtml(String(r.id||'').slice(-8))}</td><td>${escapeHtml(r.type)}</td><td>${escapeHtml(r.origin)}</td><td>${escapeHtml(r.dest)}</td><td>${escapeHtml(r.user)}</td><td>${formatShortDate(r.date)}</td><td>${statusPill(r.state)}</td><td>${cancelBtn}</td></tr>`;
+    }).join(''):'<tr><td colspan="8" class="p-8 text-center text-slate-400">No se encontraron solicitudes.</td></tr>';
     const pending=rows.filter(r=>r.state==='PENDIENTE').length;
     const sum=document.getElementById('solSummary');if(sum)sum.textContent=`${rows.length} solicitud(es) · ${pending} pendiente(s)`;
     const mini=document.getElementById('solPendingMini');if(mini)mini.textContent=pending;
