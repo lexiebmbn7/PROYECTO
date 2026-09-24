@@ -2582,7 +2582,7 @@ async def crear_usuario_desde_web(request: Request):
     if usuario.get("rol") != "jefe":
         raise HTTPException(status_code=403, detail="Solo el administrador puede crear usuarios.")
 
-    service_key = SUPABASE_SERVICE_ROLE_KEY or SUPABASE_KEY
+    service_key = SUPABASE_SERVICE_ROLE_KEY
     if not service_key:
         raise HTTPException(
             status_code=500,
@@ -2613,7 +2613,6 @@ async def crear_usuario_desde_web(request: Request):
     supabase_auth_url = f"{SUPABASE_URL}/auth/v1/admin/users"
     headers = {
         "apikey": service_key,
-        "Authorization": f"Bearer {service_key}",
         "Content-Type": "application/json",
     }
     body = {
@@ -2673,13 +2672,12 @@ async def listar_usuarios_desde_web(request: Request):
     if usuario.get("rol") != "jefe":
         raise HTTPException(status_code=403, detail="Solo el administrador puede consultar los usuarios.")
 
-    service_key = SUPABASE_SERVICE_ROLE_KEY or SUPABASE_KEY
+    service_key = SUPABASE_SERVICE_ROLE_KEY
     if not service_key:
         raise HTTPException(status_code=500, detail="Falta SUPABASE_SERVICE_ROLE_KEY en la configuración del backend.")
 
     headers = {
         "apikey": service_key,
-        "Authorization": f"Bearer {service_key}",
     }
     try:
         respuesta = requests.get(
@@ -2734,13 +2732,12 @@ async def eliminar_usuario_desde_web(user_id: str, request: Request):
     if target_id == current_id:
         raise HTTPException(status_code=400, detail="No puedes eliminar tu propia cuenta.")
 
-    service_key = SUPABASE_SERVICE_ROLE_KEY or SUPABASE_KEY
+    service_key = SUPABASE_SERVICE_ROLE_KEY
     if not service_key:
         raise HTTPException(status_code=500, detail="Falta SUPABASE_SERVICE_ROLE_KEY en la configuración del backend.")
 
     headers = {
         "apikey": service_key,
-        "Authorization": f"Bearer {service_key}",
     }
     try:
         respuesta = requests.delete(
