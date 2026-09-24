@@ -5121,7 +5121,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 
   function uploadUnitMine(u){const r=u.type==='folder'?u.rows[0]:u.row;return rowMine(r);}
   function dvQueueFolderDetailId(id){return 'dv-queue-folder-'+String(id||'').replace(/[^a-zA-Z0-9_-]/g,'');}
-  function toggleDvQueueFolder(id){const row=document.getElementById(dvQueueFolderDetailId(id));const icon=document.getElementById(dvQueueFolderDetailId(id)+'-icon');if(!row)return;const hidden=row.classList.toggle('hidden');if(icon)icon.textContent=hidden?'▶':'▼';}
+  window.toggleDvQueueFolder=function(id){const row=document.getElementById(dvQueueFolderDetailId(id));const icon=document.getElementById(dvQueueFolderDetailId(id)+'-icon');if(!row)return;const hidden=row.classList.toggle('hidden');if(icon)icon.textContent=hidden?'▶':'▼';};
   function dvQueueFolderPendingCount(rows){return (rows||[]).filter(r=>String(r?.estado||'PENDIENTE').toUpperCase()==='PENDIENTE').length;}
   function dvQueueFolderRow(rows,loteId){
     const root=dvRoot(rows[0])||'Carpeta';
