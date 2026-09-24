@@ -2266,7 +2266,7 @@ body {
 <section id="view-usuarios" class="view space-y-4">
   <div class="page-title">
     <div><span class="module-kicker">Administración</span><h2>Usuarios y actividad</h2><p>Consulta quién carga documentos, cuántos archivos tiene y el estado de sus solicitudes.</p></div>
-    <button onclick="loadAdminUsers()" class="secondary-btn"><i class="fa-solid fa-rotate"></i>Actualizar</button>
+    <div class="flex items-center gap-2"><button onclick="openCreateUserModal()" class="primary-btn"><i class="fa-solid fa-user-plus"></i>Crear usuario</button><button onclick="loadAdminUsers()" class="secondary-btn"><i class="fa-solid fa-rotate"></i>Actualizar</button></div>
   </div>
   <div class="grid grid-cols-2 xl:grid-cols-4 gap-3">
     <div class="dashboard-card p-4"><p class="metric-label">Usuarios con actividad</p><b id="admUsersTotal" class="text-2xl">—</b></div>
@@ -4428,6 +4428,82 @@ window.addEventListener('DOMContentLoaded',()=>{
     renderRoleRecent(rows);
   }
 
+  // =======================================================
+  // CREAR USUARIOS DESDE EL PANEL DEL ADMINISTRADOR
+  // =======================================================
+  function ensureCreateUserModal(){
+    if(document.getElementById('dvUserCreateModal')) return document.getElementById('dvUserCreateModal');
+    const modal=document.createElement('div');
+    modal.id='dvUserCreateModal';
+    modal.className='dv-hidden';
+    modal.innerHTML=`<div class="dv-user-modal-card">
+      <div class="dv-user-modal-head"><div><p class="text-[10px] uppercase tracking-widest text-slate-400 font-bold">Administración</p><h3 class="text-lg font-extrabold text-slate-800 mt-1">Crear usuario</h3><p class="text-xs text-slate-500 mt-1">Registra una nueva cuenta de acceso para DataVault DLP.</p></div><button type="button" class="icon-btn" onclick="closeCreateUserModal()"><i class="fa-solid fa-xmark"></i></button></div>
+      <div class="dv-user-modal-body">
+        <form id="dvCreateUserForm" class="dv-user-form-grid" onsubmit="submitCreateUser(event)">
+          <div class="dv-user-field full"><label class="field-label" for="dvNewUserName">Nombre completo</label><input id="dvNewUserName" class="input-modern w-full" type="text" maxlength="120" placeholder="Nombre y apellidos" required></div>
+          <div class="dv-user-field full"><label class="field-label" for="dvNewUserEmail">Correo electrónico</label><input id="dvNewUserEmail" class="input-modern w-full" type="email" maxlength="180" placeholder="usuario@empresa.com" required></div>
+          <div class="dv-user-field"><label class="field-label" for="dvNewUserRole">Rol</label><select id="dvNewUserRole" class="input-modern w-full"><option value="subordinado">Subordinado</option><option value="jefe">Administrador</option></select></div>
+          <div class="dv-user-field"><label class="field-label" for="dvNewUserPassword">Contraseña</label><input id="dvNewUserPassword" class="input-modern w-full" type="password" minlength="6" maxlength="128" placeholder="Mínimo 6 caracteres" required></div>
+          <div class="dv-user-field full"><label class="field-label" for="dvNewUserPassword2">Confirmar contraseña</label><input id="dvNewUserPassword2" class="input-modern w-full" type="password" minlength="6" maxlength="128" placeholder="Repite la contraseña" required></div>
+          <div id="dvCreateUserMessage" class="dv-user-field full hidden"></div>
+          <div class="dv-user-field full flex-row justify-end gap-2 pt-1"><button type="button" class="secondary-btn" onclick="closeCreateUserModal()">Cancelar</button><button type="submit" id="dvCreateUserSubmit" class="primary-btn"><i class="fa-solid fa-user-plus"></i>Crear usuario</button></div>
+        </form>
+      </div>
+    </div>`;
+    modal.addEventListener('click',e=>{if(e.target===modal)closeCreateUserModal();});
+    document.body.appendChild(modal);
+    return modal;
+  }
+
+  window.openCreateUserModal=function(){
+    if(!isAdmin()) return toast('Solo el administrador puede crear usuarios.');
+    const modal=ensureCreateUserModal();
+    const form=document.getElementById('dvCreateUserForm');
+    if(form) form.reset();
+    const msg=document.getElementById('dvCreateUserMessage');
+    if(msg){msg.className='dv-user-field full hidden';msg.textContent='';}
+    modal.classList.remove('dv-hidden');
+    setTimeout(()=>document.getElementById('dvNewUserName')?.focus(),50);
+  };
+
+  window.closeCreateUserModal=function(){
+    document.getElementById('dvUserCreateModal')?.classList.add('dv-hidden');
+  };
+
+  window.submitCreateUser=async function(event){
+    event?.preventDefault();
+    if(!isAdmin()) return;
+    const name=document.getElementById('dvNewUserName')?.value.trim();
+    const email=document.getElementById('dvNewUserEmail')?.value.trim();
+    const role=document.getElementById('dvNewUserRole')?.value || 'subordinado';
+    const password=document.getElementById('dvNewUserPassword')?.value || '';
+    const password2=document.getElementById('dvNewUserPassword2')?.value || '';
+    const msg=document.getElementById('dvCreateUserMessage');
+    const submit=document.getElementById('dvCreateUserSubmit');
+    const setMessage=(text,ok=false)=>{if(!msg)return;msg.className=`dv-user-field full ${ok?'dv-user-success':'dv-user-error'}`;msg.textContent=text;};
+    if(!name||!email||!password){setMessage('Completa todos los campos.');return;}
+    if(password.length<6){setMessage('La contraseña debe tener al menos 6 caracteres.');return;}
+    if(password!==password2){setMessage('Las contraseñas no coinciden.');return;}
+    if(!['jefe','subordinado'].includes(role)){setMessage('Rol inválido.');return;}
+    try{
+      if(submit) {submit.disabled=true;submit.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>Creando...';}
+      const headers=await authHeaders(true);
+      const res=await fetch(`${API_URL}/admin/users`,{method:'POST',headers,body:JSON.stringify({nombre:name,email,rol:role,password})});
+      const data=await res.json().catch(()=>({}));
+      if(!res.ok) throw new Error(data?.detail || 'No se pudo crear el usuario.');
+      setMessage(`Usuario creado correctamente: ${data?.usuario?.email || email}.`,true);
+      toast('Usuario creado correctamente.');
+      document.getElementById('dvCreateUserForm')?.reset();
+      if(typeof loadAdminUsers==='function') await loadAdminUsers();
+      setTimeout(closeCreateUserModal,1200);
+    }catch(error){
+      console.error('CREAR USUARIO:',error);
+      setMessage(error?.message || 'No se pudo crear el usuario.');
+    }finally{
+      if(submit){submit.disabled=false;submit.innerHTML='<i class="fa-solid fa-user-plus"></i>Crear usuario';}
+    }
+  };
+
   // Usuarios del admin derivados de la auditoría real.
   window.loadAdminUsers=async function(){
     if(!isAdmin())return;
@@ -4919,6 +4995,12 @@ window.addEventListener('DOMContentLoaded',()=>{
 .dv-op-modal-head{padding:18px 20px;border-bottom:1px solid #edf1f4;display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
 .dv-op-modal-body{padding:20px}
 .dv-op-toast{position:fixed;right:22px;bottom:22px;z-index:10000;background:#173647;color:#fff;padding:11px 14px;border-radius:10px;box-shadow:0 12px 30px rgba(15,23,42,.25);font-size:12px;font-weight:700;max-width:360px}
+#dvUserCreateModal{position:fixed;inset:0;z-index:10001;background:rgba(8,22,32,.5);display:flex;align-items:center;justify-content:center;padding:18px}
+#dvUserCreateModal.dv-hidden{display:none!important}
+.dv-user-modal-card{width:min(520px,96vw);background:#fff;border-radius:15px;box-shadow:0 24px 70px rgba(15,23,42,.25);border:1px solid #e2e8f0;overflow:hidden}
+.dv-user-modal-head{padding:18px 20px;border-bottom:1px solid #edf1f4;display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.dv-user-modal-body{padding:20px}.dv-user-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.dv-user-field{display:flex;flex-direction:column;gap:6px}.dv-user-field.full{grid-column:1/-1}.dv-user-help{font-size:9px;color:#8a9cab;line-height:1.4}.dv-user-error{font-size:10px;color:#b42318;background:#fff5f5;border:1px solid #fecaca;border-radius:8px;padding:9px 10px}.dv-user-success{font-size:10px;color:#067647;background:#effcf6;border:1px solid #abefc6;border-radius:8px;padding:9px 10px}
+@media(max-width:640px){.dv-user-form-grid{grid-template-columns:1fr}.dv-user-field.full{grid-column:auto}}
 @media(max-width:900px){.dv-op-actions{justify-content:flex-start}.dv-op-btn{font-size:10px}}
 </style>
 
