@@ -2565,6 +2565,115 @@ async def registrar_lote_custodia(
 # OPERACIONES SOLICITADAS DESDE LA WEB
 # ============================================================
 
+@app.post("/custody/cancel")
+async def cancelar_custodia_desde_web(request: Request):
+    """Cancela desde la web una carga PENDIENTE, igualando la decisión
+    de Rechazar disponible en Telegram. Solo el administrador/jefe puede
+    ejecutar esta acción. Los datos en RAM se liberan para evitar conservar
+    contenido que ya no debe procesarse.
+    """
+    usuario = obtener_usuario_supabase_desde_request(request)
+    if usuario.get("rol") != "jefe":
+        raise HTTPException(status_code=403, detail="Solo el administrador puede cancelar cargas en cola.")
+
+    payload = await request.json()
+    objeto_tipo = str(payload.get("objeto_tipo") or "").upper().strip()
+
+    if objeto_tipo not in ("ARCHIVO", "CARPETA"):
+        raise HTTPException(status_code=400, detail="objeto_tipo inválido.")
+
+    if objeto_tipo == "CARPETA":
+        lote_raw = str(payload.get("lote_id") or "").strip()
+        try:
+            lote_id = str(UUID(lote_raw))
+        except (ValueError, TypeError, AttributeError):
+            raise HTTPException(status_code=400, detail="lote_id inválido.")
+
+        with DECISION_LOCK:
+            consulta = (
+                supabase
+                .table("auditoria_custodia")
+                .select("id,estado")
+                .eq("lote_id", lote_id)
+                .eq("estado", "PENDIENTE")
+                .execute()
+            )
+            documentos = consulta.data or []
+
+            if not documentos:
+                raise HTTPException(
+                    status_code=404,
+                    detail="La carpeta ya no tiene archivos pendientes de cancelación.",
+                )
+
+            resultado = (
+                supabase
+                .table("auditoria_custodia")
+                .update({"estado": "RECHAZADO"})
+                .eq("lote_id", lote_id)
+                .eq("estado", "PENDIENTE")
+                .execute()
+            )
+
+            cancelados = resultado.data or []
+            for documento in documentos:
+                ARCHIVOS_EN_RAM.pop(str(documento.get("id")), None)
+
+        return {
+            "status": "ok",
+            "objeto_tipo": "CARPETA",
+            "lote_id": lote_id,
+            "estado": "RECHAZADO",
+            "cancelados": len(cancelados),
+        }
+
+    auditoria_raw = str(payload.get("auditoria_id") or "").strip()
+    try:
+        auditoria_id = str(UUID(auditoria_raw))
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(status_code=400, detail="auditoria_id inválido.")
+
+    with DECISION_LOCK:
+        consulta = (
+            supabase
+            .table("auditoria_custodia")
+            .select("id,estado")
+            .eq("id", auditoria_id)
+            .limit(1)
+            .execute()
+        )
+        if not consulta.data:
+            raise HTTPException(status_code=404, detail="No existe el archivo seleccionado.")
+
+        registro = consulta.data[0]
+        if str(registro.get("estado") or "").upper() != "PENDIENTE":
+            raise HTTPException(
+                status_code=409,
+                detail=f"El archivo ya fue procesado. Estado actual: {registro.get('estado') or 'DESCONOCIDO'}.",
+            )
+
+        resultado = (
+            supabase
+            .table("auditoria_custodia")
+            .update({"estado": "RECHAZADO"})
+            .eq("id", auditoria_id)
+            .eq("estado", "PENDIENTE")
+            .execute()
+        )
+        if not resultado.data:
+            raise HTTPException(status_code=409, detail="El archivo ya no está pendiente.")
+
+        ARCHIVOS_EN_RAM.pop(auditoria_id, None)
+
+    return {
+        "status": "ok",
+        "objeto_tipo": "ARCHIVO",
+        "auditoria_id": auditoria_id,
+        "estado": "RECHAZADO",
+        "cancelados": 1,
+    }
+
+
 @app.get("/drive-folders")
 def obtener_carpetas_drive(request: Request):
     obtener_usuario_supabase_desde_request(request)
