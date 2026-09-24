@@ -2530,6 +2530,10 @@ function updateTopbarResponsive() {
 
 window.addEventListener('DOMContentLoaded', () => {
   updateTopbarResponsive();
+  const topbarNav = document.querySelector('#topbar .topbar-nav');
+  if(topbarNav && window.MutationObserver){
+    new MutationObserver(() => updateTopbarResponsive()).observe(topbarNav, {childList:true, subtree:false, attributes:true, attributeFilter:['class','style']});
+  }
   const topbar = document.getElementById('topbar');
   const appSection = document.getElementById('appSection');
   if (window.ResizeObserver) {
@@ -4309,6 +4313,18 @@ window.addEventListener('DOMContentLoaded',()=>{
     baseSetSession(user);
     currentRole=roleFromUser(user);
     applyRoleExperience();
+
+    // El rol puede cambiar después del primer cálculo responsive del topbar.
+    // Recalculamos después de aplicar las visibilidades y el orden del menú.
+    const refreshAdminTopbar = () => {
+      if(typeof updateTopbarResponsive === 'function'){
+        updateTopbarResponsive();
+        requestAnimationFrame(() => updateTopbarResponsive());
+      }
+    };
+    refreshAdminTopbar();
+    setTimeout(refreshAdminTopbar, 0);
+    setTimeout(refreshAdminTopbar, 120);
   };
 
   // Evita navegación visual a módulos que no corresponden al rol.
@@ -4566,10 +4582,11 @@ window.addEventListener('DOMContentLoaded',()=>{
       populateAdminFileFilter();
     }catch(error){
       console.error('USUARIOS ADMIN:',error);
+      const errorMessage = error?.message || 'No se pudo cargar la lista de usuarios.';
       if(body && !adminUsersCache.length){
-        body.innerHTML='<tr><td colspan="8" class="p-8 text-center text-red-400">No se pudo cargar la lista de usuarios.</td></tr>';
+        body.innerHTML=`<tr><td colspan="8" class="p-8 text-center text-red-400">${escapeHtml(errorMessage)}</td></tr>`;
       }else{
-        toast(error?.message || 'No se pudo actualizar la actividad de usuarios.');
+        toast(errorMessage);
       }
     }
   };
