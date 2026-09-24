@@ -2530,10 +2530,6 @@ function updateTopbarResponsive() {
 
 window.addEventListener('DOMContentLoaded', () => {
   updateTopbarResponsive();
-  const topbarNav = document.querySelector('#topbar .topbar-nav');
-  if(topbarNav && window.MutationObserver){
-    new MutationObserver(() => updateTopbarResponsive()).observe(topbarNav, {childList:true, subtree:false, attributes:true, attributeFilter:['class','style']});
-  }
   const topbar = document.getElementById('topbar');
   const appSection = document.getElementById('appSection');
   if (window.ResizeObserver) {
