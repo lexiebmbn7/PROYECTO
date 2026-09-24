@@ -2665,6 +2665,105 @@ async def crear_usuario_desde_web(request: Request):
     }
 
 
+@app.get("/admin/users")
+async def listar_usuarios_desde_web(request: Request):
+    """Devuelve las cuentas de acceso del sistema para que el administrador
+    pueda verlas y gestionarlas desde el panel web."""
+    usuario = obtener_usuario_supabase_desde_request(request)
+    if usuario.get("rol") != "jefe":
+        raise HTTPException(status_code=403, detail="Solo el administrador puede consultar los usuarios.")
+
+    service_key = SUPABASE_SERVICE_ROLE_KEY or SUPABASE_KEY
+    if not service_key:
+        raise HTTPException(status_code=500, detail="Falta SUPABASE_SERVICE_ROLE_KEY en la configuración del backend.")
+
+    headers = {
+        "apikey": service_key,
+        "Authorization": f"Bearer {service_key}",
+    }
+    try:
+        respuesta = requests.get(
+            f"{SUPABASE_URL}/auth/v1/admin/users",
+            headers=headers,
+            params={"page": 1, "per_page": 1000},
+            timeout=20,
+        )
+    except requests.RequestException as error:
+        print("[SUPABASE LIST USERS ERROR]", error)
+        raise HTTPException(status_code=503, detail="No se pudo conectar con Supabase Auth.")
+
+    if respuesta.status_code != 200:
+        print("[SUPABASE LIST USERS REJECTED]", respuesta.status_code, respuesta.text[:500])
+        raise HTTPException(status_code=502, detail="Supabase no permitió consultar los usuarios.")
+
+    try:
+        data = respuesta.json() or {}
+    except ValueError:
+        raise HTTPException(status_code=502, detail="Supabase devolvió una respuesta inválida.")
+
+    usuarios = []
+    for item in data.get("users", []):
+        metadata = item.get("user_metadata") or {}
+        app_metadata = item.get("app_metadata") or {}
+        usuarios.append({
+            "id": item.get("id"),
+            "email": item.get("email") or "",
+            "nombre": metadata.get("full_name") or metadata.get("name") or item.get("email") or "Usuario",
+            "rol": app_metadata.get("rol") or metadata.get("rol") or "subordinado",
+            "created_at": item.get("created_at"),
+            "last_sign_in_at": item.get("last_sign_in_at"),
+        })
+
+    return {"status": "ok", "usuarios": usuarios}
+
+
+@app.delete("/admin/users/{user_id}")
+async def eliminar_usuario_desde_web(user_id: str, request: Request):
+    """Elimina una cuenta de Supabase Auth desde el panel del administrador.
+    El propio administrador no puede eliminar su cuenta desde aquí."""
+    usuario = obtener_usuario_supabase_desde_request(request)
+    if usuario.get("rol") != "jefe":
+        raise HTTPException(status_code=403, detail="Solo el administrador puede eliminar usuarios.")
+
+    try:
+        target_id = str(UUID(user_id.strip()))
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=400, detail="ID de usuario inválido.")
+
+    current_id = str(usuario.get("id") or usuario.get("sub") or "").strip()
+    if target_id == current_id:
+        raise HTTPException(status_code=400, detail="No puedes eliminar tu propia cuenta.")
+
+    service_key = SUPABASE_SERVICE_ROLE_KEY or SUPABASE_KEY
+    if not service_key:
+        raise HTTPException(status_code=500, detail="Falta SUPABASE_SERVICE_ROLE_KEY en la configuración del backend.")
+
+    headers = {
+        "apikey": service_key,
+        "Authorization": f"Bearer {service_key}",
+    }
+    try:
+        respuesta = requests.delete(
+            f"{SUPABASE_URL}/auth/v1/admin/users/{target_id}",
+            headers=headers,
+            timeout=20,
+        )
+    except requests.RequestException as error:
+        print("[SUPABASE DELETE USER ERROR]", error)
+        raise HTTPException(status_code=503, detail="No se pudo conectar con Supabase Auth.")
+
+    if respuesta.status_code not in (200, 204):
+        try:
+            detalle = respuesta.json()
+        except ValueError:
+            detalle = {}
+        mensaje = str(detalle.get("msg") or detalle.get("message") or detalle.get("error_description") or "")
+        print("[SUPABASE DELETE USER REJECTED]", respuesta.status_code, respuesta.text[:500])
+        raise HTTPException(status_code=502, detail=mensaje or "Supabase no permitió eliminar el usuario.")
+
+    return {"status": "ok", "mensaje": "Usuario eliminado correctamente.", "usuario_id": target_id}
+
+
 # ============================================================
 # OPERACIONES SOLICITADAS DESDE LA WEB
 # ============================================================
