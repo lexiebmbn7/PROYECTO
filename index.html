@@ -3986,19 +3986,36 @@ renderSelectedFiles = function(){
   if(btn)btn.disabled=false;
 
   if(dvSelectionMode==='folder'){
-    // La carpeta se muestra como UNA sola unidad antes de subir.
-    // Las subcarpetas se podrán explorar después en la interfaz de Archivos.
+    // Mostrar el contenido completo de la carpeta ANTES de subirlo.
+    // Cada archivo puede retirarse individualmente sin modificar la carpeta
+    // original del equipo. El backend recibirá solo los que queden aquí.
+    const raiz=(dvSelectedFolderName || 'Carpeta').replace(/\\/g,'/').replace(/^\/+|\/+$/g,'');
+    const filas=dvSelectedEntries.map((e,i)=>{
+      let ruta=String(e.relativePath || e.file.name || 'Archivo').replace(/\\/g,'/');
+      if(raiz && ruta.startsWith(raiz + '/')) ruta=ruta.slice(raiz.length + 1);
+      return `<div class="dv-selected-row">
+        <span class="truncate text-[10px] text-slate-600" title="${escapeHtml(ruta)}"><i class="fa-solid fa-file mr-2 text-slate-400"></i>${escapeHtml(ruta)}</span>
+        <span class="text-[9px] text-slate-400 whitespace-nowrap">${formatBytes(e.file.size)}</span>
+        <button type="button" class="dv-remove-file" title="Quitar este archivo de la subida" onclick="removeSelectedFile(${i})">×</button>
+      </div>`;
+    }).join('');
+
     box.innerHTML=`
-      <div class="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-3">
-        <div class="h-10 w-10 rounded-lg bg-amber-50 text-amber-500 flex items-center justify-center flex-none">
-          <i class="fa-solid fa-folder text-lg"></i>
+      <div class="rounded-lg border border-slate-200 bg-white overflow-hidden">
+        <div class="flex items-center gap-3 px-3 py-3 border-b border-slate-100">
+          <div class="h-10 w-10 rounded-lg bg-amber-50 text-amber-500 flex items-center justify-center flex-none">
+            <i class="fa-solid fa-folder-open text-lg"></i>
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="font-bold text-slate-700 text-[12px] truncate">${escapeHtml(dvSelectedFolderName || 'Carpeta')}</div>
+            <div class="text-[10px] text-slate-400 mt-1">${dvSelectedEntries.length} archivo(s) seleccionado(s) · ${formatBytes(total)}</div>
+            <div class="text-[9px] text-slate-400 mt-1"><i class="fa-solid fa-circle-info mr-1"></i>Quita con × los archivos que no quieras enviar. No se borran de tu equipo.</div>
+          </div>
+          <button type="button" class="dv-remove-file" title="Quitar toda la carpeta de la selección" onclick="clearSelectedBatch()">×</button>
         </div>
-        <div class="min-w-0 flex-1">
-          <div class="font-bold text-slate-700 text-[12px] truncate">${escapeHtml(dvSelectedFolderName || 'Carpeta')}</div>
-          <div class="text-[10px] text-slate-400 mt-1">${dvSelectedEntries.length} archivo(s) incluidos automáticamente · ${formatBytes(total)}</div>
-          <div class="text-[9px] text-slate-400 mt-1"><i class="fa-solid fa-folder-tree mr-1"></i>Incluye todas las subcarpetas sin seleccionarlas una por una.</div>
+        <div class="max-h-64 overflow-y-auto px-3 py-1">
+          ${filas}
         </div>
-        <button type="button" class="dv-remove-file" title="Quitar carpeta" onclick="clearSelectedBatch()">×</button>
       </div>`;
   }else{
     box.innerHTML=`
@@ -4009,7 +4026,7 @@ renderSelectedFiles = function(){
   }
 
   if(meta){
-    meta.textContent=`${formatBytes(total)} · ${dvSelectionMode==='folder'?'Carpeta completa':'Archivos sueltos'}`;
+    meta.textContent=`${formatBytes(total)} · ${dvSelectedEntries.length} archivo(s) ${dvSelectionMode==='folder'?'de carpeta':'sueltos'}`;
   }
 };
 
