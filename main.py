@@ -592,6 +592,11 @@ def obtener_archivo_drive(service, file_id: str):
 
 
 def listar_carpetas_drive_raiz():
+    """Lista únicamente las carpetas hijas directas del directorio autorizado.
+
+    Se conserva porque otras funciones del proyecto la utilizan para operaciones
+    sobre la raíz. Para el selector de movimiento se usa la versión recursiva.
+    """
     service = obtener_servicio_google_drive()
     consulta = (
         f"'{GOOGLE_FOLDER_ID}' in parents and "
@@ -613,20 +618,93 @@ def listar_carpetas_drive_raiz():
     return respuesta.get("files") or []
 
 
+def listar_carpetas_drive_recursivas():
+    """Devuelve todas las carpetas debajo de GOOGLE_FOLDER_ID.
+
+    Cada entrada incluye su ruta, profundidad y ancestros para poder mostrar un
+    explorador buscable en la web y validar que una carpeta no se mueva dentro
+    de sí misma o de una de sus subcarpetas.
+    """
+    service = obtener_servicio_google_drive()
+    pendientes = [{
+        "id": GOOGLE_FOLDER_ID,
+        "path": "DRIVE PROYECTO",
+        "depth": 0,
+        "ancestors": [],
+    }]
+    visitados = {GOOGLE_FOLDER_ID}
+    carpetas = []
+
+    while pendientes:
+        padre = pendientes.pop(0)
+        page_token = None
+
+        while True:
+            consulta = (
+                f"'{padre['id']}' in parents and "
+                "mimeType='application/vnd.google-apps.folder' and trashed=false"
+            )
+            respuesta = (
+                service
+                .files()
+                .list(
+                    q=consulta,
+                    fields="nextPageToken,files(id,name,parents)",
+                    orderBy="name",
+                    pageSize=200,
+                    pageToken=page_token,
+                    supportsAllDrives=True,
+                    includeItemsFromAllDrives=True,
+                )
+                .execute()
+            )
+
+            for carpeta in respuesta.get("files") or []:
+                carpeta_id = str(carpeta.get("id") or "").strip()
+                if not carpeta_id or carpeta_id in visitados:
+                    continue
+
+                visitados.add(carpeta_id)
+                nombre = str(carpeta.get("name") or "Carpeta").strip() or "Carpeta"
+                path = f"{padre['path']} / {nombre}"
+                ancestors = [*padre["ancestors"], padre["id"]]
+                item = {
+                    "id": carpeta_id,
+                    "name": nombre,
+                    "parent_id": padre["id"],
+                    "path": path,
+                    "depth": int(padre["depth"]) + 1,
+                    "ancestors": ancestors,
+                }
+                carpetas.append(item)
+                pendientes.append(item)
+
+                # Protección para no recorrer accidentalmente árboles enormes.
+                if len(carpetas) >= 2000:
+                    return carpetas
+
+            page_token = respuesta.get("nextPageToken")
+            if not page_token:
+                break
+
+    return carpetas
+
+
 def validar_destino_drive(destino_id: str):
     destino_id = str(destino_id or "").strip()
     if not destino_id or destino_id == GOOGLE_FOLDER_ID:
         return {
             "id": GOOGLE_FOLDER_ID,
             "name": "DRIVE PROYECTO",
+            "parent_id": None,
+            "path": "DRIVE PROYECTO",
+            "depth": 0,
+            "ancestors": [],
         }
 
-    for carpeta in listar_carpetas_drive_raiz():
+    for carpeta in listar_carpetas_drive_recursivas():
         if str(carpeta.get("id")) == destino_id:
-            return {
-                "id": str(carpeta.get("id")),
-                "name": str(carpeta.get("name") or "Carpeta"),
-            }
+            return carpeta
 
     raise HTTPException(
         status_code=400,
@@ -708,6 +786,7 @@ def obtener_objeto_operable(usuario_id: str, objeto_tipo: str, auditoria_id=None
             "lote_id": str(lote_id),
             "auditoria_id": None,
             "ubicacion": filas[0].get("ubicacion_drive") or "DRIVE PROYECTO",
+            "drive_parent_id": str(filas[0].get("drive_parent_id") or GOOGLE_FOLDER_ID),
         }
 
     if objeto_tipo == "ARCHIVO":
@@ -743,6 +822,7 @@ def obtener_objeto_operable(usuario_id: str, objeto_tipo: str, auditoria_id=None
             "lote_id": None,
             "auditoria_id": str(auditoria_id),
             "ubicacion": fila.get("ubicacion_drive") or "DRIVE PROYECTO",
+            "drive_parent_id": str(fila.get("drive_parent_id") or GOOGLE_FOLDER_ID),
         }
 
     raise HTTPException(status_code=400, detail="objeto_tipo inválido.")
@@ -849,16 +929,25 @@ def procesar_solicitud_operacion(solicitud_id: str, aprobar: bool, resuelto_por:
 
         elif tipo == "MOVER":
             destino = validar_destino_drive(solicitud.get("carpeta_destino_id"))
-            if destino["id"] == objeto["drive_id"]:
-                raise RuntimeError("Una carpeta no puede moverse dentro de sí misma.")
+
+            if destino["id"] == objeto["drive_parent_id"]:
+                raise RuntimeError("El elemento ya se encuentra en esa carpeta.")
+
+            if objeto["tipo"] == "CARPETA":
+                if destino["id"] == objeto["drive_id"]:
+                    raise RuntimeError("Una carpeta no puede moverse dentro de sí misma.")
+                if objeto["drive_id"] in (destino.get("ancestors") or []):
+                    raise RuntimeError("Una carpeta no puede moverse dentro de una de sus subcarpetas.")
+
             mover_objeto_google_drive(objeto["drive_id"], destino["id"])
+            ubicacion_destino = destino.get("path") or destino["name"]
             cambios.update({
                 "en_drive": True,
                 "estado_archivo": "ACTIVO",
                 "drive_parent_id": destino["id"],
-                "ubicacion_drive": destino["name"],
+                "ubicacion_drive": ubicacion_destino,
             })
-            resultado_texto = f"Elemento movido a {destino['name']}."
+            resultado_texto = f"Elemento movido a {ubicacion_destino}."
         else:
             raise RuntimeError("Tipo de operación no soportado.")
 
@@ -2882,11 +2971,31 @@ def obtener_carpetas_drive(request: Request):
     obtener_usuario_supabase_desde_request(request)
     if not google_drive_configurado():
         raise HTTPException(status_code=503, detail="Google Drive no está configurado.")
-    carpetas = listar_carpetas_drive_raiz()
+
+    carpetas = listar_carpetas_drive_recursivas()
     return {
         "folders": [
-            {"id": GOOGLE_FOLDER_ID, "name": "DRIVE PROYECTO", "root": True},
-            *[{"id": c.get("id"), "name": c.get("name"), "root": False} for c in carpetas],
+            {
+                "id": GOOGLE_FOLDER_ID,
+                "name": "DRIVE PROYECTO",
+                "parent_id": None,
+                "path": "DRIVE PROYECTO",
+                "depth": 0,
+                "ancestors": [],
+                "root": True,
+            },
+            *[
+                {
+                    "id": c.get("id"),
+                    "name": c.get("name"),
+                    "parent_id": c.get("parent_id"),
+                    "path": c.get("path"),
+                    "depth": c.get("depth", 1),
+                    "ancestors": c.get("ancestors") or [],
+                    "root": False,
+                }
+                for c in carpetas
+            ],
         ]
     }
 
@@ -2913,8 +3022,18 @@ async def solicitar_operacion(request: Request, background_tasks: BackgroundTask
     destino = None
     if tipo == "MOVER":
         destino = validar_destino_drive(payload.get("carpeta_destino_id"))
-        if destino["id"] == objeto["drive_id"]:
-            raise HTTPException(status_code=400, detail="Una carpeta no puede moverse dentro de sí misma.")
+
+        if destino["id"] == objeto["drive_parent_id"]:
+            raise HTTPException(status_code=400, detail="El elemento ya se encuentra en esa carpeta.")
+
+        if objeto["tipo"] == "CARPETA":
+            if destino["id"] == objeto["drive_id"]:
+                raise HTTPException(status_code=400, detail="Una carpeta no puede moverse dentro de sí misma.")
+            if objeto["drive_id"] in (destino.get("ancestors") or []):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Una carpeta no puede moverse dentro de una de sus subcarpetas.",
+                )
 
     # Evita solicitudes repetidas pendientes para el mismo objeto.
     pendientes = (
@@ -2949,7 +3068,7 @@ async def solicitar_operacion(request: Request, background_tasks: BackgroundTask
         "nombre_objeto": objeto["nombre"],
         "carpeta_origen": objeto.get("ubicacion") or "DRIVE PROYECTO",
         "carpeta_destino_id": destino["id"] if destino else None,
-        "carpeta_destino_nombre": destino["name"] if destino else None,
+        "carpeta_destino_nombre": (destino.get("path") or destino["name"]) if destino else None,
         "estado": "PENDIENTE",
     }
 
