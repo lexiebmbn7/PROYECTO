@@ -5136,6 +5136,10 @@ window.addEventListener('DOMContentLoaded',()=>{
 .dv-user-modal-card{width:min(520px,96vw);background:#fff;border-radius:15px;box-shadow:0 24px 70px rgba(15,23,42,.25);border:1px solid #e2e8f0;overflow:hidden}
 .dv-user-modal-head{padding:18px 20px;border-bottom:1px solid #edf1f4;display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
 .dv-user-modal-body{padding:20px}.dv-user-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.dv-user-field{display:flex;flex-direction:column;gap:6px}.dv-user-field.full{grid-column:1/-1}.dv-user-help{font-size:9px;color:#8a9cab;line-height:1.4}.dv-user-error{font-size:10px;color:#b42318;background:#fff5f5;border:1px solid #fecaca;border-radius:8px;padding:9px 10px}.dv-user-success{font-size:10px;color:#067647;background:#effcf6;border:1px solid #abefc6;border-radius:8px;padding:9px 10px}
+.dv-folder-search{position:relative}.dv-folder-search i{position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:11px;color:#8da0ae;pointer-events:none}.dv-folder-search input{padding-left:34px}
+.dv-folder-tree{border:1px solid #dbe4ea;border-radius:10px;max-height:290px;overflow:auto;background:#fbfdfe;padding:5px}
+.dv-folder-option{width:100%;display:flex;align-items:center;gap:9px;text-align:left;border:0;background:transparent;border-radius:7px;padding:8px 9px;color:#304958;cursor:pointer;font-size:10px;transition:.15s ease}.dv-folder-option:hover{background:#edf5f8}.dv-folder-option.selected{background:#dff1f7;color:#0f516d;font-weight:800}.dv-folder-option.disabled{opacity:.42;cursor:not-allowed;background:transparent}.dv-folder-option.disabled:hover{background:transparent}.dv-folder-option .folder-main{min-width:0;flex:1}.dv-folder-option .folder-name{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dv-folder-option .folder-path{font-size:8px;color:#899aa6;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dv-folder-option .folder-note{font-size:8px;color:#94a3b8;white-space:nowrap}
+.dv-move-selection{border:1px solid #dbe4ea;background:#f8fbfc;border-radius:9px;padding:10px 12px;font-size:10px;color:#526b7a;line-height:1.45}.dv-move-selection strong{color:#173647}.dv-op-pending{display:inline-flex;align-items:center;gap:5px;border-radius:999px;background:#fff7e8;color:#a15c00;border:1px solid #f7dca6;padding:5px 8px;font-size:8px;font-weight:800;white-space:nowrap}
 @media(max-width:640px){.dv-user-form-grid{grid-template-columns:1fr}.dv-user-field.full{grid-column:auto}}
 @media(max-width:900px){.dv-op-actions{justify-content:flex-start}.dv-op-btn{font-size:10px}}
 </style>
@@ -5155,6 +5159,8 @@ window.addEventListener('DOMContentLoaded',()=>{
   let dvOpsSyncTimer=null;
   let dvOpsSyncBusy=false;
   let dvCurrentMove=null;
+  let dvMoveFolders=[];
+  let dvMoveSelectedId='';
 
   const norm=v=>String(v??'').trim().toLowerCase();
   const isAdmin=()=>['jefe','admin','administrador'].includes(norm(currentRole));
@@ -5206,24 +5212,47 @@ window.addEventListener('DOMContentLoaded',()=>{
     const modal=document.createElement('div');
     modal.id='dvOperationModal';modal.className='dv-hidden';
     modal.innerHTML=`<div class="dv-op-modal-card">
-      <div class="dv-op-modal-head"><div><p class="text-[10px] uppercase tracking-widest text-slate-400 font-bold">Solicitud de movimiento</p><h3 class="text-lg font-extrabold text-slate-800 mt-1" id="dvMoveTitle">Mover elemento</h3><p class="text-xs text-slate-500 mt-1">La operación se ejecutará solo después de la aprobación del custodio.</p></div><button type="button" class="icon-btn" onclick="dvCloseMoveModal()"><i class="fa-solid fa-xmark"></i></button></div>
+      <div class="dv-op-modal-head"><div><p class="text-[10px] uppercase tracking-widest text-slate-400 font-bold">Solicitud de movimiento</p><h3 class="text-lg font-extrabold text-slate-800 mt-1" id="dvMoveTitle">Mover elemento</h3><p class="text-xs text-slate-500 mt-1">Busca y selecciona una carpeta ya existente en Google Drive. El custodio deberá aprobar la operación.</p></div><button type="button" class="icon-btn" onclick="dvCloseMoveModal()"><i class="fa-solid fa-xmark"></i></button></div>
       <div class="dv-op-modal-body space-y-4">
-        <div><label class="field-label">Destino en Google Drive</label><select id="dvMoveDestination" class="input-modern w-full"><option>Cargando...</option></select></div>
+        <div>
+          <label class="field-label">Buscar carpeta destino</label>
+          <div class="dv-folder-search"><i class="fa-solid fa-magnifying-glass"></i><input id="dvMoveSearch" class="input-modern w-full" placeholder="Ej. contratos, cliente A, proyectos..." autocomplete="off" oninput="dvFilterMoveFolders()"></div>
+        </div>
+        <div id="dvMoveFolderList" class="dv-folder-tree"><div class="p-4 text-center text-xs text-slate-400"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Cargando carpetas...</div></div>
+        <div id="dvMoveSelection" class="dv-move-selection">Selecciona una carpeta de destino.</div>
         <div id="dvMoveMessage" class="text-xs text-slate-500"></div>
-        <div class="flex justify-end gap-2"><button type="button" class="secondary-btn" onclick="dvCloseMoveModal()">Cancelar</button><button type="button" class="primary-btn" id="dvMoveSubmit" onclick="dvSubmitMoveRequest()"><i class="fa-solid fa-paper-plane"></i>Solicitar movimiento</button></div>
+        <div class="flex justify-end gap-2"><button type="button" class="secondary-btn" onclick="dvCloseMoveModal()">Cancelar</button><button type="button" class="primary-btn" id="dvMoveSubmit" onclick="dvSubmitMoveRequest()" disabled><i class="fa-solid fa-paper-plane"></i>Solicitar movimiento</button></div>
       </div>
     </div>`;
     modal.addEventListener('click',e=>{if(e.target===modal)dvCloseMoveModal();});
     document.body.appendChild(modal);
   }
 
-  window.dvCloseMoveModal=function(){document.getElementById('dvOperationModal')?.classList.add('dv-hidden');dvCurrentMove=null;};
+  window.dvCloseMoveModal=function(){
+    document.getElementById('dvOperationModal')?.classList.add('dv-hidden');
+    dvCurrentMove=null;dvMoveFolders=[];dvMoveSelectedId='';
+  };
+
+  function pendingOperation(kind,id){
+    const target=String(id||'');
+    return (dvOpsRequestCache||[]).find(r=>{
+      if(String(r?.estado||'').toUpperCase()!=='PENDIENTE')return false;
+      return kind==='CARPETA'
+        ? String(r?.lote_id||'')===target
+        : String(r?.auditoria_id||'')===target;
+    })||null;
+  }
 
   function operationButtons(kind, id, rowsOrRow){
     if(isAdmin()) return '<span class="dv-op-legacy">Supervisión</span>';
     const rows=Array.isArray(rowsOrRow)?rowsOrRow:[rowsOrRow];
     const approved=rows.every(r=>String(r?.estado||'').toUpperCase()==='APROBADO') && !rows.some(deleted);
     const linked=kind==='CARPETA' ? !!String(rows[0]?.drive_folder_id||'').trim() : !!String(rows[0]?.drive_file_id||'').trim();
+    const pending=pendingOperation(kind,id);
+    if(pending){
+      const label=String(pending.tipo_operacion||'').toUpperCase()==='MOVER'?'Movimiento pendiente':'Eliminación pendiente';
+      return `<span class="dv-op-pending"><i class="fa-solid fa-clock"></i>${escapeHtml(label)}</span>`;
+    }
     if(!approved) return '<span class="dv-op-legacy">Disponible al aprobar</span>';
     if(!linked) return '<span class="dv-op-legacy" title="Registro histórico sin ID de Drive">Sin vínculo Drive</span>';
     const safe=escapeHtml(String(id));
@@ -5262,36 +5291,112 @@ window.addEventListener('DOMContentLoaded',()=>{
     renderFilesTable(rows);
   };
 
+  function dvMoveContext(kind,id){
+    const target=String(id||'');
+    if(kind==='CARPETA'){
+      const rows=(auditCache||[]).filter(r=>String(r?.lote_id||'')===target);
+      const r=rows[0]||{};
+      return {
+        kind,id:target,
+        name:dvRoot(r)||'Carpeta',
+        driveId:String(r?.drive_folder_id||''),
+        currentParent:String(r?.drive_parent_id||'')
+      };
+    }
+    const r=(auditCache||[]).find(x=>String(x?.id||'')===target)||{};
+    return {
+      kind,id:target,
+      name:r?.nombre_archivo||'Archivo',
+      driveId:String(r?.drive_file_id||''),
+      currentParent:String(r?.drive_parent_id||'')
+    };
+  }
+
+  function dvMoveFolderRestriction(folder){
+    if(!dvCurrentMove)return '';
+    const folderId=String(folder?.id||'');
+    if(folderId && dvCurrentMove.currentParent && folderId===dvCurrentMove.currentParent)return 'Ubicación actual';
+    if(dvCurrentMove.kind==='CARPETA'){
+      if(folderId && folderId===dvCurrentMove.driveId)return 'Es la misma carpeta';
+      const ancestors=Array.isArray(folder?.ancestors)?folder.ancestors.map(String):[];
+      if(dvCurrentMove.driveId && ancestors.includes(dvCurrentMove.driveId))return 'Está dentro de la carpeta que mueves';
+    }
+    return '';
+  }
+
+  function dvRenderMoveFolders(){
+    const list=document.getElementById('dvMoveFolderList');if(!list)return;
+    const q=norm(document.getElementById('dvMoveSearch')?.value||'');
+    const folders=(dvMoveFolders||[]).filter(f=>!q||norm(`${f?.name||''} ${f?.path||''}`).includes(q));
+    if(!folders.length){
+      list.innerHTML='<div class="p-5 text-center text-xs text-slate-400"><i class="fa-solid fa-folder-open mr-2"></i>No se encontraron carpetas.</div>';
+      return;
+    }
+    list.innerHTML=folders.map(f=>{
+      const restriction=dvMoveFolderRestriction(f);
+      const selected=String(f?.id||'')===String(dvMoveSelectedId||'');
+      const depth=Math.min(Number(f?.depth||0),8);
+      const path=String(f?.path||f?.name||'Carpeta');
+      const pathSecondary=Number(f?.depth||0)>0?path:'Carpeta raíz autorizada';
+      return `<button type="button" class="dv-folder-option${selected?' selected':''}${restriction?' disabled':''}" data-dv-folder-id="${escapeHtml(String(f?.id||''))}" ${restriction?'disabled':''} style="padding-left:${9+(depth*15)}px" title="${escapeHtml(restriction||path)}">
+        <i class="fa-solid ${Number(f?.depth||0)===0?'fa-hard-drive':'fa-folder'} text-amber-500"></i>
+        <span class="folder-main"><span class="folder-name">${escapeHtml(f?.name||'Carpeta')}</span><span class="folder-path">${escapeHtml(pathSecondary)}</span></span>
+        ${restriction?`<span class="folder-note">${escapeHtml(restriction)}</span>`:''}
+      </button>`;
+    }).join('');
+    list.querySelectorAll('[data-dv-folder-id]:not(:disabled)').forEach(btn=>btn.addEventListener('click',()=>dvSelectMoveFolder(btn.dataset.dvFolderId)));
+  }
+
+  window.dvFilterMoveFolders=function(){dvRenderMoveFolders();};
+
+  window.dvSelectMoveFolder=function(folderId){
+    const folder=(dvMoveFolders||[]).find(f=>String(f?.id||'')===String(folderId||''));
+    if(!folder || dvMoveFolderRestriction(folder))return;
+    dvMoveSelectedId=String(folder.id||'');
+    dvRenderMoveFolders();
+    const box=document.getElementById('dvMoveSelection');
+    if(box)box.innerHTML=`Destino seleccionado:<br><strong><i class="fa-solid fa-folder mr-1 text-amber-500"></i>${escapeHtml(folder.path||folder.name||'Carpeta')}</strong>`;
+    const btn=document.getElementById('dvMoveSubmit');if(btn)btn.disabled=false;
+  };
+
   window.dvRequestMove=async function(kind,id){
     try{
       ensureModal();
-      dvCurrentMove={kind,id};
+      dvCurrentMove=dvMoveContext(kind,id);dvMoveFolders=[];dvMoveSelectedId='';
       const modal=document.getElementById('dvOperationModal');modal.classList.remove('dv-hidden');
-      document.getElementById('dvMoveTitle').textContent=kind==='CARPETA'?'Mover carpeta':'Mover archivo';
-      const sel=document.getElementById('dvMoveDestination');sel.innerHTML='<option>Cargando...</option>';
-      document.getElementById('dvMoveMessage').textContent='Consultando carpetas disponibles en Drive...';
+      document.getElementById('dvMoveTitle').textContent=`Mover ${kind==='CARPETA'?'carpeta':'archivo'}: ${dvCurrentMove.name}`;
+      const search=document.getElementById('dvMoveSearch');if(search)search.value='';
+      const list=document.getElementById('dvMoveFolderList');if(list)list.innerHTML='<div class="p-4 text-center text-xs text-slate-400"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Cargando carpetas...</div>';
+      const selection=document.getElementById('dvMoveSelection');if(selection)selection.textContent='Selecciona una carpeta de destino.';
+      const submit=document.getElementById('dvMoveSubmit');if(submit)submit.disabled=true;
+      document.getElementById('dvMoveMessage').textContent='Consultando carpetas y subcarpetas disponibles en Drive...';
       const res=await fetch(`${API_URL}/drive-folders`,{headers:await authHeaders(false)});
       const data=await res.json().catch(()=>({}));
       if(!res.ok)throw new Error(data.detail||`Error HTTP ${res.status}`);
-      const folders=Array.isArray(data.folders)?data.folders:[];
-      sel.innerHTML=folders.map(f=>`<option value="${escapeHtml(f.id)}">${escapeHtml(f.name)}</option>`).join('');
-      document.getElementById('dvMoveMessage').textContent='Se creará una solicitud PENDIENTE y el custodio la resolverá por Telegram.';
+      dvMoveFolders=(Array.isArray(data.folders)?data.folders:[]).slice().sort((a,b)=>{
+        if(Boolean(a?.root)!==Boolean(b?.root))return a?.root?-1:1;
+        return String(a?.path||a?.name||'').localeCompare(String(b?.path||b?.name||''),'es',{numeric:true,sensitivity:'base'});
+      });
+      dvRenderMoveFolders();
+      document.getElementById('dvMoveMessage').textContent='Solo se enviará la solicitud. Google Drive cambiará cuando el custodio la apruebe por Telegram.';
     }catch(err){dvCloseMoveModal();alert('No se pudieron cargar los destinos: '+(err.message||err));}
   };
 
   window.dvSubmitMoveRequest=async function(){
     if(!dvCurrentMove)return;
-    const btn=document.getElementById('dvMoveSubmit');const sel=document.getElementById('dvMoveDestination');
+    const btn=document.getElementById('dvMoveSubmit');
+    if(!dvMoveSelectedId){toast('Selecciona primero una carpeta de destino.');return;}
     try{
       btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Enviando...';
-      const payload={tipo_operacion:'MOVER',objeto_tipo:dvCurrentMove.kind,carpeta_destino_id:sel.value};
+      const payload={tipo_operacion:'MOVER',objeto_tipo:dvCurrentMove.kind,carpeta_destino_id:dvMoveSelectedId};
       if(dvCurrentMove.kind==='CARPETA')payload.lote_id=dvCurrentMove.id;else payload.auditoria_id=dvCurrentMove.id;
       const res=await fetch(`${API_URL}/operations/request`,{method:'POST',headers:await authHeaders(),body:JSON.stringify(payload)});
       const data=await res.json().catch(()=>({}));
       if(!res.ok)throw new Error(typeof data.detail==='string'?data.detail:`Error HTTP ${res.status}`);
       dvCloseMoveModal();toast('Solicitud de movimiento enviada al custodio.');await loadCola();
+      if(typeof loadFilesView==='function')await loadFilesView();
     }catch(err){alert('No se pudo solicitar el movimiento: '+(err.message||err));}
-    finally{if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i>Solicitar movimiento';}}
+    finally{if(btn){btn.disabled=!dvMoveSelectedId;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i>Solicitar movimiento';}}
   };
 
   window.dvRequestDelete=async function(kind,id){
@@ -5304,6 +5409,7 @@ window.addEventListener('DOMContentLoaded',()=>{
       const data=await res.json().catch(()=>({}));
       if(!res.ok)throw new Error(typeof data.detail==='string'?data.detail:`Error HTTP ${res.status}`);
       toast('Solicitud de eliminación enviada al custodio.');await loadCola();
+      if(typeof loadFilesView==='function')await loadFilesView();
     }catch(err){alert('No se pudo solicitar la eliminación: '+(err.message||err));}
   };
 
