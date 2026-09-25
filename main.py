@@ -2613,6 +2613,7 @@ async def crear_usuario_desde_web(request: Request):
     supabase_auth_url = f"{SUPABASE_URL}/auth/v1/admin/users"
     headers = {
         "apikey": service_key,
+        "Authorization": f"Bearer {service_key}",
         "Content-Type": "application/json",
     }
     body = {
@@ -2678,6 +2679,7 @@ async def listar_usuarios_desde_web(request: Request):
 
     headers = {
         "apikey": service_key,
+        "Authorization": f"Bearer {service_key}",
     }
     try:
         respuesta = requests.get(
@@ -2738,6 +2740,7 @@ async def eliminar_usuario_desde_web(user_id: str, request: Request):
 
     headers = {
         "apikey": service_key,
+        "Authorization": f"Bearer {service_key}",
     }
     try:
         respuesta = requests.delete(
