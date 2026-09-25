@@ -4447,6 +4447,30 @@ window.addEventListener('DOMContentLoaded',()=>{
     renderRoleRecent(rows);
   }
 
+  // Helpers locales del modulo de usuarios administrativos.
+  // Se mantienen dentro de este bloque para que crear/listar/eliminar
+  // usuarios pueda autenticar las llamadas al backend correctamente.
+  async function authHeaders(json=true){
+    const {data,error}=await supabaseClient.auth.getSession();
+    if(error) throw error;
+    const token=data?.session?.access_token;
+    if(!token) throw new Error('Sesión expirada. Vuelve a iniciar sesión.');
+    const headers={Authorization:`Bearer ${token}`};
+    if(json) headers['Content-Type']='application/json';
+    return headers;
+  }
+
+  function toast(msg){
+    const old=document.getElementById('dvOpToast');
+    if(old) old.remove();
+    const el=document.createElement('div');
+    el.id='dvOpToast';
+    el.className='dv-op-toast';
+    el.textContent=msg;
+    document.body.appendChild(el);
+    setTimeout(()=>el.remove(),3500);
+  }
+
   // =======================================================
   // CREAR USUARIOS DESDE EL PANEL DEL ADMINISTRADOR
   // =======================================================
