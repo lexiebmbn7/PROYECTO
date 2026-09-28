@@ -5426,7 +5426,21 @@ window.addEventListener('DOMContentLoaded',()=>{
       ? 'Se transferirá a Google Drive y quedará marcado como aprobado.'
       : 'Quedará marcado como rechazado y ya no se enviará a Google Drive.';
 
-    if(!confirm(`¿${verbo} ${objeto}? ${efecto}`))return;
+    const confirmado=await dvShowDecisionModal({
+      mode:aprobar?'approve':'reject',
+      title:aprobar
+        ? (esCarpeta?'Aprobar carpeta':'Aprobar archivo')
+        : (esCarpeta?'Rechazar carpeta':'Rechazar archivo'),
+      subtitle:esCarpeta
+        ? 'Decisión sobre los archivos pendientes de la carpeta'
+        : 'Decisión de custodia del archivo',
+      message:`¿${verbo} ${objeto}?`,
+      detail:efecto,
+      confirmText:aprobar?'Sí, aprobar':'Sí, rechazar',
+      cancelText:'Cancelar'
+    });
+
+    if(!confirmado)return;
 
     const originalHtml=buttonEl?.innerHTML;
     try{
@@ -5450,18 +5464,31 @@ window.addEventListener('DOMContentLoaded',()=>{
       if(!res.ok)throw new Error(typeof data.detail==='string'?data.detail:`Error HTTP ${res.status}`);
 
       const cantidad=Number(data.procesados||0);
-      if(esCarpeta){
-        toast(`${aprobar?'Carpeta aprobada':'Carpeta rechazada'} (${cantidad} archivo(s)).`);
-      }else{
-        toast(aprobar?'Archivo aprobado y transferido a Google Drive.':'Archivo rechazado.');
-      }
 
       await loadCola();
       if(typeof loadRoleHome==='function')await loadRoleHome();
       if(typeof loadFilesView==='function' && document.getElementById('view-gestor')?.classList.contains('active'))await loadFilesView();
       if(typeof loadAudit==='function')await loadAudit();
+
+      await dvShowMessageModal({
+        type:'success',
+        title:aprobar
+          ? (esCarpeta?'Carpeta aprobada':'Archivo aprobado')
+          : (esCarpeta?'Carpeta rechazada':'Archivo rechazado'),
+        message:esCarpeta
+          ? `${aprobar?'Se aprobaron':'Se rechazaron'} ${cantidad} archivo(s) pendiente(s) de la carpeta.`
+          : (aprobar
+              ? 'El archivo fue aprobado y transferido correctamente a Google Drive.'
+              : 'El archivo fue rechazado y ya no será enviado a Google Drive.'),
+        buttonText:'Entendido'
+      });
     }catch(err){
-      alert(`No se pudo ${aprobar?'aprobar':'rechazar'} la carga: `+(err.message||err));
+      await dvShowMessageModal({
+        type:'error',
+        title:aprobar?'No se pudo aprobar':'No se pudo rechazar',
+        message:String(err?.message||err||'Ocurrió un error inesperado.'),
+        buttonText:'Cerrar'
+      });
     }finally{
       if(buttonEl && document.body.contains(buttonEl)){
         buttonEl.disabled=false;
@@ -5511,14 +5538,14 @@ window.addEventListener('DOMContentLoaded',()=>{
     const detailRows=(rows||[]).slice().sort((a,b)=>String(a?.ruta_relativa||a?.nombre_archivo||'').localeCompare(String(b?.ruta_relativa||b?.nombre_archivo||''))).map(r=>{
       const rowState=String(r?.estado||'PENDIENTE').toUpperCase();
       const name=dvPath(r)||r?.nombre_archivo||'Archivo';
-      const cancel=r?.id&&rowState==='PENDIENTE'
-        ? `<button type="button" class="secondary-btn danger-outline !px-2 !py-1 !text-[9px]" onclick="resolvePendingUpload('${escapeHtml(String(r.id))}','ARCHIVO','RECHAZAR',this)" title="Rechazar solo este archivo"><i class="fa-solid fa-xmark"></i> Rechazar</button>`
+      const childActions=r?.id&&rowState==='PENDIENTE'&&isAdmin()
+        ? custodyDecisionButtons(r.id,'ARCHIVO')
         : '<span class="text-[9px] text-slate-400">—</span>';
       return `<div class="flex flex-wrap items-center gap-2 border-b border-slate-100 py-2 last:border-b-0">
         <div class="min-w-0 flex-1"><p class="font-semibold text-[9px] text-slate-700 truncate" title="${escapeHtml(name)}"><i class="fa-solid ${dvIconFor(r?.nombre_archivo||name)} mr-2 text-blue-400"></i>${escapeHtml(name)}</p></div>
         <span class="text-[8px] text-slate-400">${formatBytes(Number(r?.tamano_bytes||0))}</span>
         <span class="status-pill ${dvStatusClass(rowState)}">${escapeHtml(rowState)}</span>
-        ${cancel}
+        ${childActions}
       </div>`;
     }).join('');
     const cancelAll=pendingRows.length&&isAdmin()
@@ -6369,6 +6396,423 @@ window.addEventListener('DOMContentLoaded',()=>{
 
   // Exponer para pruebas desde consola.
   window.dvRefreshDashboardInventory = refreshDashboard;
+})();
+</script>
+
+
+<style id="datavault-decision-modal-v2">
+/* =========================================================
+   MODAL DATAVAULT · APROBAR / RECHAZAR
+   Reemplaza los confirm()/alert() del navegador por una
+   interfaz centrada y consistente con el sistema.
+   ========================================================= */
+body.dv-modal-open{overflow:hidden!important}
+
+#dvDecisionModal{
+  position:fixed;
+  inset:0;
+  z-index:100000;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:24px;
+  background:rgba(13,28,39,.52);
+  backdrop-filter:blur(5px);
+  -webkit-backdrop-filter:blur(5px);
+  opacity:1;
+  visibility:visible;
+  transition:opacity .16s ease,visibility .16s ease;
+}
+
+#dvDecisionModal.dv-hidden{
+  opacity:0;
+  visibility:hidden;
+  pointer-events:none;
+}
+
+.dv-decision-card{
+  width:min(520px,calc(100vw - 32px));
+  max-height:calc(100vh - 48px);
+  overflow:auto;
+  background:#fff;
+  border:1px solid #e2e8f0;
+  border-radius:20px;
+  box-shadow:0 28px 85px rgba(15,23,42,.30);
+  transform:translateY(0) scale(1);
+  transition:transform .18s ease,opacity .18s ease;
+}
+
+#dvDecisionModal.dv-hidden .dv-decision-card{
+  transform:translateY(12px) scale(.975);
+  opacity:0;
+}
+
+.dv-decision-top{
+  padding:24px 24px 18px;
+  display:flex;
+  align-items:flex-start;
+  gap:15px;
+}
+
+.dv-decision-icon{
+  width:48px;
+  height:48px;
+  min-width:48px;
+  border-radius:14px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:18px;
+  border:1px solid transparent;
+}
+
+.dv-decision-icon.approve,
+.dv-decision-icon.success{
+  color:#067647;
+  background:#ecfdf3;
+  border-color:#abefc6;
+}
+
+.dv-decision-icon.reject,
+.dv-decision-icon.error{
+  color:#b42318;
+  background:#fef3f2;
+  border-color:#fecdca;
+}
+
+.dv-decision-icon.info{
+  color:#175cd3;
+  background:#eff8ff;
+  border-color:#b2ddff;
+}
+
+.dv-decision-title{
+  margin:1px 0 0;
+  color:#173647;
+  font-size:20px;
+  line-height:1.2;
+  font-weight:850;
+  letter-spacing:-.02em;
+}
+
+.dv-decision-subtitle{
+  margin-top:5px;
+  color:#738696;
+  font-size:12px;
+  line-height:1.45;
+}
+
+.dv-decision-body{
+  padding:0 24px 22px;
+}
+
+.dv-decision-message{
+  padding:15px 16px;
+  border-radius:12px;
+  border:1px solid #e4ebef;
+  background:#f8fbfc;
+  color:#314b5b;
+  font-size:14px;
+  font-weight:700;
+  line-height:1.5;
+}
+
+.dv-decision-detail{
+  margin-top:10px;
+  color:#647887;
+  font-size:12px;
+  line-height:1.55;
+}
+
+.dv-decision-actions{
+  padding:17px 24px 22px;
+  border-top:1px solid #edf1f4;
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:10px;
+  background:#fbfcfd;
+}
+
+.dv-decision-btn{
+  min-height:42px;
+  border-radius:10px;
+  padding:0 16px;
+  border:1px solid #d6e0e5;
+  background:#fff;
+  color:#405966;
+  font-size:13px;
+  font-weight:800;
+  cursor:pointer;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  transition:transform .14s ease,box-shadow .14s ease,background .14s ease;
+}
+
+.dv-decision-btn:hover{
+  transform:translateY(-1px);
+  box-shadow:0 5px 14px rgba(15,23,42,.08);
+}
+
+.dv-decision-btn:focus-visible{
+  outline:3px solid rgba(59,130,246,.20);
+  outline-offset:2px;
+}
+
+.dv-decision-btn.cancel{
+  background:#fff;
+  color:#526873;
+}
+
+.dv-decision-btn.confirm.approve,
+.dv-decision-btn.confirm.success{
+  background:#16845b;
+  border-color:#16845b;
+  color:#fff;
+}
+
+.dv-decision-btn.confirm.approve:hover,
+.dv-decision-btn.confirm.success:hover{
+  background:#116b4a;
+}
+
+.dv-decision-btn.confirm.reject,
+.dv-decision-btn.confirm.error{
+  background:#b54747;
+  border-color:#b54747;
+  color:#fff;
+}
+
+.dv-decision-btn.confirm.reject:hover,
+.dv-decision-btn.confirm.error:hover{
+  background:#963c3c;
+}
+
+@media(max-width:640px){
+  #dvDecisionModal{padding:16px}
+  .dv-decision-top{padding:20px 18px 15px}
+  .dv-decision-body{padding:0 18px 18px}
+  .dv-decision-actions{padding:14px 18px 18px;flex-direction:column-reverse}
+  .dv-decision-btn{width:100%}
+  .dv-decision-title{font-size:18px}
+}
+</style>
+
+<div id="dvDecisionModal" class="dv-hidden" role="dialog" aria-modal="true" aria-labelledby="dvDecisionTitle" aria-describedby="dvDecisionMessage">
+  <div class="dv-decision-card" tabindex="-1">
+    <div class="dv-decision-top">
+      <div id="dvDecisionIcon" class="dv-decision-icon info">
+        <i class="fa-solid fa-circle-info"></i>
+      </div>
+      <div class="min-w-0">
+        <h3 id="dvDecisionTitle" class="dv-decision-title">Confirmar acción</h3>
+        <p id="dvDecisionSubtitle" class="dv-decision-subtitle">DataVault DLP</p>
+      </div>
+    </div>
+
+    <div class="dv-decision-body">
+      <div id="dvDecisionMessage" class="dv-decision-message">¿Deseas continuar?</div>
+      <div id="dvDecisionDetail" class="dv-decision-detail"></div>
+    </div>
+
+    <div class="dv-decision-actions">
+      <button type="button" id="dvDecisionCancel" class="dv-decision-btn cancel">
+        <i class="fa-solid fa-xmark"></i>
+        <span>Cancelar</span>
+      </button>
+      <button type="button" id="dvDecisionConfirm" class="dv-decision-btn confirm approve">
+        <i class="fa-solid fa-check"></i>
+        <span>Confirmar</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script id="datavault-decision-modal-v2-script">
+(function(){
+  let dvModalResolver=null;
+  let dvModalKeyHandler=null;
+  let dvModalPreviousFocus=null;
+
+  function modalEls(){
+    return {
+      modal:document.getElementById('dvDecisionModal'),
+      card:document.querySelector('#dvDecisionModal .dv-decision-card'),
+      icon:document.getElementById('dvDecisionIcon'),
+      title:document.getElementById('dvDecisionTitle'),
+      subtitle:document.getElementById('dvDecisionSubtitle'),
+      message:document.getElementById('dvDecisionMessage'),
+      detail:document.getElementById('dvDecisionDetail'),
+      cancel:document.getElementById('dvDecisionCancel'),
+      confirm:document.getElementById('dvDecisionConfirm')
+    };
+  }
+
+  function closeModal(result){
+    const e=modalEls();
+    if(!e.modal)return;
+
+    e.modal.classList.add('dv-hidden');
+    document.body.classList.remove('dv-modal-open');
+
+    if(dvModalKeyHandler){
+      document.removeEventListener('keydown',dvModalKeyHandler);
+      dvModalKeyHandler=null;
+    }
+
+    const resolve=dvModalResolver;
+    dvModalResolver=null;
+
+    setTimeout(()=>{
+      if(dvModalPreviousFocus && typeof dvModalPreviousFocus.focus==='function'){
+        try{dvModalPreviousFocus.focus();}catch(_){}
+      }
+      dvModalPreviousFocus=null;
+    },0);
+
+    if(resolve)resolve(Boolean(result));
+  }
+
+  function configureIcon(iconEl,mode){
+    const safe=['approve','reject','success','error','info'].includes(mode)?mode:'info';
+    iconEl.className=`dv-decision-icon ${safe}`;
+
+    if(safe==='approve'||safe==='success'){
+      iconEl.innerHTML='<i class="fa-solid fa-check"></i>';
+    }else if(safe==='reject'||safe==='error'){
+      iconEl.innerHTML='<i class="fa-solid fa-xmark"></i>';
+    }else{
+      iconEl.innerHTML='<i class="fa-solid fa-circle-info"></i>';
+    }
+  }
+
+  window.dvShowDecisionModal=function({
+    mode='approve',
+    title='Confirmar acción',
+    subtitle='DataVault DLP',
+    message='¿Deseas continuar?',
+    detail='',
+    confirmText='Confirmar',
+    cancelText='Cancelar'
+  }={}){
+    return new Promise(resolve=>{
+      const e=modalEls();
+
+      if(!e.modal||!e.card||!e.icon||!e.title||!e.subtitle||!e.message||!e.detail||!e.cancel||!e.confirm){
+        resolve(false);
+        return;
+      }
+
+      // Si por alguna razón hubiera otro modal de decisión abierto,
+      // lo cerramos antes de abrir el nuevo.
+      if(dvModalResolver){
+        const previous=dvModalResolver;
+        dvModalResolver=null;
+        previous(false);
+      }
+
+      dvModalResolver=resolve;
+      dvModalPreviousFocus=document.activeElement;
+
+      configureIcon(e.icon,mode);
+      e.title.textContent=title;
+      e.subtitle.textContent=subtitle;
+      e.message.textContent=message;
+      e.detail.textContent=detail||'';
+      e.detail.style.display=detail?'block':'none';
+
+      e.cancel.style.display='inline-flex';
+      e.cancel.querySelector('span').textContent=cancelText;
+
+      e.confirm.className=`dv-decision-btn confirm ${mode==='reject'?'reject':'approve'}`;
+      e.confirm.innerHTML=`<i class="fa-solid ${mode==='reject'?'fa-xmark':'fa-check'}"></i><span>${escapeHtml(confirmText)}</span>`;
+
+      e.cancel.onclick=()=>closeModal(false);
+      e.confirm.onclick=()=>closeModal(true);
+      e.modal.onclick=event=>{
+        if(event.target===e.modal)closeModal(false);
+      };
+
+      dvModalKeyHandler=event=>{
+        if(event.key==='Escape'){
+          event.preventDefault();
+          closeModal(false);
+        }else if(event.key==='Enter'){
+          event.preventDefault();
+          e.confirm.click();
+        }
+      };
+      document.addEventListener('keydown',dvModalKeyHandler);
+
+      document.body.classList.add('dv-modal-open');
+      e.modal.classList.remove('dv-hidden');
+
+      requestAnimationFrame(()=>{
+        try{e.confirm.focus();}catch(_){}
+      });
+    });
+  };
+
+  window.dvShowMessageModal=function({
+    type='info',
+    title='DataVault DLP',
+    message='',
+    detail='',
+    buttonText='Entendido'
+  }={}){
+    return new Promise(resolve=>{
+      const e=modalEls();
+
+      if(!e.modal||!e.card||!e.icon||!e.title||!e.subtitle||!e.message||!e.detail||!e.cancel||!e.confirm){
+        resolve(true);
+        return;
+      }
+
+      if(dvModalResolver){
+        const previous=dvModalResolver;
+        dvModalResolver=null;
+        previous(false);
+      }
+
+      dvModalResolver=resolve;
+      dvModalPreviousFocus=document.activeElement;
+
+      configureIcon(e.icon,type);
+      e.title.textContent=title;
+      e.subtitle.textContent=type==='error'?'Se produjo un inconveniente':'Operación completada';
+      e.message.textContent=message;
+      e.detail.textContent=detail||'';
+      e.detail.style.display=detail?'block':'none';
+
+      e.cancel.style.display='none';
+
+      const buttonMode=type==='error'?'error':'success';
+      e.confirm.className=`dv-decision-btn confirm ${buttonMode}`;
+      e.confirm.innerHTML=`<i class="fa-solid ${type==='error'?'fa-xmark':'fa-check'}"></i><span>${escapeHtml(buttonText)}</span>`;
+      e.confirm.onclick=()=>closeModal(true);
+
+      e.modal.onclick=event=>{
+        if(event.target===e.modal)closeModal(true);
+      };
+
+      dvModalKeyHandler=event=>{
+        if(event.key==='Escape'||event.key==='Enter'){
+          event.preventDefault();
+          closeModal(true);
+        }
+      };
+      document.addEventListener('keydown',dvModalKeyHandler);
+
+      document.body.classList.add('dv-modal-open');
+      e.modal.classList.remove('dv-hidden');
+
+      requestAnimationFrame(()=>{
+        try{e.confirm.focus();}catch(_){}
+      });
+    });
+  };
 })();
 </script>
 
