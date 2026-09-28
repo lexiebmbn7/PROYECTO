@@ -1,5 +1,5 @@
-
 import hashlib
+import json
 import io
 import mimetypes
 import os
@@ -1032,9 +1032,183 @@ def actualizar_auditoria_operacion(
     return query.execute()
 
 
-def notificar_solicitud_operacion_telegram(
-    solicitud: dict
+def normalizar_referencias_telegram_operacion(solicitud: dict):
+    """Devuelve referencias chat_id/message_id guardadas para una operación.
+
+    Supabase JSONB normalmente llega como lista. También aceptamos string JSON
+    para conservar compatibilidad si PostgREST lo serializa en alguna versión.
+    """
+    raw = (solicitud or {}).get("telegram_mensajes") or []
+
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            raw = []
+
+    if isinstance(raw, dict):
+        raw = [raw]
+
+    if not isinstance(raw, list):
+        return []
+
+    referencias = []
+    vistos = set()
+
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+
+        chat_id = item.get("chat_id")
+        message_id = item.get("message_id")
+
+        if chat_id is None or message_id is None:
+            continue
+
+        clave = (str(chat_id), str(message_id))
+        if clave in vistos:
+            continue
+        vistos.add(clave)
+
+        referencias.append({
+            "chat_id": chat_id,
+            "message_id": message_id,
+        })
+
+    return referencias
+
+
+def guardar_referencias_telegram_operacion(solicitud_id: str, referencias: list):
+    """Guarda en JSONB los mensajes enviados a los custodios.
+
+    Si la columna todavía no fue creada, la solicitud NO falla: queda un log
+    claro para que la operación principal siga funcionando.
+    """
+    if not referencias:
+        return
+
+    try:
+        supabase_admin.table("solicitudes_operacion").update({
+            "telegram_mensajes": referencias,
+        }).eq("id", str(solicitud_id)).execute()
+    except Exception as error:
+        print(
+            "[TELEGRAM REFERENCIAS SAVE ERROR]",
+            "Ejecuta ALTER TABLE solicitudes_operacion ADD COLUMN telegram_mensajes jsonb...",
+            error,
+        )
+
+
+def construir_texto_operacion_resuelta(solicitud: dict, origen_resolucion: str = ""):
+    estado = str((solicitud or {}).get("estado") or "").upper()
+    tipo = str((solicitud or {}).get("tipo_operacion") or "OPERACIÓN").upper()
+    icono = "✅" if estado == "APROBADO" else "❌" if estado == "RECHAZADO" else "⚠️"
+
+    origen = str(origen_resolucion or (solicitud or {}).get("resuelto_por") or "").strip()
+    if origen.startswith("WEB:"):
+        procesado_por = "Panel web del administrador"
+    elif origen:
+        procesado_por = f"Telegram ID: {origen}"
+    else:
+        procesado_por = "Custodio"
+
+    texto = (
+        "🛡️ DataVault DLP - GM Ingenieros\n\n"
+        f"{icono} {tipo}: {estado or 'PROCESADA'}\n\n"
+        f"👤 Usuario: {(solicitud or {}).get('solicitante_nombre') or 'Usuario'}\n"
+        f"📄 Objeto: {(solicitud or {}).get('nombre_objeto') or 'Archivo/Carpeta'}\n"
+        f"📌 Tipo: {(solicitud or {}).get('objeto_tipo') or '—'}\n"
+        f"📂 Origen: {(solicitud or {}).get('carpeta_origen') or 'DRIVE PROYECTO'}\n"
+    )
+
+    if (solicitud or {}).get("carpeta_destino_nombre"):
+        texto += f"➡️ Destino: {(solicitud or {}).get('carpeta_destino_nombre')}\n"
+
+    if (solicitud or {}).get("resultado"):
+        texto += f"\n📝 {(solicitud or {}).get('resultado')}\n"
+
+    texto += f"\n👤 Procesado por: {procesado_por}"
+    return texto
+
+
+def sincronizar_mensajes_telegram_operacion(
+    solicitud: dict,
+    origen_resolucion: str = "",
+    fallback_chat_id=None,
+    fallback_message_id=None,
+    error_texto: str | None = None,
 ):
+    """Actualiza todas las copias de la alerta de MOVER/ELIMINAR.
+
+    Esto permite que una decisión tomada desde la web quite inmediatamente los
+    botones de Telegram y viceversa. Las solicitudes antiguas pueden no tener
+    referencias guardadas; en ese caso el callback actual se usa como fallback.
+    """
+    referencias = normalizar_referencias_telegram_operacion(solicitud)
+
+    if fallback_chat_id is not None and fallback_message_id is not None:
+        clave_fallback = (str(fallback_chat_id), str(fallback_message_id))
+        existentes = {
+            (str(r.get("chat_id")), str(r.get("message_id")))
+            for r in referencias
+        }
+        if clave_fallback not in existentes:
+            referencias.append({
+                "chat_id": fallback_chat_id,
+                "message_id": fallback_message_id,
+            })
+
+    if not referencias:
+        print(
+            "[TELEGRAM SYNC] Sin referencias de mensajes para solicitud",
+            (solicitud or {}).get("id"),
+        )
+        return
+
+    if error_texto:
+        texto = (
+            "🛡️ DataVault DLP - GM Ingenieros\n\n"
+            "❌ NO SE PUDO COMPLETAR LA OPERACIÓN\n\n"
+            f"Motivo: {str(error_texto)[:800]}\n\n"
+            "La solicitud continúa pendiente. Puedes volver a intentarlo."
+        )
+        solicitud_id = str((solicitud or {}).get("id") or "")
+        reply_markup = {
+            "inline_keyboard": [[
+                {
+                    "text": "✅ Aprobar",
+                    "callback_data": f"opap:{solicitud_id}",
+                },
+                {
+                    "text": "❌ Rechazar",
+                    "callback_data": f"opre:{solicitud_id}",
+                },
+            ]]
+        }
+    else:
+        texto = construir_texto_operacion_resuelta(
+            solicitud,
+            origen_resolucion,
+        )
+        # Vacío para retirar botones antiguos.
+        reply_markup = {"inline_keyboard": []}
+
+    for referencia in referencias:
+        try:
+            telegram_request(
+                "editMessageText",
+                {
+                    "chat_id": referencia["chat_id"],
+                    "message_id": referencia["message_id"],
+                    "text": texto,
+                    "reply_markup": reply_markup,
+                },
+            )
+        except Exception as error:
+            print("[TELEGRAM SYNC MESSAGE ERROR]", error)
+
+
+def notificar_solicitud_operacion_telegram(solicitud: dict):
 
     if not TELEGRAM_TOKEN or not AUTHORIZED_CHAT_IDS:
         return
@@ -1083,10 +1257,12 @@ def notificar_solicitud_operacion_telegram(
         ]
     }
 
+    referencias = []
+
     for chat_id in AUTHORIZED_CHAT_IDS:
 
         try:
-            telegram_request(
+            resultado = telegram_request(
                 "sendMessage",
                 {
                     "chat_id": chat_id,
@@ -1095,11 +1271,26 @@ def notificar_solicitud_operacion_telegram(
                 },
             )
 
+            message_id = (
+                (resultado or {}).get("result") or {}
+            ).get("message_id")
+
+            if (resultado or {}).get("ok") and message_id:
+                referencias.append({
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                })
+
         except Exception as error:
             print(
                 "[TELEGRAM OPERACION ERROR]",
                 error
             )
+
+    guardar_referencias_telegram_operacion(
+        solicitud.get("id"),
+        referencias,
+    )
 
 
 def procesar_solicitud_operacion(
@@ -1110,8 +1301,8 @@ def procesar_solicitud_operacion(
     """Procesa una solicitud MOVER/ELIMINAR.
 
     El destino de un movimiento ya fue validado cuando el usuario creó la
-    solicitud. En la aprobación de Telegram reutilizamos ese ID guardado para
-    evitar recorrer otra vez todo el árbol de Google Drive.
+    solicitud. En la aprobación reutilizamos ese ID guardado para evitar
+    recorrer nuevamente todo el árbol de Google Drive.
     """
 
     with DECISION_LOCK:
@@ -1181,9 +1372,6 @@ def procesar_solicitud_operacion(
             if objeto["tipo"] == "CARPETA" and destino_id == objeto["drive_id"]:
                 raise RuntimeError("Una carpeta no puede moverse dentro de sí misma.")
 
-            # La validación de descendientes ya se realizó al crear la solicitud
-            # en /operations/request. Aquí evitamos repetir el recorrido recursivo
-            # de Drive para que la aprobación desde Telegram responda más rápido.
             mover_objeto_google_drive(
                 objeto["drive_id"],
                 destino_id
@@ -1231,7 +1419,7 @@ def procesar_operacion_telegram_background(
     chat_id,
     message_id
 ):
-    """Completa MOVER/ELIMINAR fuera de la respuesta inmediata del webhook."""
+    """Completa MOVER/ELIMINAR después de responder el webhook a Telegram."""
 
     try:
         solicitud, cambio = procesar_solicitud_operacion(
@@ -1240,73 +1428,133 @@ def procesar_operacion_telegram_background(
             str(user_id),
         )
 
-        estado_final = str(
-            solicitud.get("estado") or ""
-        ).upper()
-
-        if not cambio:
-            texto = (
-                "🛡️ DataVault DLP - GM Ingenieros\n\n"
-                "⚠️ SOLICITUD YA PROCESADA\n\n"
-                f"Estado actual: {estado_final or 'DESCONOCIDO'}"
-            )
-            reply_markup = None
-        else:
-            tipo = solicitud.get("tipo_operacion") or "OPERACIÓN"
-            icono = "✅" if estado_final == "APROBADO" else "❌"
-            texto = (
-                "🛡️ DataVault DLP - GM Ingenieros\n\n"
-                f"{icono} {tipo}: {estado_final}\n\n"
-                f"👤 Usuario: {solicitud.get('solicitante_nombre') or 'Usuario'}\n"
-                f"📄 Objeto: {solicitud.get('nombre_objeto') or 'Archivo/Carpeta'}\n"
-                f"📌 Tipo: {solicitud.get('objeto_tipo') or '—'}\n"
-                f"📂 Origen: {solicitud.get('carpeta_origen') or 'DRIVE PROYECTO'}\n"
-            )
-
-            if solicitud.get("carpeta_destino_nombre"):
-                texto += (
-                    f"➡️ Destino: {solicitud.get('carpeta_destino_nombre')}\n"
-                )
-
-            if solicitud.get("resultado"):
-                texto += f"\n📝 {solicitud.get('resultado')}\n"
-
-            texto += f"\n👤 Procesado por Telegram ID: {user_id}"
-            reply_markup = None
+        sincronizar_mensajes_telegram_operacion(
+            solicitud,
+            str(user_id),
+            fallback_chat_id=chat_id,
+            fallback_message_id=message_id,
+        )
 
     except Exception as error:
         print("[OPERACION BACKGROUND ERROR]", error)
-        texto = (
-            "🛡️ DataVault DLP - GM Ingenieros\n\n"
-            "❌ NO SE PUDO COMPLETAR LA OPERACIÓN\n\n"
-            f"Motivo: {str(error)[:800]}\n\n"
-            "La solicitud no se marcó como completada. "
-            "Puedes volver a intentarlo desde estos botones."
-        )
-        reply_markup = {
-            "inline_keyboard": [
-                [
-                    {
-                        "text": "✅ Aprobar",
-                        "callback_data": f"opap:{solicitud_id}",
-                    },
-                    {
-                        "text": "❌ Rechazar",
-                        "callback_data": f"opre:{solicitud_id}",
-                    },
-                ]
-            ]
-        }
 
-    if chat_id and message_id:
-        payload = {
-            "chat_id": chat_id,
-            "message_id": message_id,
-            "text": texto,
-        }
-        if reply_markup is not None:
-            payload["reply_markup"] = reply_markup
-        telegram_request("editMessageText", payload)
+        solicitud = {"id": solicitud_id}
+        try:
+            respuesta = (
+                supabase_admin
+                .table("solicitudes_operacion")
+                .select("*")
+                .eq("id", solicitud_id)
+                .limit(1)
+                .execute()
+            )
+            if respuesta.data:
+                solicitud = respuesta.data[0]
+        except Exception as consulta_error:
+            print("[OPERACION BACKGROUND RECOVERY ERROR]", consulta_error)
+
+        sincronizar_mensajes_telegram_operacion(
+            solicitud,
+            str(user_id),
+            fallback_chat_id=chat_id,
+            fallback_message_id=message_id,
+            error_texto=str(error),
+        )
+
+
+def notificar_resultado_custodia_web_telegram(
+    payload: dict,
+    resultado: dict,
+    usuario_admin: dict,
+):
+    """Notifica en Telegram una decisión de SUBIDA tomada desde la web.
+
+    Las subidas históricamente usan un menú dinámico en Telegram en vez de un
+    mensaje individual persistido. Por eso se envía el resultado y un botón
+    para abrir la bandeja actualizada de pendientes.
+    """
+    if not TELEGRAM_TOKEN or not AUTHORIZED_CHAT_IDS:
+        return
+
+    objeto_tipo = str((resultado or {}).get("objeto_tipo") or payload.get("objeto_tipo") or "").upper()
+    estado = str((resultado or {}).get("estado") or "").upper()
+    icono = "✅" if estado == "APROBADO" else "❌"
+
+    nombre = "Archivo/Carpeta"
+    solicitante = "Usuario"
+    ubicacion = "DRIVE PROYECTO"
+    cantidad = int((resultado or {}).get("procesados") or 0)
+
+    try:
+        if objeto_tipo == "CARPETA":
+            lote_id = str((resultado or {}).get("lote_id") or payload.get("lote_id") or "")
+            consulta = (
+                supabase
+                .table("auditoria_custodia")
+                .select("nombre_archivo,ruta_relativa,solicitante_nombre,solicitante_correo,ubicacion_drive")
+                .eq("lote_id", lote_id)
+                .limit(1)
+                .execute()
+            )
+            if consulta.data:
+                fila = consulta.data[0]
+                nombre = obtener_carpeta_desde_ruta(fila.get("ruta_relativa")) or fila.get("nombre_archivo") or "Carpeta"
+                solicitante = fila.get("solicitante_nombre") or fila.get("solicitante_correo") or "Usuario"
+                ubicacion = fila.get("ubicacion_drive") or ubicacion
+        else:
+            auditoria_id = str((resultado or {}).get("auditoria_id") or payload.get("auditoria_id") or "")
+            consulta = (
+                supabase
+                .table("auditoria_custodia")
+                .select("nombre_archivo,solicitante_nombre,solicitante_correo,ubicacion_drive")
+                .eq("id", auditoria_id)
+                .limit(1)
+                .execute()
+            )
+            if consulta.data:
+                fila = consulta.data[0]
+                nombre = fila.get("nombre_archivo") or "Archivo"
+                solicitante = fila.get("solicitante_nombre") or fila.get("solicitante_correo") or "Usuario"
+                ubicacion = fila.get("ubicacion_drive") or ubicacion
+    except Exception as error:
+        print("[TELEGRAM CUSTODY WEB DETAIL ERROR]", error)
+
+    tipo_label = "CARPETA" if objeto_tipo == "CARPETA" else "ARCHIVO"
+    texto = (
+        "🛡️ DataVault DLP - GM Ingenieros\n\n"
+        f"{icono} SUBIDA {estado or 'PROCESADA'} DESDE WEB\n\n"
+        f"👤 Usuario: {solicitante}\n"
+        f"📌 Tipo: {tipo_label}\n"
+        f"📄 Elemento: {nombre}\n"
+    )
+
+    if objeto_tipo == "CARPETA":
+        texto += f"📚 Archivos procesados: {cantidad}\n"
+
+    if estado == "APROBADO":
+        texto += f"📂 Destino: {ubicacion}\n"
+
+    texto += "\n👤 Procesado por: Panel web del administrador"
+
+    botones = {
+        "inline_keyboard": [[{
+            "text": "👥 Ver pendientes actualizados",
+            "callback_data": "menu:usuarios",
+        }]]
+    }
+
+    for chat_id in AUTHORIZED_CHAT_IDS:
+        try:
+            telegram_request(
+                "sendMessage",
+                {
+                    "chat_id": chat_id,
+                    "text": texto,
+                    "reply_markup": botones,
+                },
+            )
+        except Exception as error:
+            print("[TELEGRAM CUSTODY WEB RESULT ERROR]", error)
 
 
 # ============================================================
@@ -5798,7 +6046,8 @@ def resolver_payload_custodia_web(
 
 @app.post("/custody/decision")
 async def decidir_custodia_desde_web(
-    request: Request
+    request: Request,
+    background_tasks: BackgroundTasks
 ):
 
     usuario = (
@@ -5846,7 +6095,7 @@ async def decidir_custodia_desde_web(
         )
 
 
-    return (
+    resultado = (
         resolver_payload_custodia_web(
             payload,
             aprobar=(
@@ -5855,6 +6104,15 @@ async def decidir_custodia_desde_web(
             )
         )
     )
+
+    background_tasks.add_task(
+        notificar_resultado_custodia_web_telegram,
+        payload,
+        resultado,
+        usuario,
+    )
+
+    return resultado
 
 
 @app.post("/custody/cancel")
@@ -6347,7 +6605,10 @@ async def solicitar_operacion(
 
 
 @app.post("/operations/decision")
-async def decidir_operacion_desde_web(request: Request):
+async def decidir_operacion_desde_web(
+    request: Request,
+    background_tasks: BackgroundTasks
+):
     """Aprueba o rechaza MOVER/ELIMINAR desde la cuenta web del administrador.
 
     Telegram sigue siendo una segunda vía de resolución. La función central
@@ -6399,6 +6660,12 @@ async def decidir_operacion_desde_web(request: Request):
         )
 
     estado = str(solicitud.get("estado") or "").upper()
+
+    background_tasks.add_task(
+        sincronizar_mensajes_telegram_operacion,
+        solicitud,
+        f"WEB:{usuario.get('id')}",
+    )
 
     return {
         "status": "ok" if cambio else "already_processed",
@@ -8062,19 +8329,9 @@ async def recibir_respuesta_telegram(
 
             aprobar_operacion = prefijo == "opap"
 
-            # Telegram recibe respuesta inmediata. El trabajo pesado con
-            # Google Drive y Supabase continúa como tarea de fondo.
-            telegram_request(
-                "answerCallbackQuery",
-                {
-                    "callback_query_id": callback_id,
-                    "text": "⏳ Procesando operación...",
-                },
-            )
-
-            # No editamos el mensaje aquí. Esa segunda llamada a Telegram
-            # hacía esperar innecesariamente al webhook. answerCallbackQuery
-            # corta el spinner y el procesamiento pesado continúa en background.
+            # Programamos el trabajo pesado y respondemos AL MISMO webhook con
+            # answerCallbackQuery. Así Telegram corta el spinner sin esperar una
+            # segunda conexión HTTP saliente desde Railway.
             background_tasks.add_task(
                 procesar_operacion_telegram_background,
                 solicitud_id,
@@ -8084,9 +8341,13 @@ async def recibir_respuesta_telegram(
                 message_id,
             )
 
+            # Telegram permite ejecutar un método Bot API directamente como
+            # respuesta al webhook. Esto es más rápido que requests.post().
             return {
-                "status": "operation_processing",
-                "solicitud_id": solicitud_id,
+                "method": "answerCallbackQuery",
+                "callback_query_id": callback_id,
+                "text": "⏳ Procesando operación...",
+                "show_alert": False,
             }
 
         # NAVEGACIÓN: DETALLE DE UNA CARPETA / LOTE
