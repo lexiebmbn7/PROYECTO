@@ -6620,7 +6620,7 @@ body.dv-modal-open{overflow:hidden!important}
     <div class="dv-decision-actions">
       <button type="button" id="dvDecisionCancel" class="dv-decision-btn cancel">
         <i class="fa-solid fa-xmark"></i>
-        <span>Cancelar</span>
+        <span class="dv-decision-btn-label">Cancelar</span>
       </button>
       <button type="button" id="dvDecisionConfirm" class="dv-decision-btn confirm approve">
         <i class="fa-solid fa-check"></i>
@@ -6724,7 +6724,7 @@ body.dv-modal-open{overflow:hidden!important}
       e.detail.style.display=detail?'block':'none';
 
       e.cancel.style.display='inline-flex';
-      e.cancel.querySelector('span').textContent=cancelText;
+      e.cancel.querySelector('.dv-decision-btn-label').textContent=cancelText;
 
       e.confirm.className=`dv-decision-btn confirm ${mode==='reject'?'reject':'approve'}`;
       e.confirm.innerHTML=`<i class="fa-solid ${mode==='reject'?'fa-xmark':'fa-check'}"></i><span>${escapeHtml(confirmText)}</span>`;
