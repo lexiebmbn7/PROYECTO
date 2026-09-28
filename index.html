@@ -7,7 +7,7 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  
+
 <style>
   :root{--navy:#0f2c42;--navy2:#163a56;--line:#e2e8f0;--muted:#64748b;--bg:#f5f7fa;--topbar:72px}
   *{box-sizing:border-box}
@@ -5667,17 +5667,51 @@ window.addEventListener('DOMContentLoaded',()=>{
   };
 
   window.dvRequestDelete=async function(kind,id){
-    const texto=kind==='CARPETA'?'esta carpeta completa':'este archivo';
-    if(!confirm(`¿Solicitar eliminación de ${texto}? El custodio deberá aprobarla antes de enviarla a la papelera de Google Drive.`))return;
+    const item=dvMoveContext(kind,id);
+    const esCarpeta=kind==='CARPETA';
+    const titulo=esCarpeta?'Solicitar eliminación de carpeta':'Solicitar eliminación de archivo';
+    const nombre=item?.name|| (esCarpeta?'Carpeta seleccionada':'Archivo seleccionado');
+    const origen=item?.location||item?.currentPath||'DRIVE PROYECTO';
+
+    const confirmado=await dvShowDecisionModal({
+      mode:'reject',
+      title:titulo,
+      subtitle:'Solicitud de eliminación',
+      message:`¿Deseas solicitar la eliminación de ${esCarpeta?'esta carpeta':'este archivo'}?`,
+      detail:`${esCarpeta?'📁 Carpeta':'📄 Archivo'}: ${nombre}
+📂 Ubicación actual: ${origen}
+ℹ️ El custodio deberá aprobar la operación antes de enviarla a la papelera de Google Drive.`,
+      confirmText:'Solicitar eliminación',
+      cancelText:'Cancelar'
+    });
+
+    if(!confirmado)return;
+
     try{
       const payload={tipo_operacion:'ELIMINAR',objeto_tipo:kind};
       if(kind==='CARPETA')payload.lote_id=id;else payload.auditoria_id=id;
       const res=await fetch(`${API_URL}/operations/request`,{method:'POST',headers:await authHeaders(),body:JSON.stringify(payload)});
       const data=await res.json().catch(()=>({}));
       if(!res.ok)throw new Error(typeof data.detail==='string'?data.detail:`Error HTTP ${res.status}`);
-      toast('Solicitud de eliminación enviada al custodio.');await loadCola();
+      await dvShowMessageModal({
+        type:'success',
+        title:'Solicitud enviada',
+        message:'La solicitud de eliminación fue enviada correctamente al custodio.',
+        detail:`${esCarpeta?'📁 Carpeta':'📄 Archivo'}: ${nombre}
+📂 Ubicación actual: ${origen}`,
+        buttonText:'Entendido'
+      });
+      await loadCola();
       if(typeof loadFilesView==='function')await loadFilesView();
-    }catch(err){alert('No se pudo solicitar la eliminación: '+(err.message||err));}
+    }catch(err){
+      await dvShowMessageModal({
+        type:'error',
+        title:'No se pudo solicitar la eliminación',
+        message:'Ocurrió un problema al registrar la solicitud.',
+        detail:String(err?.message||err||'Error desconocido'),
+        buttonText:'Cerrar'
+      });
+    }
   };
 
   window.resolvePendingOperation=async function(id,decision,buttonEl=null){
