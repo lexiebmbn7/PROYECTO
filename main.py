@@ -238,6 +238,7 @@ def subir_a_google_drive(
     nombre_archivo: str,
     contenido_bytes: bytes,
     auditoria_id: str | None = None,
+    parent_id: str | None = None,
 ):
     """Sube un archivo individual directamente desde RAM a Google Drive."""
 
@@ -249,13 +250,18 @@ def subir_a_google_drive(
         print("[DRIVE ERROR] El contenido recibido está vacío")
         return None
 
+    destino_parent_id = (
+        str(parent_id or GOOGLE_FOLDER_ID).strip()
+        or GOOGLE_FOLDER_ID
+    )
+
     try:
         service = obtener_servicio_google_drive()
         drive_id = subir_archivo_google_drive_en_carpeta(
             service,
             nombre_archivo,
             contenido_bytes,
-            GOOGLE_FOLDER_ID,
+            destino_parent_id,
             app_properties=(
                 {"datavault_auditoria_id": str(auditoria_id)}
                 if auditoria_id else None
@@ -284,7 +290,10 @@ def obtener_carpeta_desde_ruta(ruta_relativa: str):
     return partes[0]
 
 
-def subir_lote_carpeta_a_drive(documentos: list):
+def subir_lote_carpeta_a_drive(
+    documentos: list,
+    parent_id: str | None = None,
+):
     """Sube un lote proveniente de una carpeta como UNA carpeta en Drive.
 
     Mantiene las subcarpetas. Si cualquier archivo falla, intenta borrar la
@@ -331,6 +340,11 @@ def subir_lote_carpeta_a_drive(documentos: list):
         lote_id = str(documentos[0].get("lote_id") or "lote")
         nombre_carpeta = f"LOTE_{lote_id[:8]}"
 
+    destino_parent_id = (
+        str(parent_id or GOOGLE_FOLDER_ID).strip()
+        or GOOGLE_FOLDER_ID
+    )
+
     service = None
     carpeta_raiz_id = None
 
@@ -340,7 +354,7 @@ def subir_lote_carpeta_a_drive(documentos: list):
         carpeta_raiz_id = crear_carpeta_google_drive(
             service,
             nombre_carpeta,
-            GOOGLE_FOLDER_ID,
+            destino_parent_id,
             app_properties={
                 "datavault_lote_id": lote_id_actual,
                 "datavault_tipo": "carpeta_lote",
@@ -2208,7 +2222,8 @@ def mostrar_detalle_lote(
                 "id,nombre_archivo,hash_sha256,"
                 "tamano_bytes,estado,solicitante_id,"
                 "solicitante_nombre,solicitante_correo,"
-                "lote_id,ruta_relativa"
+                "lote_id,ruta_relativa,drive_parent_id,"
+                "ubicacion_drive"
             )
             .eq(
                 "lote_id",
@@ -2302,6 +2317,12 @@ def mostrar_detalle_lote(
             "solicitante_correo"
         )
         or ""
+    )
+
+
+    destino_drive = str(
+        primer.get("ubicacion_drive")
+        or "DRIVE PROYECTO"
     )
 
 
@@ -2432,7 +2453,8 @@ def mostrar_detalle_lote(
         f"👤 Solicitante: {nombre_usuario}\n"
         f"📧 Correo: {correo}\n"
         f"📄 Archivos: {len(documentos)}\n"
-        f"📦 Tamaño total: {formato_bytes(total_bytes)}\n\n"
+        f"📦 Tamaño total: {formato_bytes(total_bytes)}\n"
+        f"📂 Destino: {destino_drive}\n\n"
         f"Contenido:\n{contenido}\n\n"
         "¿Autoriza la transferencia de TODA "
         "la carpeta a Google Drive?"
@@ -2521,7 +2543,8 @@ def mostrar_detalle_documento(
             .select(
                 "id,nombre_archivo,hash_sha256,"
                 "estado,solicitante_id,"
-                "solicitante_nombre,solicitante_correo"
+                "solicitante_nombre,solicitante_correo,"
+                "drive_parent_id,ubicacion_drive"
             )
             .eq(
                 "id",
@@ -2637,7 +2660,9 @@ def mostrar_detalle_documento(
             f"👤 Solicitante: "
             f"{documento.get('solicitante_nombre') or 'Usuario'}\n"
             f"📧 Correo: "
-            f"{documento.get('solicitante_correo') or ''}\n\n"
+            f"{documento.get('solicitante_correo') or ''}\n"
+            f"📂 Destino: "
+            f"{documento.get('ubicacion_drive') or 'DRIVE PROYECTO'}\n\n"
             f"🔑 Hash SHA-256:\n"
             f"{documento.get('hash_sha256') or ''}\n\n"
             f"🆔 Auditoría:\n"
@@ -3637,6 +3662,10 @@ async def registrar_lote_custodia(
 
     lote_id:
         str
+        = Form(""),
+
+    carpeta_destino_id:
+        str
         = Form("")
 
 ):
@@ -3721,6 +3750,42 @@ async def registrar_lote_custodia(
             detail=
                 "No hay Telegram IDs autorizados."
         )
+
+
+    carpeta_destino_id = str(
+        carpeta_destino_id
+        or ""
+    ).strip()
+
+
+    if not carpeta_destino_id:
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Selecciona una carpeta destino de Google Drive. "
+                "Si deseas dejar archivos sueltos, selecciona "
+                "explícitamente DRIVE PROYECTO (raíz)."
+            )
+        )
+
+
+    destino_upload = validar_destino_drive(
+        carpeta_destino_id
+    )
+
+
+    destino_upload_id = str(
+        destino_upload.get("id")
+        or GOOGLE_FOLDER_ID
+    )
+
+
+    destino_upload_path = str(
+        destino_upload.get("path")
+        or destino_upload.get("name")
+        or "DRIVE PROYECTO"
+    )
 
 
     if lote_id.strip():
@@ -3914,6 +3979,12 @@ async def registrar_lote_custodia(
                 "ruta_relativa":
                     ruta_relativa,
 
+                "drive_parent_id":
+                    destino_upload_id,
+
+                "ubicacion_drive":
+                    destino_upload_path,
+
             }
 
 
@@ -3977,6 +4048,12 @@ async def registrar_lote_custodia(
                 "carpeta":
                     carpeta,
 
+                "drive_parent_id":
+                    destino_upload_id,
+
+                "ubicacion_drive":
+                    destino_upload_path,
+
             }
 
 
@@ -3996,6 +4073,12 @@ async def registrar_lote_custodia(
 
                 "tamano_bytes":
                     len(contenido),
+
+                "drive_parent_id":
+                    destino_upload_id,
+
+                "ubicacion_drive":
+                    destino_upload_path,
 
             })
 
@@ -4102,6 +4185,11 @@ async def registrar_lote_custodia(
 
         "lote_id":
             lote_uuid,
+
+        "destino_drive": {
+            "id": destino_upload_id,
+            "path": destino_upload_path,
+        },
 
         "total_recibidos":
             len(files),
@@ -4846,7 +4934,8 @@ def resolver_custodia_archivo(
             .select(
                 "id,estado,nombre_archivo,hash_sha256,"
                 "solicitante_id,solicitante_nombre,"
-                "solicitante_correo"
+                "solicitante_correo,drive_parent_id,"
+                "ubicacion_drive"
             )
             .eq(
                 "id",
@@ -4939,6 +5028,11 @@ def resolver_custodia_archivo(
                 auditoria_id=
                     auditoria_id,
 
+                parent_id=(
+                    registro.get("drive_parent_id")
+                    or GOOGLE_FOLDER_ID
+                ),
+
             )
 
 
@@ -4968,10 +5062,16 @@ def resolver_custodia_archivo(
                         drive_id,
 
                     "drive_parent_id":
-                        GOOGLE_FOLDER_ID,
+                        (
+                            registro.get("drive_parent_id")
+                            or GOOGLE_FOLDER_ID
+                        ),
 
                     "ubicacion_drive":
-                        "DRIVE PROYECTO",
+                        (
+                            registro.get("ubicacion_drive")
+                            or "DRIVE PROYECTO"
+                        ),
 
                     "en_drive":
                         True,
@@ -5141,7 +5241,8 @@ def resolver_custodia_carpeta(
                 "id,nombre_archivo,hash_sha256,"
                 "tamano_bytes,estado,solicitante_id,"
                 "solicitante_nombre,solicitante_correo,"
-                "lote_id,ruta_relativa"
+                "lote_id,ruta_relativa,drive_parent_id,"
+                "ubicacion_drive"
             )
 
             .eq(
@@ -5239,7 +5340,11 @@ def resolver_custodia_carpeta(
 
             drive_lote = (
                 subir_lote_carpeta_a_drive(
-                    documentos
+                    documentos,
+                    parent_id=(
+                        documentos[0].get("drive_parent_id")
+                        or GOOGLE_FOLDER_ID
+                    )
                 )
             )
 
@@ -5272,12 +5377,16 @@ def resolver_custodia_carpeta(
                         ],
 
                     "drive_parent_id":
-                        GOOGLE_FOLDER_ID,
+                        (
+                            documentos[0].get("drive_parent_id")
+                            or GOOGLE_FOLDER_ID
+                        ),
 
                     "ubicacion_drive":
-                        drive_lote[
-                            "folder_name"
-                        ],
+                        (
+                            documentos[0].get("ubicacion_drive")
+                            or "DRIVE PROYECTO"
+                        ),
 
                     "en_drive":
                         True,
