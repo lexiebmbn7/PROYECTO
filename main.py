@@ -120,6 +120,12 @@ if not PUBLIC_BASE_URL and RAILWAY_PUBLIC_DOMAIN:
 ARCHIVOS_EN_RAM = {}
 DECISION_LOCK = threading.Lock()
 
+# Mantiene una sola bandeja unificada de Telegram por custodio durante
+# la vida de la instancia. Después de un redeploy la primera notificación
+# crea una nueva bandeja y las siguientes reutilizan ese mismo mensaje.
+TELEGRAM_BANDEJA_MESSAGE_IDS = {}
+TELEGRAM_BANDEJA_LOCK = threading.Lock()
+
 # Límites de prueba para carga por lotes. Se pueden cambiar en Railway.
 MAX_BATCH_FILES = int(os.getenv("MAX_BATCH_FILES", "100"))
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "25"))
@@ -1138,11 +1144,12 @@ def sincronizar_mensajes_telegram_operacion(
     fallback_message_id=None,
     error_texto: str | None = None,
 ):
-    """Actualiza todas las copias de la alerta de MOVER/ELIMINAR.
+    """Sincroniza una decisión de MOVER/ELIMINAR con Telegram.
 
-    Esto permite que una decisión tomada desde la web quite inmediatamente los
-    botones de Telegram y viceversa. Las solicitudes antiguas pueden no tener
-    referencias guardadas; en ese caso el callback actual se usa como fallback.
+    Las solicitudes nuevas se muestran dentro de la bandeja agrupada por
+    usuario. Si la decisión se tomó desde el detalle de Telegram, ese mismo
+    mensaje se actualiza. Luego se publica una bandeja agrupada actualizada para
+    cada custodio, de forma que Web y Telegram reflejen los mismos pendientes.
     """
     referencias = normalizar_referencias_telegram_operacion(solicitud)
 
@@ -1158,41 +1165,34 @@ def sincronizar_mensajes_telegram_operacion(
                 "message_id": fallback_message_id,
             })
 
-    if not referencias:
-        print(
-            "[TELEGRAM SYNC] Sin referencias de mensajes para solicitud",
-            (solicitud or {}).get("id"),
-        )
-        return
-
     if error_texto:
+        solicitud_id = str((solicitud or {}).get("id") or "")
         texto = (
             "🛡️ DataVault DLP - GM Ingenieros\n\n"
             "❌ NO SE PUDO COMPLETAR LA OPERACIÓN\n\n"
             f"Motivo: {str(error_texto)[:800]}\n\n"
-            "La solicitud continúa pendiente. Puedes volver a intentarlo."
+            "La solicitud continúa pendiente."
         )
-        solicitud_id = str((solicitud or {}).get("id") or "")
         reply_markup = {
-            "inline_keyboard": [[
-                {
-                    "text": "✅ Aprobar",
-                    "callback_data": f"opap:{solicitud_id}",
-                },
-                {
-                    "text": "❌ Rechazar",
-                    "callback_data": f"opre:{solicitud_id}",
-                },
-            ]]
+            "inline_keyboard": [
+                [
+                    {"text": "✅ Aprobar", "callback_data": f"opap:{solicitud_id}"},
+                    {"text": "❌ Rechazar", "callback_data": f"opre:{solicitud_id}"},
+                ],
+                [{"text": "🔙 Volver al usuario", "callback_data": f"usr:{(solicitud or {}).get('solicitante_id') or ''}"}],
+            ]
         }
     else:
-        texto = construir_texto_operacion_resuelta(
-            solicitud,
-            origen_resolucion,
-        )
-        # Vacío para retirar botones antiguos.
-        reply_markup = {"inline_keyboard": []}
+        texto = construir_texto_operacion_resuelta(solicitud, origen_resolucion)
+        uid = str((solicitud or {}).get("solicitante_id") or "")
+        reply_markup = {
+            "inline_keyboard": [[
+                {"text": "🔙 Pendientes del usuario", "callback_data": f"usr:{uid}"}
+            ]] if uid else []
+        }
 
+    # Actualiza el detalle desde el que se tomó la decisión y cualquier mensaje
+    # individual antiguo que haya quedado de versiones previas.
     for referencia in referencias:
         try:
             telegram_request(
@@ -1207,91 +1207,35 @@ def sincronizar_mensajes_telegram_operacion(
         except Exception as error:
             print("[TELEGRAM SYNC MESSAGE ERROR]", error)
 
+    # Publica la bandeja unificada actualizada para todos los custodios.
+    if not error_texto:
+        for chat_id in AUTHORIZED_CHAT_IDS:
+            try:
+                mostrar_menu_usuarios(chat_id)
+            except Exception as error:
+                print("[TELEGRAM SYNC MENU ERROR]", error)
 
 def notificar_solicitud_operacion_telegram(solicitud: dict):
+    """Muestra MOVER/ELIMINAR dentro de la misma bandeja agrupada de subidas.
 
+    Ya no envía una alerta individual por operación. Cada nueva solicitud
+    genera una vista actualizada de usuarios con sus contadores de Subir,
+    Mover y Eliminar.
+    """
     if not TELEGRAM_TOKEN or not AUTHORIZED_CHAT_IDS:
         return
 
-    tipo = str(
-        solicitud.get("tipo_operacion") or ""
-    ).upper()
-
-    icono = (
-        "↔️"
-        if tipo == "MOVER"
-        else "🗑️"
-    )
-
-    destino = (
-        solicitud.get("carpeta_destino_nombre")
-        or "—"
-    )
-
-    texto = (
-        "🛡️ DataVault DLP - GM Ingenieros\n\n"
-        f"{icono} SOLICITUD DE {tipo}\n\n"
-        f"👤 Usuario: {solicitud.get('solicitante_nombre') or 'Usuario'}\n"
-        f"📄 Objeto: {solicitud.get('nombre_objeto') or 'Archivo/Carpeta'}\n"
-        f"📌 Tipo: {solicitud.get('objeto_tipo') or '—'}\n"
-        f"📂 Origen: {solicitud.get('carpeta_origen') or 'DRIVE PROYECTO'}\n"
-    )
-
-    if tipo == "MOVER":
-        texto += f"➡️ Destino: {destino}\n"
-
-    texto += "\n¿Autorizar operación?"
-
-    botones = {
-        "inline_keyboard": [
-            [
-                {
-                    "text": "✅ Aprobar",
-                    "callback_data": f"opap:{solicitud['id']}"
-                },
-                {
-                    "text": "❌ Rechazar",
-                    "callback_data": f"opre:{solicitud['id']}"
-                },
-            ]
-        ]
-    }
-
-    referencias = []
-
     for chat_id in AUTHORIZED_CHAT_IDS:
-
         try:
-            resultado = telegram_request(
-                "sendMessage",
-                {
-                    "chat_id": chat_id,
-                    "text": texto,
-                    "reply_markup": botones
-                },
-            )
-
-            message_id = (
-                (resultado or {}).get("result") or {}
-            ).get("message_id")
-
-            if (resultado or {}).get("ok") and message_id:
-                referencias.append({
-                    "chat_id": chat_id,
-                    "message_id": message_id,
-                })
-
-        except Exception as error:
+            resultado = mostrar_menu_usuarios(chat_id)
             print(
-                "[TELEGRAM OPERACION ERROR]",
-                error
+                "[TELEGRAM OPERACION MENU]",
+                f"chat={chat_id}",
+                f"solicitud={solicitud.get('id')}",
+                f"ok={(resultado or {}).get('ok')}",
             )
-
-    guardar_referencias_telegram_operacion(
-        solicitud.get("id"),
-        referencias,
-    )
-
+        except Exception as error:
+            print("[TELEGRAM OPERACION MENU ERROR]", error)
 
 def procesar_solicitud_operacion(
     solicitud_id: str,
@@ -1467,95 +1411,15 @@ def notificar_resultado_custodia_web_telegram(
     resultado: dict,
     usuario_admin: dict,
 ):
-    """Notifica en Telegram una decisión de SUBIDA tomada desde la web.
-
-    Las subidas históricamente usan un menú dinámico en Telegram en vez de un
-    mensaje individual persistido. Por eso se envía el resultado y un botón
-    para abrir la bandeja actualizada de pendientes.
-    """
+    """Refresca la bandeja agrupada después de resolver una SUBIDA en web."""
     if not TELEGRAM_TOKEN or not AUTHORIZED_CHAT_IDS:
         return
 
-    objeto_tipo = str((resultado or {}).get("objeto_tipo") or payload.get("objeto_tipo") or "").upper()
-    estado = str((resultado or {}).get("estado") or "").upper()
-    icono = "✅" if estado == "APROBADO" else "❌"
-
-    nombre = "Archivo/Carpeta"
-    solicitante = "Usuario"
-    ubicacion = "DRIVE PROYECTO"
-    cantidad = int((resultado or {}).get("procesados") or 0)
-
-    try:
-        if objeto_tipo == "CARPETA":
-            lote_id = str((resultado or {}).get("lote_id") or payload.get("lote_id") or "")
-            consulta = (
-                supabase
-                .table("auditoria_custodia")
-                .select("nombre_archivo,ruta_relativa,solicitante_nombre,solicitante_correo,ubicacion_drive")
-                .eq("lote_id", lote_id)
-                .limit(1)
-                .execute()
-            )
-            if consulta.data:
-                fila = consulta.data[0]
-                nombre = obtener_carpeta_desde_ruta(fila.get("ruta_relativa")) or fila.get("nombre_archivo") or "Carpeta"
-                solicitante = fila.get("solicitante_nombre") or fila.get("solicitante_correo") or "Usuario"
-                ubicacion = fila.get("ubicacion_drive") or ubicacion
-        else:
-            auditoria_id = str((resultado or {}).get("auditoria_id") or payload.get("auditoria_id") or "")
-            consulta = (
-                supabase
-                .table("auditoria_custodia")
-                .select("nombre_archivo,solicitante_nombre,solicitante_correo,ubicacion_drive")
-                .eq("id", auditoria_id)
-                .limit(1)
-                .execute()
-            )
-            if consulta.data:
-                fila = consulta.data[0]
-                nombre = fila.get("nombre_archivo") or "Archivo"
-                solicitante = fila.get("solicitante_nombre") or fila.get("solicitante_correo") or "Usuario"
-                ubicacion = fila.get("ubicacion_drive") or ubicacion
-    except Exception as error:
-        print("[TELEGRAM CUSTODY WEB DETAIL ERROR]", error)
-
-    tipo_label = "CARPETA" if objeto_tipo == "CARPETA" else "ARCHIVO"
-    texto = (
-        "🛡️ DataVault DLP - GM Ingenieros\n\n"
-        f"{icono} SUBIDA {estado or 'PROCESADA'} DESDE WEB\n\n"
-        f"👤 Usuario: {solicitante}\n"
-        f"📌 Tipo: {tipo_label}\n"
-        f"📄 Elemento: {nombre}\n"
-    )
-
-    if objeto_tipo == "CARPETA":
-        texto += f"📚 Archivos procesados: {cantidad}\n"
-
-    if estado == "APROBADO":
-        texto += f"📂 Destino: {ubicacion}\n"
-
-    texto += "\n👤 Procesado por: Panel web del administrador"
-
-    botones = {
-        "inline_keyboard": [[{
-            "text": "👥 Ver pendientes actualizados",
-            "callback_data": "menu:usuarios",
-        }]]
-    }
-
     for chat_id in AUTHORIZED_CHAT_IDS:
         try:
-            telegram_request(
-                "sendMessage",
-                {
-                    "chat_id": chat_id,
-                    "text": texto,
-                    "reply_markup": botones,
-                },
-            )
+            mostrar_menu_usuarios(chat_id)
         except Exception as error:
-            print("[TELEGRAM CUSTODY WEB RESULT ERROR]", error)
-
+            print("[TELEGRAM CUSTODY WEB MENU ERROR]", error)
 
 # ============================================================
 # TELEGRAM
@@ -1701,91 +1565,70 @@ def quitar_teclado_inferior(chat_id):
 
 
 def obtener_resumen_panel():
-    """Resumen simple para el panel principal del custodio."""
-
+    """Resumen unificado de SUBIDAS, MOVIMIENTOS y ELIMINACIONES pendientes."""
     try:
-
         respuesta = (
             supabase
             .table("auditoria_custodia")
-            .select(
-                "estado,solicitante_id,"
-                "lote_id,ruta_relativa"
-            )
+            .select("estado,solicitante_id,lote_id,ruta_relativa")
             .execute()
         )
-
         registros = respuesta.data or []
-
     except Exception as error:
+        print("[PANEL RESUMEN ERROR]", error)
+        registros = []
 
-        print(
-            "[PANEL RESUMEN ERROR]",
-            error
+    try:
+        respuesta_ops = (
+            supabase_admin
+            .table("solicitudes_operacion")
+            .select("estado,tipo_operacion,solicitante_id")
+            .execute()
         )
+        operaciones = respuesta_ops.data or []
+    except Exception as error:
+        print("[PANEL OPERACIONES ERROR]", error)
+        operaciones = []
 
-        return {
-            "pendientes": 0,
-            "aprobados": 0,
-            "rechazados": 0,
-            "usuarios_pendientes": 0,
-            "carpetas_pendientes": 0,
-            "archivos_sueltos_pendientes": 0,
-        }
+    pendientes = [r for r in registros if str(r.get("estado") or "").upper() == "PENDIENTE"]
+    aprobados = sum(1 for r in registros if str(r.get("estado") or "").upper() == "APROBADO")
+    rechazados = sum(1 for r in registros if str(r.get("estado") or "").upper() == "RECHAZADO")
 
-
-    pendientes = [
-        r
-        for r in registros
-        if r.get("estado") == "PENDIENTE"
+    operaciones_pendientes = [
+        o for o in operaciones
+        if str(o.get("estado") or "").upper() == "PENDIENTE"
     ]
-
-
-    aprobados = sum(
-        1
-        for r in registros
-        if r.get("estado") == "APROBADO"
+    movimientos = sum(
+        1 for o in operaciones_pendientes
+        if str(o.get("tipo_operacion") or "").upper() == "MOVER"
     )
-
-
-    rechazados = sum(
-        1
-        for r in registros
-        if r.get("estado") == "RECHAZADO"
+    eliminaciones = sum(
+        1 for o in operaciones_pendientes
+        if str(o.get("tipo_operacion") or "").upper() == "ELIMINAR"
     )
-
 
     usuarios = {
         str(r.get("solicitante_id"))
         for r in pendientes
         if r.get("solicitante_id")
     }
-
+    usuarios.update({
+        str(o.get("solicitante_id"))
+        for o in operaciones_pendientes
+        if o.get("solicitante_id")
+    })
 
     carpetas = set()
     archivos_sueltos = 0
-
-
     for registro in pendientes:
-
-        lote_id = str(
-            registro.get("lote_id")
-            or ""
-        ).strip()
-
-        ruta = str(
-            registro.get("ruta_relativa")
-            or ""
-        ).replace("\\", "/").strip("/")
-
+        lote_id = str(registro.get("lote_id") or "").strip()
+        ruta = str(registro.get("ruta_relativa") or "").replace("\\", "/").strip("/")
         if lote_id and "/" in ruta:
-
             carpetas.add(lote_id)
-
         else:
-
             archivos_sueltos += 1
 
+    subidas_unidades = len(carpetas) + archivos_sueltos
 
     return {
         "pendientes": len(pendientes),
@@ -1793,173 +1636,78 @@ def obtener_resumen_panel():
         "rechazados": rechazados,
         "usuarios_pendientes": len(usuarios),
         "carpetas_pendientes": len(carpetas),
-        "archivos_sueltos_pendientes":
-            archivos_sueltos,
+        "archivos_sueltos_pendientes": archivos_sueltos,
+        "subidas_pendientes": subidas_unidades,
+        "movimientos_pendientes": movimientos,
+        "eliminaciones_pendientes": eliminaciones,
+        "operaciones_pendientes": len(operaciones_pendientes),
+        "solicitudes_pendientes": subidas_unidades + len(operaciones_pendientes),
     }
 
-
-def mostrar_panel_principal(
-    chat_id,
-    message_id=None
-):
-
+def mostrar_panel_principal(chat_id, message_id=None):
     resumen = obtener_resumen_panel()
-
 
     texto = (
         "🛡️ DataVault DLP - GM Ingenieros\n\n"
         "Panel de custodia\n\n"
-        f"👥 Usuarios con pendientes: "
-        f"{resumen['usuarios_pendientes']}\n"
-        f"📁 Carpetas pendientes: "
-        f"{resumen['carpetas_pendientes']}\n"
-        f"📄 Archivos sueltos: "
-        f"{resumen['archivos_sueltos_pendientes']}\n"
-        f"🟡 Documentos pendientes: "
-        f"{resumen['pendientes']}"
+        f"👥 Usuarios con pendientes: {resumen['usuarios_pendientes']}\n"
+        f"📤 Subidas pendientes: {resumen['subidas_pendientes']}\n"
+        f"↔️ Movimientos pendientes: {resumen['movimientos_pendientes']}\n"
+        f"🗑️ Eliminaciones pendientes: {resumen['eliminaciones_pendientes']}\n"
+        f"🟡 Solicitudes pendientes: {resumen['solicitudes_pendientes']}"
     )
-
 
     payload = {
-
-        "chat_id":
-            chat_id,
-
-        "text":
-            texto,
-
+        "chat_id": chat_id,
+        "text": texto,
         "reply_markup": {
-
             "inline_keyboard": [
-
                 [
-                    {
-                        "text":
-                            "👥 Usuarios",
-
-                        "callback_data":
-                            "panel:usuarios",
-                    },
-
-                    {
-                        "text":
-                            "🔄 Actualizar",
-
-                        "callback_data":
-                            "panel:actualizar",
-                    },
+                    {"text": "👥 Usuarios", "callback_data": "panel:usuarios"},
+                    {"text": "🔄 Actualizar", "callback_data": "panel:actualizar"},
                 ],
-
-                [
-                    {
-                        "text":
-                            "📊 Estado",
-
-                        "callback_data":
-                            "panel:estado",
-                    }
-                ],
-
+                [{"text": "📊 Estado", "callback_data": "panel:estado"}],
             ]
         },
-
     }
 
-
     if message_id:
+        payload["message_id"] = message_id
+        return telegram_request("editMessageText", payload)
 
-        payload[
-            "message_id"
-        ] = message_id
+    return telegram_request("sendMessage", payload)
 
-        return telegram_request(
-            "editMessageText",
-            payload
-        )
-
-
-    return telegram_request(
-        "sendMessage",
-        payload
-    )
-
-
-def mostrar_estado_panel(
-    chat_id,
-    message_id
-):
-
+def mostrar_estado_panel(chat_id, message_id):
     resumen = obtener_resumen_panel()
-
 
     texto = (
         "📊 ESTADO DATAVAULT\n\n"
-        f"🟡 Pendientes: {resumen['pendientes']}\n"
-        f"🟢 Aprobados: {resumen['aprobados']}\n"
-        f"🔴 Rechazados: {resumen['rechazados']}\n\n"
-        f"👥 Usuarios con pendientes: "
-        f"{resumen['usuarios_pendientes']}\n"
-        f"📁 Carpetas pendientes: "
-        f"{resumen['carpetas_pendientes']}\n"
-        f"📄 Archivos sueltos: "
-        f"{resumen['archivos_sueltos_pendientes']}"
+        f"👥 Usuarios con pendientes: {resumen['usuarios_pendientes']}\n"
+        f"📤 Subidas: {resumen['subidas_pendientes']}\n"
+        f"↔️ Movimientos: {resumen['movimientos_pendientes']}\n"
+        f"🗑️ Eliminaciones: {resumen['eliminaciones_pendientes']}\n"
+        f"🟡 Total solicitudes: {resumen['solicitudes_pendientes']}\n\n"
+        f"🟢 Documentos aprobados: {resumen['aprobados']}\n"
+        f"🔴 Documentos rechazados: {resumen['rechazados']}"
     )
-
 
     return telegram_request(
-
         "editMessageText",
-
         {
-
-            "chat_id":
-                chat_id,
-
-            "message_id":
-                message_id,
-
-            "text":
-                texto,
-
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": texto,
             "reply_markup": {
-
                 "inline_keyboard": [
-
                     [
-                        {
-                            "text":
-                                "👥 Usuarios",
-
-                            "callback_data":
-                                "panel:usuarios",
-                        },
-
-                        {
-                            "text":
-                                "🔄 Actualizar",
-
-                            "callback_data":
-                                "panel:estado",
-                        },
+                        {"text": "👥 Usuarios", "callback_data": "panel:usuarios"},
+                        {"text": "🔄 Actualizar", "callback_data": "panel:estado"},
                     ],
-
-                    [
-                        {
-                            "text":
-                                "🏠 Panel",
-
-                            "callback_data":
-                                "panel:inicio",
-                        }
-                    ],
-
+                    [{"text": "🏠 Panel", "callback_data": "panel:inicio"}],
                 ]
             },
-
         },
-
     )
-
 
 # ============================================================
 # MENÚ TELEGRAM - USUARIOS -> ARCHIVOS -> DECISIÓN
@@ -2035,481 +1783,430 @@ def info_carpeta_documento(
     }
 
 
-def mostrar_menu_usuarios(
-    chat_id,
-    message_id=None
-):
+def obtener_operaciones_pendientes(solicitante_id: str | None = None):
+    """Obtiene solicitudes MOVER/ELIMINAR pendientes desde el backend admin."""
+    try:
+        query = (
+            supabase_admin
+            .table("solicitudes_operacion")
+            .select("*")
+            .eq("estado", "PENDIENTE")
+            .order("fecha_solicitud", desc=True)
+        )
+        if solicitante_id:
+            query = query.eq("solicitante_id", str(solicitante_id))
+        respuesta = query.execute()
+        return respuesta.data or []
+    except Exception as error:
+        print("[MENU TELEGRAM OPERACIONES ERROR]", error)
+        return []
 
+
+
+def obtener_message_id_bandeja_telegram(chat_id):
+    """Devuelve el message_id de la bandeja activa de un custodio."""
+    clave = str(chat_id)
+    with TELEGRAM_BANDEJA_LOCK:
+        return TELEGRAM_BANDEJA_MESSAGE_IDS.get(clave)
+
+
+def guardar_message_id_bandeja_telegram(chat_id, message_id):
+    """Recuerda qué mensaje debe reutilizarse como bandeja principal."""
+    if not message_id:
+        return
+    clave = str(chat_id)
+    with TELEGRAM_BANDEJA_LOCK:
+        TELEGRAM_BANDEJA_MESSAGE_IDS[clave] = int(message_id)
+
+
+def extraer_message_id_telegram(resultado):
+    """Extrae de forma segura el message_id devuelto por sendMessage."""
+    try:
+        return int(
+            ((resultado or {}).get("result") or {}).get("message_id")
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def mostrar_menu_usuarios(chat_id, message_id=None):
+    """Bandeja Telegram unificada y agrupada por usuario."""
     documentos = obtener_documentos_pendientes()
-
+    operaciones = obtener_operaciones_pendientes()
     usuarios = {}
 
+    def asegurar_usuario(uid, nombre, correo):
+        if uid not in usuarios:
+            usuarios[uid] = {
+                "nombre": nombre or correo or "Usuario",
+                "correo": correo or "",
+                "carpetas": set(),
+                "archivos_sueltos": 0,
+                "movimientos": 0,
+                "eliminaciones": 0,
+            }
+        else:
+            if not usuarios[uid].get("nombre") and nombre:
+                usuarios[uid]["nombre"] = nombre
+            if not usuarios[uid].get("correo") and correo:
+                usuarios[uid]["correo"] = correo
 
     for documento in documentos:
-
-        solicitante_id = str(
-            documento.get("solicitante_id")
-            or ""
-        ).strip()
-
-
-        if not solicitante_id:
+        uid = str(documento.get("solicitante_id") or "").strip()
+        if not uid:
             continue
-
-
-        if solicitante_id not in usuarios:
-
-            usuarios[
-                solicitante_id
-            ] = {
-
-                "nombre":
-                    (
-                        documento.get(
-                            "solicitante_nombre"
-                        )
-                        or
-                        documento.get(
-                            "solicitante_correo"
-                        )
-                        or
-                        "Usuario"
-                    ),
-
-                "correo":
-                    documento.get(
-                        "solicitante_correo"
-                    )
-                    or "",
-
-                "carpetas":
-                    set(),
-
-                "archivos_sueltos":
-                    0,
-            }
-
-
-        info_carpeta = info_carpeta_documento(
-            documento
+        asegurar_usuario(
+            uid,
+            documento.get("solicitante_nombre"),
+            documento.get("solicitante_correo"),
         )
-
-
-        if info_carpeta:
-
-            usuarios[
-                solicitante_id
-            ][
-                "carpetas"
-            ].add(
-                info_carpeta[
-                    "lote_id"
-                ]
-            )
-
+        info = info_carpeta_documento(documento)
+        if info:
+            usuarios[uid]["carpetas"].add(info["lote_id"])
         else:
+            usuarios[uid]["archivos_sueltos"] += 1
 
-            usuarios[
-                solicitante_id
-            ][
-                "archivos_sueltos"
-            ] += 1
-
+    for operacion in operaciones:
+        uid = str(operacion.get("solicitante_id") or "").strip()
+        if not uid:
+            continue
+        asegurar_usuario(
+            uid,
+            operacion.get("solicitante_nombre"),
+            operacion.get("solicitante_correo"),
+        )
+        tipo = str(operacion.get("tipo_operacion") or "").upper()
+        if tipo == "MOVER":
+            usuarios[uid]["movimientos"] += 1
+        elif tipo == "ELIMINAR":
+            usuarios[uid]["eliminaciones"] += 1
 
     usuarios_ordenados = sorted(
-
         usuarios.items(),
-
-        key=lambda item:
-            str(
-                item[1]["nombre"]
-            ).lower(),
-
+        key=lambda item: str(item[1]["nombre"]).lower(),
     )
 
-
     botones = []
-
+    total_subidas = 0
+    total_movimientos = 0
+    total_eliminaciones = 0
 
     for uid, usuario in usuarios_ordenados:
+        subidas = len(usuario["carpetas"]) + usuario["archivos_sueltos"]
+        movimientos = usuario["movimientos"]
+        eliminaciones = usuario["eliminaciones"]
+        total_subidas += subidas
+        total_movimientos += movimientos
+        total_eliminaciones += eliminaciones
 
-        n_carpetas = len(
-            usuario["carpetas"]
-        )
+        nombre = str(usuario["nombre"] or "Usuario")
+        if len(nombre) > 24:
+            nombre = nombre[:21] + "..."
 
-        n_archivos = (
-            usuario[
-                "archivos_sueltos"
-            ]
-        )
+        botones.append([{
+            "text": f"👤 {nombre} · 📤{subidas} ↔️{movimientos} 🗑️{eliminaciones}",
+            "callback_data": f"usr:{uid}",
+        }])
 
-        partes = []
-
-
-        if n_carpetas:
-
-            partes.append(
-                f"{n_carpetas} carpeta"
-                if n_carpetas == 1
-                else
-                f"{n_carpetas} carpetas"
-            )
-
-
-        if n_archivos:
-
-            partes.append(
-                f"{n_archivos} archivo"
-                if n_archivos == 1
-                else
-                f"{n_archivos} archivos"
-            )
-
-
-        resumen = (
-            " + ".join(partes)
-            if partes
-            else
-            "sin pendientes"
-        )
-
-
-        botones.append([
-            {
-                "text":
-                    (
-                        f"👤 {usuario['nombre']} "
-                        f"· {resumen}"
-                    ),
-
-                "callback_data":
-                    f"usr:{uid}",
-            }
-        ])
-
-
-    botones.append([
-        {
-            "text":
-                "🔄 Actualizar",
-
-            "callback_data":
-                "menu:usuarios",
-        }
-    ])
-
+    botones.append([{
+        "text": "🔄 Actualizar",
+        "callback_data": "menu:usuarios",
+    }])
 
     if usuarios:
-
         texto = (
             "🛡️ DataVault DLP - GM Ingenieros\n\n"
-            "📂 DOCUMENTOS PENDIENTES\n\n"
+            "📥 SOLICITUDES PENDIENTES\n\n"
+            f"📤 Subidas: {total_subidas}\n"
+            f"↔️ Movimientos: {total_movimientos}\n"
+            f"🗑️ Eliminaciones: {total_eliminaciones}\n\n"
             "Seleccione un usuario:"
         )
-
     else:
-
         texto = (
             "🛡️ DataVault DLP - GM Ingenieros\n\n"
-            "✅ No existen documentos pendientes."
+            "✅ No existen solicitudes pendientes."
         )
-
 
     payload = {
-
-        "chat_id":
-            chat_id,
-
-        "text":
-            texto,
-
-        "reply_markup": {
-            "inline_keyboard":
-                botones
-        },
-
+        "chat_id": chat_id,
+        "text": texto,
+        "reply_markup": {"inline_keyboard": botones},
     }
 
+    # Si el callback trae un message_id, ese mismo mensaje pasa a ser la
+    # bandeja activa. Si no lo trae, reutilizamos la última bandeja conocida.
+    objetivo_message_id = (
+        message_id
+        or obtener_message_id_bandeja_telegram(chat_id)
+    )
 
-    if message_id:
+    if objetivo_message_id:
+        payload_edicion = dict(payload)
+        payload_edicion["message_id"] = objetivo_message_id
 
-        payload[
-            "message_id"
-        ] = message_id
-
-        return telegram_request(
+        resultado = telegram_request(
             "editMessageText",
-            payload
+            payload_edicion
         )
 
+        if (resultado or {}).get("ok"):
+            guardar_message_id_bandeja_telegram(
+                chat_id,
+                objetivo_message_id
+            )
+            return resultado
 
-    return telegram_request(
+        # El mensaje pudo ser eliminado o quedar inaccesible. Solo en ese caso
+        # creamos una nueva bandeja y desde ahí volvemos a reutilizarla.
+        print(
+            "[TELEGRAM BANDEJA] No se pudo editar; "
+            "se creará una nueva bandeja.",
+            chat_id,
+            (resultado or {}).get("description"),
+        )
+
+    resultado = telegram_request(
         "sendMessage",
         payload
     )
 
+    nuevo_message_id = extraer_message_id_telegram(
+        resultado
+    )
 
-def mostrar_archivos_usuario(
-    chat_id,
-    message_id,
-    solicitante_id
-):
+    if (resultado or {}).get("ok") and nuevo_message_id:
+        guardar_message_id_bandeja_telegram(
+            chat_id,
+            nuevo_message_id
+        )
 
+    return resultado
+
+def mostrar_archivos_usuario(chat_id, message_id, solicitante_id):
+    """Muestra en una sola bandeja las 3 clases de solicitud del usuario."""
     try:
-
         respuesta = (
             supabase
             .table("auditoria_custodia")
             .select(
-                "id,nombre_archivo,tamano_bytes,"
-                "fecha_solicitud,solicitante_id,"
-                "solicitante_nombre,solicitante_correo,"
+                "id,nombre_archivo,tamano_bytes,fecha_solicitud,"
+                "solicitante_id,solicitante_nombre,solicitante_correo,"
                 "lote_id,ruta_relativa"
             )
-            .eq(
-                "solicitante_id",
-                solicitante_id
-            )
-            .eq(
-                "estado",
-                "PENDIENTE"
-            )
-            .order(
-                "fecha_solicitud",
-                desc=True
-            )
+            .eq("solicitante_id", solicitante_id)
+            .eq("estado", "PENDIENTE")
+            .order("fecha_solicitud", desc=True)
             .execute()
         )
-
         archivos = respuesta.data or []
-
     except Exception as error:
-
-        print(
-            "[ARCHIVOS USUARIO ERROR]",
-            error
-        )
-
+        print("[ARCHIVOS USUARIO ERROR]", error)
         archivos = []
 
+    operaciones = obtener_operaciones_pendientes(solicitante_id)
 
-    if not archivos:
+    if not archivos and not operaciones:
+        return mostrar_menu_usuarios(chat_id, message_id)
 
-        return mostrar_menu_usuarios(
-            chat_id,
-            message_id
-        )
-
-
+    fuente = archivos[0] if archivos else operaciones[0]
     nombre_usuario = (
-        archivos[0].get(
-            "solicitante_nombre"
-        )
-        or
-        archivos[0].get(
-            "solicitante_correo"
-        )
-        or
-        "Usuario"
+        fuente.get("solicitante_nombre")
+        or fuente.get("solicitante_correo")
+        or "Usuario"
     )
-
-
-    correo = (
-        archivos[0].get(
-            "solicitante_correo"
-        )
-        or ""
-    )
-
+    correo = fuente.get("solicitante_correo") or ""
 
     carpetas = {}
     sueltos = []
-
-
     for archivo in archivos:
-
-        info = info_carpeta_documento(
-            archivo
-        )
-
-
+        info = info_carpeta_documento(archivo)
         if info:
-
-            lote_id = info[
-                "lote_id"
-            ]
-
-
+            lote_id = info["lote_id"]
             if lote_id not in carpetas:
-
-                carpetas[
-                    lote_id
-                ] = {
-
-                    "nombre":
-                        info[
-                            "nombre"
-                        ],
-
-                    "cantidad":
-                        0,
-
-                    "tamano":
-                        0,
+                carpetas[lote_id] = {
+                    "nombre": info["nombre"],
+                    "cantidad": 0,
+                    "tamano": 0,
                 }
-
-
-            carpetas[
-                lote_id
-            ][
-                "cantidad"
-            ] += 1
-
-
-            carpetas[
-                lote_id
-            ][
-                "tamano"
-            ] += int(
-                archivo.get(
-                    "tamano_bytes"
-                )
-                or 0
-            )
-
-
+            carpetas[lote_id]["cantidad"] += 1
+            carpetas[lote_id]["tamano"] += int(archivo.get("tamano_bytes") or 0)
         else:
+            sueltos.append(archivo)
 
-            sueltos.append(
-                archivo
-            )
-
+    movimientos = [
+        o for o in operaciones
+        if str(o.get("tipo_operacion") or "").upper() == "MOVER"
+    ]
+    eliminaciones = [
+        o for o in operaciones
+        if str(o.get("tipo_operacion") or "").upper() == "ELIMINAR"
+    ]
 
     botones = []
 
-
     for lote_id, carpeta in carpetas.items():
-
-        nombre = carpeta[
-            "nombre"
-        ]
-
-
-        if len(nombre) > 30:
-
-            nombre = (
-                nombre[:27]
-                + "..."
-            )
-
-
-        botones.append([
-            {
-                "text":
-                    (
-                        f"📁 {nombre} · "
-                        f"{carpeta['cantidad']} archivos"
-                    ),
-
-                "callback_data":
-                    f"lot:{lote_id}",
-            }
-        ])
-
+        nombre = str(carpeta["nombre"] or "Carpeta")
+        if len(nombre) > 28:
+            nombre = nombre[:25] + "..."
+        botones.append([{
+            "text": f"📤 📁 {nombre} · {carpeta['cantidad']} archivos",
+            "callback_data": f"lot:{lote_id}",
+        }])
 
     for archivo in sueltos:
+        nombre = str(archivo.get("nombre_archivo") or "Archivo")
+        if len(nombre) > 36:
+            nombre = nombre[:33] + "..."
+        botones.append([{
+            "text": f"📤 📄 {nombre}",
+            "callback_data": f"doc:{archivo['id']}",
+        }])
 
-        nombre = (
-            archivo.get(
-                "nombre_archivo"
-            )
-            or
-            "Archivo"
-        )
+    for operacion in movimientos:
+        nombre = str(operacion.get("nombre_objeto") or "Archivo/Carpeta")
+        destino = str(operacion.get("carpeta_destino_nombre") or "Destino")
+        if len(nombre) > 25:
+            nombre = nombre[:22] + "..."
+        if len(destino) > 18:
+            destino = ".../" + destino.split("/")[-1].strip()
+        botones.append([{
+            "text": f"↔️ {nombre} → {destino}",
+            "callback_data": f"opdet:{operacion['id']}",
+        }])
 
+    for operacion in eliminaciones:
+        nombre = str(operacion.get("nombre_objeto") or "Archivo/Carpeta")
+        if len(nombre) > 36:
+            nombre = nombre[:33] + "..."
+        botones.append([{
+            "text": f"🗑️ {nombre}",
+            "callback_data": f"opdet:{operacion['id']}",
+        }])
 
-        nombre_boton = (
-            nombre
-            if len(nombre) <= 42
-            else
-            nombre[:39] + "..."
-        )
+    botones.append([{
+        "text": "🔙 Usuarios",
+        "callback_data": "menu:usuarios",
+    }])
 
-
-        botones.append([
-            {
-                "text":
-                    f"📄 {nombre_boton}",
-
-                "callback_data":
-                    (
-                        f"doc:"
-                        f"{archivo['id']}"
-                    ),
-            }
-        ])
-
-
-    botones.append([
-        {
-            "text":
-                "🔙 Usuarios",
-
-            "callback_data":
-                "menu:usuarios",
-        }
-    ])
-
-
-    resumen = []
-
-
-    if carpetas:
-
-        resumen.append(
-            f"{len(carpetas)} carpeta(s)"
-        )
-
-
-    if sueltos:
-
-        resumen.append(
-            f"{len(sueltos)} archivo(s) suelto(s)"
-        )
-
-
+    subidas = len(carpetas) + len(sueltos)
     texto = (
         f"👤 {nombre_usuario}\n"
         f"📧 {correo}\n\n"
-        f"📂 {' + '.join(resumen)} pendiente(s)\n\n"
-        "Seleccione una carpeta o archivo:"
+        f"📤 Subidas: {subidas}\n"
+        f"↔️ Movimientos: {len(movimientos)}\n"
+        f"🗑️ Eliminaciones: {len(eliminaciones)}\n\n"
+        "Seleccione una solicitud:"
     )
-
 
     return telegram_request(
-
         "editMessageText",
-
         {
-
-            "chat_id":
-                chat_id,
-
-            "message_id":
-                message_id,
-
-            "text":
-                texto,
-
-            "reply_markup": {
-                "inline_keyboard":
-                    botones
-            },
-
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": texto,
+            "reply_markup": {"inline_keyboard": botones},
         },
-
     )
 
+
+def mostrar_detalle_operacion(chat_id, message_id, solicitud_id):
+    """Detalle y decisión de una solicitud MOVER/ELIMINAR desde la bandeja."""
+    try:
+        respuesta = (
+            supabase_admin
+            .table("solicitudes_operacion")
+            .select("*")
+            .eq("id", str(solicitud_id))
+            .limit(1)
+            .execute()
+        )
+        if not respuesta.data:
+            raise ValueError("La solicitud no existe.")
+        solicitud = respuesta.data[0]
+    except Exception as error:
+        print("[DETALLE OPERACION TELEGRAM ERROR]", error)
+        return telegram_request(
+            "editMessageText",
+            {
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "text": "❌ No se pudo cargar la solicitud seleccionada.",
+                "reply_markup": {
+                    "inline_keyboard": [[
+                        {"text": "👥 Usuarios", "callback_data": "menu:usuarios"}
+                    ]]
+                },
+            },
+        )
+
+    tipo = str(solicitud.get("tipo_operacion") or "").upper()
+    estado = str(solicitud.get("estado") or "").upper()
+    icono = "↔️" if tipo == "MOVER" else "🗑️"
+    etiqueta = "MOVIMIENTO" if tipo == "MOVER" else "ELIMINACIÓN"
+    uid = str(solicitud.get("solicitante_id") or "")
+
+    texto = (
+        "🛡️ DataVault DLP - GM Ingenieros\n\n"
+        f"{icono} SOLICITUD DE {etiqueta}\n\n"
+        f"👤 Usuario: {solicitud.get('solicitante_nombre') or 'Usuario'}\n"
+        f"📧 Correo: {solicitud.get('solicitante_correo') or ''}\n"
+        f"📄 Objeto: {solicitud.get('nombre_objeto') or 'Archivo/Carpeta'}\n"
+        f"📌 Tipo: {solicitud.get('objeto_tipo') or '—'}\n"
+        f"📂 Origen: {solicitud.get('carpeta_origen') or 'DRIVE PROYECTO'}\n"
+    )
+    if tipo == "MOVER":
+        texto += f"➡️ Destino: {solicitud.get('carpeta_destino_nombre') or '—'}\n"
+    texto += f"\n🟡 Estado: {estado or 'PENDIENTE'}"
+
+    botones = []
+    if estado == "PENDIENTE":
+        botones.append([
+            {"text": "✅ Aprobar", "callback_data": f"opap:{solicitud_id}"},
+            {"text": "❌ Rechazar", "callback_data": f"opre:{solicitud_id}"},
+        ])
+    if uid:
+        botones.append([{
+            "text": "🔙 Solicitudes del usuario",
+            "callback_data": f"usr:{uid}",
+        }])
+    botones.append([{
+        "text": "👥 Usuarios",
+        "callback_data": "menu:usuarios",
+    }])
+
+    # Este detalle vive dentro de la misma bandeja unificada. Guardamos tanto
+    # el message_id activo del chat como la referencia de la operación para
+    # que una resolución hecha desde la web pueda actualizar ese mismo mensaje.
+    guardar_message_id_bandeja_telegram(
+        chat_id,
+        message_id
+    )
+
+    try:
+        referencias = normalizar_referencias_telegram(solicitud)
+        referencia_actual = {
+            "chat_id": int(chat_id),
+            "message_id": int(message_id),
+        }
+        if referencia_actual not in referencias:
+            referencias.append(referencia_actual)
+            guardar_referencias_telegram_operacion(
+                solicitud_id,
+                referencias,
+            )
+    except Exception as error:
+        print("[TELEGRAM DETALLE REF ERROR]", error)
+
+    return telegram_request(
+        "editMessageText",
+        {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": texto,
+            "reply_markup": {"inline_keyboard": botones},
+        },
+    )
 
 def mostrar_detalle_lote(
     chat_id,
@@ -8303,6 +8000,29 @@ async def recibir_respuesta_telegram(
                     "detalle_documento"
             }
 
+
+        # ----------------------------------------------------
+        # NAVEGACIÓN: DETALLE DE MOVER / ELIMINAR
+        # ----------------------------------------------------
+        if action_data.startswith("opdet:"):
+            solicitud_raw = action_data.split(":", 1)[1].strip()
+            try:
+                solicitud_id = str(UUID(solicitud_raw))
+            except (ValueError, TypeError, AttributeError):
+                return {
+                    "method": "answerCallbackQuery",
+                    "callback_query_id": callback_id,
+                    "text": "❌ ID de solicitud inválido.",
+                    "show_alert": True,
+                }
+
+            # Abrir el detalle es liviano; cortamos primero el spinner.
+            telegram_request(
+                "answerCallbackQuery",
+                {"callback_query_id": callback_id},
+            )
+            mostrar_detalle_operacion(chat_id, message_id, solicitud_id)
+            return {"status": "detalle_operacion"}
 
         # ----------------------------------------------------
         # DECISIÓN: MOVER / ELIMINAR SOLICITADO DESDE LA WEB
