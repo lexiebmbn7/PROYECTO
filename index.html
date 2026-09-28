@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -2024,6 +2025,24 @@ body {
   .dv-unit-sub{font-size:8px;color:#91a0ae;margin-top:2px}
   .dv-folder-chip{display:inline-flex;align-items:center;gap:5px;padding:3px 7px;border-radius:999px;background:#eef6fc;color:#176aa4;font-size:8px;font-weight:700}
   @media(max-width:700px){.dv-tree-file{grid-template-columns:minmax(0,1fr) auto}.dv-tree-file .dv-hide-mobile{display:none}}
+</style>
+
+
+<style id="dv-admin-approval-user-styles">
+  .dv-approval-user-summary td{padding:8px 10px!important;background:#f6f9fb!important;border-top:1px solid #dfe8ef!important;border-bottom:1px solid #dfe8ef!important}
+  .dv-approval-user-toggle{width:100%;display:flex;align-items:center;gap:9px;flex-wrap:wrap;text-align:left;background:transparent;border:0;color:#405a6f}
+  .dv-approval-user-caret{width:18px;color:#71889a;font-size:11px;font-weight:800}
+  .dv-approval-user-avatar{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:#e8f2f8;color:#35789a;flex:none}
+  .dv-approval-user-main{min-width:150px;display:flex;flex-direction:column;gap:1px;margin-right:auto}
+  .dv-approval-user-main strong{font-size:10px;color:#173647;font-weight:800}
+  .dv-approval-user-main small{font-size:8px;color:#8a9aa8;font-weight:500}
+  .dv-approval-chip{display:inline-flex;align-items:center;gap:5px;padding:4px 7px;border-radius:999px;font-size:8px;font-weight:800;white-space:nowrap;border:1px solid transparent}
+  .dv-chip-upload{background:#edf5ff;color:#2d6f9f;border-color:#d9eaf8}
+  .dv-chip-move{background:#edf8f3;color:#397c66;border-color:#d4ece2}
+  .dv-chip-delete{background:#fff0f0;color:#a55757;border-color:#f3d8d8}
+  .dv-approval-user-pending{font-size:8px;font-weight:800;color:#9a681e;background:#fff6e6;border:1px solid #f2dfb6;border-radius:999px;padding:4px 7px;white-space:nowrap}
+  tr.dv-user-collapsed{display:none!important}
+  @media(max-width:760px){.dv-approval-user-main{min-width:120px}.dv-approval-chip{font-size:7px}}
 </style>
 
 </head>
@@ -5766,10 +5785,14 @@ window.addEventListener('DOMContentLoaded',()=>{
 
   async function queryRequests(){
     try{
-      let q=supabaseClient.from('solicitudes_operacion').select('*').order('fecha_solicitud',{ascending:false}).limit(500);
-      if(!isAdmin() && myUid())q=q.eq('solicitante_id',myUid());
-      const {data,error}=await q;if(error)throw error;dvOpsRequestCache=Array.isArray(data)?data:[];
-    }catch(err){console.warn('[DATAVAULT OPERACIONES] solicitudes_operacion no disponible:',err);dvOpsRequestCache=[];}
+      const res=await fetch(`${API_URL}/operations/requests`,{headers:await authHeaders(false)});
+      const body=await res.json().catch(()=>({}));
+      if(!res.ok)throw new Error(body?.detail||`Error HTTP ${res.status}`);
+      dvOpsRequestCache=Array.isArray(body?.solicitudes)?body.solicitudes:[];
+    }catch(err){
+      console.warn('[DATAVAULT OPERACIONES] solicitudes_operacion no disponible:',err);
+      dvOpsRequestCache=[];
+    }
   }
 
   function uploadUnitMine(u){const r=u.type==='folder'?u.rows[0]:u.row;return rowMine(r);}
@@ -5827,34 +5850,131 @@ window.addEventListener('DOMContentLoaded',()=>{
     </tr>`;
   }
 
+  const dvApprovalExpandedUsers=window.__dvApprovalExpandedUsers instanceof Set
+    ? window.__dvApprovalExpandedUsers
+    : new Set();
+  window.__dvApprovalExpandedUsers=dvApprovalExpandedUsers;
+
+  function dvApprovalUserDomId(key){
+    return 'dv-approval-user-'+String(key||'sin-usuario').replace(/[^a-zA-Z0-9_-]/g,'_');
+  }
+
+  window.toggleDvApprovalUser=function(key){
+    const id=dvApprovalUserDomId(key);
+    const open=dvApprovalExpandedUsers.has(String(key));
+    if(open)dvApprovalExpandedUsers.delete(String(key));
+    else dvApprovalExpandedUsers.add(String(key));
+    document.querySelectorAll(`[data-dv-user-group="${id}"]`).forEach(row=>row.classList.toggle('dv-user-collapsed',open));
+    const caret=document.getElementById(id+'-caret');if(caret)caret.textContent=open?'▶':'▼';
+  };
+
+  function dvRequestCategory(row){
+    if(row.kind==='UPLOAD')return 'SUBIDA';
+    return String(row.opType||'').toUpperCase()==='MOVER'?'MOVER':'ELIMINAR';
+  }
+
+  function dvApprovalUserSummary(key,userRows){
+    const first=userRows[0]||{};
+    const name=first.user||'Usuario';
+    const email=first.email||'';
+    const pending=userRows.filter(r=>r.state==='PENDIENTE'||(r.kind==='UPLOAD'&&r.type==='Carga de carpeta'&&r.pendingChildren>0)).length;
+    const uploads=userRows.filter(r=>dvRequestCategory(r)==='SUBIDA').length;
+    const moves=userRows.filter(r=>dvRequestCategory(r)==='MOVER').length;
+    const deletes=userRows.filter(r=>dvRequestCategory(r)==='ELIMINAR').length;
+    const id=dvApprovalUserDomId(key);
+    const expanded=dvApprovalExpandedUsers.has(String(key));
+    return `<tr class="dv-approval-user-summary"><td colspan="8">
+      <button type="button" class="dv-approval-user-toggle" onclick="toggleDvApprovalUser('${escapeHtml(String(key))}')">
+        <span class="dv-approval-user-caret" id="${id}-caret">${expanded?'▼':'▶'}</span>
+        <span class="dv-approval-user-avatar"><i class="fa-solid fa-user"></i></span>
+        <span class="dv-approval-user-main"><strong>${escapeHtml(name)}</strong>${email?`<small>${escapeHtml(email)}</small>`:''}</span>
+        <span class="dv-approval-chip dv-chip-upload"><i class="fa-solid fa-upload"></i> ${uploads} subida${uploads===1?'':'s'}</span>
+        <span class="dv-approval-chip dv-chip-move"><i class="fa-solid fa-arrow-right-arrow-left"></i> ${moves} movimiento${moves===1?'':'s'}</span>
+        <span class="dv-approval-chip dv-chip-delete"><i class="fa-solid fa-trash"></i> ${deletes} eliminación${deletes===1?'':'es'}</span>
+        <span class="dv-approval-user-pending">${pending} pendiente${pending===1?'':'s'}</span>
+      </button>
+    </td></tr>`;
+  }
+
   function renderUnifiedRequests(){
     const tbody=document.getElementById('colaContainer');if(!tbody)return;
-    const q=norm(document.getElementById('solSearch')?.value||'');const stateFilter=String(document.getElementById('solStateFilter')?.value||'').toUpperCase();
+    const q=norm(document.getElementById('solSearch')?.value||'');
+    const stateFilter=String(document.getElementById('solStateFilter')?.value||'').toUpperCase();
     let uploads=dvOpsUploadUnits.filter(u=>isAdmin()||uploadUnitMine(u));
     let ops=dvOpsRequestCache.filter(r=>isAdmin()||requestMine(r));
 
     const rows=[];
-    uploads.forEach((u,i)=>{const isF=u.type==='folder',r=isF?u.rows[0]:u.row,state=groupState(isF?u.rows:[r]),name=isF?(dvRoot(r)||'Carpeta'):(r.nombre_archivo||'Archivo'),pendingChildren=isF?dvQueueFolderPendingCount(u.rows):state==='PENDIENTE'?1:0;rows.push({kind:'UPLOAD',unit:u,id:isF?u.id:r.id,type:isF?'Carga de carpeta':'Carga de archivo',origin:name,dest:r.ubicacion_drive||'DRIVE PROYECTO',user:r.solicitante_nombre||r.usuario_solicitante||'—',date:u.date,state,pendingChildren,action:isAdmin()&&state==='PENDIENTE'?'Resolver en Telegram':'—'});});
-    ops.forEach(r=>rows.push({kind:'OP',id:r.id,type:opLabel(r),origin:r.nombre_objeto||r.carpeta_origen||'—',dest:r.tipo_operacion==='MOVER'?(r.carpeta_destino_nombre||'—'):'Papelera',user:r.solicitante_nombre||'—',date:r.fecha_solicitud,state:String(r.estado||'PENDIENTE').toUpperCase(),pendingChildren:0,action:isAdmin()&&String(r.estado).toUpperCase()==='PENDIENTE'?'Resolver en Telegram':'—'}));
+    uploads.forEach((u,i)=>{
+      const isF=u.type==='folder',r=isF?u.rows[0]:u.row,state=groupState(isF?u.rows:[r]);
+      const name=isF?(dvRoot(r)||'Carpeta'):(r.nombre_archivo||'Archivo');
+      const pendingChildren=isF?dvQueueFolderPendingCount(u.rows):state==='PENDIENTE'?1:0;
+      rows.push({
+        kind:'UPLOAD',unit:u,id:isF?u.id:r.id,
+        type:isF?'Subida de carpeta':'Subida de archivo',
+        origin:name,dest:r.ubicacion_drive||r.carpeta_destino_nombre||'DRIVE PROYECTO',
+        user:r.solicitante_nombre||r.usuario_solicitante||'—',
+        email:r.solicitante_correo||'',userId:r.solicitante_id||'',
+        date:u.date,state,pendingChildren,
+        action:isAdmin()&&state==='PENDIENTE'?'Resolver en Telegram':'—'
+      });
+    });
+    ops.forEach(r=>rows.push({
+      kind:'OP',id:r.id,opType:String(r.tipo_operacion||'').toUpperCase(),
+      type:String(r.tipo_operacion||'').toUpperCase()==='MOVER'?'Movimiento':'Eliminación',
+      origin:r.nombre_objeto||r.carpeta_origen||'—',
+      dest:String(r.tipo_operacion||'').toUpperCase()==='MOVER'?(r.carpeta_destino_nombre||'—'):'Papelera',
+      user:r.solicitante_nombre||'—',email:r.solicitante_correo||'',userId:r.solicitante_id||'',
+      date:r.fecha_solicitud,state:String(r.estado||'PENDIENTE').toUpperCase(),pendingChildren:0,
+      action:isAdmin()&&String(r.estado||'').toUpperCase()==='PENDIENTE'?'Resolver en Telegram':'—'
+    }));
+
     rows.sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
     const filtered=rows.filter(r=>{
-      const matchesQ=!q||norm([r.id,r.type,r.origin,r.dest,r.user].join(' ')).includes(q);
-      const matchesState=!stateFilter||(r.state===stateFilter)||(r.kind==='UPLOAD'&&r.type==='Carga de carpeta'&&stateFilter==='PENDIENTE'&&r.pendingChildren>0);
+      const matchesQ=!q||norm([r.id,r.type,r.origin,r.dest,r.user,r.email].join(' ')).includes(q);
+      const matchesState=!stateFilter||(r.state===stateFilter)||(r.kind==='UPLOAD'&&r.type==='Subida de carpeta'&&stateFilter==='PENDIENTE'&&r.pendingChildren>0);
       return matchesQ&&matchesState;
     });
-    tbody.innerHTML=filtered.length?filtered.map(r=>{
-      if(r.kind==='UPLOAD'&&r.type==='Carga de carpeta')return dvQueueFolderRow(r.unit.rows,r.id);
-      const cancelBtn=isAdmin()&&r.kind==='UPLOAD'&&r.state==='PENDIENTE'
+
+    const renderDetailRow=(r,groupId='')=>{
+      const groupAttrs=groupId?` data-dv-user-group="${groupId}" class="${dvApprovalExpandedUsers.has(groupId.replace('dv-approval-user-',''))?'':'dv-user-collapsed'}"`:'';
+      const actionHtml=isAdmin()&&r.kind==='UPLOAD'&&r.state==='PENDIENTE'
         ? custodyDecisionButtons(r.id,'ARCHIVO')
         : (r.action==='—'?'—':`<span class="text-[9px] text-blue-600 font-semibold"><i class="fa-brands fa-telegram mr-1"></i>${r.action}</span>`);
-      return `<tr><td>#${escapeHtml(String(r.id||'').slice(-8))}</td><td>${escapeHtml(r.type)}</td><td>${escapeHtml(r.origin)}</td><td>${escapeHtml(r.dest)}</td><td>${escapeHtml(r.user)}</td><td>${formatShortDate(r.date)}</td><td>${statusPill(r.state)}</td><td>${cancelBtn}</td></tr>`;
-    }).join(''):'<tr><td colspan="8" class="p-8 text-center text-slate-400">No se encontraron solicitudes.</td></tr>';
-    const pending=rows.filter(r=>r.state==='PENDIENTE'||(r.kind==='UPLOAD'&&r.type==='Carga de carpeta'&&r.pendingChildren>0)).length;
-    const sum=document.getElementById('solSummary');if(sum)sum.textContent=`${rows.length} solicitud(es) · ${pending} pendiente(s)`;
+      return `<tr${groupAttrs}><td>#${escapeHtml(String(r.id||'').slice(-8))}</td><td>${escapeHtml(r.type)}</td><td>${escapeHtml(r.origin)}</td><td>${escapeHtml(r.dest)}</td><td>${escapeHtml(r.user)}</td><td>${formatShortDate(r.date)}</td><td>${statusPill(r.state)}</td><td>${actionHtml}</td></tr>`;
+    };
+
+    if(isAdmin()){
+      const groups=new Map();
+      filtered.forEach(r=>{
+        const key=String(r.userId||norm(r.email)||norm(r.user)||'sin-usuario');
+        if(!groups.has(key))groups.set(key,[]);
+        groups.get(key).push(r);
+      });
+      const html=[];
+      for(const [key,userRows] of groups.entries()){
+        html.push(dvApprovalUserSummary(key,userRows));
+        const groupId=dvApprovalUserDomId(key);
+        const expanded=dvApprovalExpandedUsers.has(String(key));
+        userRows.forEach(r=>{
+          const actionHtml=r.kind==='UPLOAD'&&r.state==='PENDIENTE'
+            ? (r.type==='Subida de carpeta'
+                ? custodyDecisionButtons(r.id,'CARPETA',{folder:true})
+                : custodyDecisionButtons(r.id,'ARCHIVO'))
+            : (r.action==='—'?'—':`<span class="text-[9px] text-blue-600 font-semibold"><i class="fa-brands fa-telegram mr-1"></i>${r.action}</span>`);
+          html.push(`<tr data-dv-user-group="${groupId}" class="${expanded?'':'dv-user-collapsed'}"><td>#${escapeHtml(String(r.id||'').slice(-8))}</td><td>${escapeHtml(r.type)}</td><td>${escapeHtml(r.origin)}</td><td>${escapeHtml(r.dest)}</td><td>${escapeHtml(r.user)}</td><td>${formatShortDate(r.date)}</td><td>${statusPill(r.state)}</td><td>${actionHtml}</td></tr>`);
+        });
+      }
+      tbody.innerHTML=html.length?html.join(''):'<tr><td colspan="8" class="p-8 text-center text-slate-400">No se encontraron solicitudes.</td></tr>';
+    }else{
+      tbody.innerHTML=filtered.length?filtered.map(r=>renderDetailRow(r)).join(''):'<tr><td colspan="8" class="p-8 text-center text-slate-400">No se encontraron solicitudes.</td></tr>';
+    }
+
+    const pending=rows.filter(r=>r.state==='PENDIENTE'||(r.kind==='UPLOAD'&&r.type==='Subida de carpeta'&&r.pendingChildren>0)).length;
+    const sum=document.getElementById('solSummary');
+    if(sum)sum.textContent=isAdmin()?`${new Set(rows.map(r=>String(r.userId||norm(r.email)||norm(r.user)||'sin-usuario'))).size} usuario(s) · ${rows.length} solicitud(es) · ${pending} pendiente(s)`:`${rows.length} solicitud(es) · ${pending} pendiente(s)`;
     const mini=document.getElementById('solPendingMini');if(mini)mini.textContent=pending;
     updateKpis({pendientes:pending});
 
-    // Corrige también la tarjeta Pendientes del subordinado después de loadRoleHome().
     if(!isAdmin()){
       const cards=[...document.querySelectorAll('#view-inicio .grid.grid-cols-2.xl\\:grid-cols-4 .dashboard-card')];
       const pendingCard=cards.find(c=>/Pendientes/i.test(c.querySelector('.metric-label')?.textContent||''));
@@ -6359,28 +6479,22 @@ window.addEventListener('DOMContentLoaded',()=>{
       .order('fecha_solicitud', {ascending:false})
       .limit(2000);
 
-    let opsReq = supabaseClient
-      .from('solicitudes_operacion')
-      .select('*')
-      .order('fecha_solicitud', {ascending:false})
-      .limit(1000);
+    const opsReq = (async()=>{
+      try{
+        const res=await fetch(`${API_URL}/operations/requests`,{headers:await authHeaders(false)});
+        const body=await res.json().catch(()=>({}));
+        if(!res.ok)throw new Error(body?.detail||`Error HTTP ${res.status}`);
+        return Array.isArray(body?.solicitudes)?body.solicitudes:[];
+      }catch(err){
+        console.warn('[DASHBOARD operaciones]',err);
+        return [];
+      }
+    })();
 
-    if(!isAdmin() && currentUser?.id){
-      opsReq = opsReq.eq('solicitante_id', currentUser.id);
-    }
-
-    const [
-      {data:auditData, error:auditError},
-      {data:opsData, error:opsError}
-    ] = await Promise.all([auditReq, opsReq]);
+    const [auditResult, opsData] = await Promise.all([auditReq, opsReq]);
+    const {data:auditData, error:auditError}=auditResult;
 
     if(auditError) throw auditError;
-
-    // Si todavía no existe la tabla de operaciones, el dashboard principal
-    // sigue funcionando con auditoria_custodia.
-    if(opsError){
-      console.warn('[DASHBOARD operaciones]', opsError);
-    }
 
     let audit = Array.isArray(auditData) ? auditData : [];
     let ops = Array.isArray(opsData) ? opsData : [];
