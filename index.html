@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -5681,6 +5680,92 @@ window.addEventListener('DOMContentLoaded',()=>{
     }catch(err){alert('No se pudo solicitar la eliminación: '+(err.message||err));}
   };
 
+  window.resolvePendingOperation=async function(id,decision,buttonEl=null){
+    if(!isAdmin())return;
+    const aprobar=String(decision||'').toUpperCase()==='APROBAR';
+    const row=(dvOpsRequestCache||[]).find(r=>String(r?.id||'')===String(id||''));
+    const tipo=String(row?.tipo_operacion||'OPERACIÓN').toUpperCase();
+    const nombre=row?.nombre_objeto||'este elemento';
+    const esMover=tipo==='MOVER';
+
+    const confirmado=await dvShowDecisionModal({
+      mode:aprobar?'approve':'reject',
+      title:aprobar
+        ? (esMover?'Aprobar movimiento':'Aprobar eliminación')
+        : (esMover?'Rechazar movimiento':'Rechazar eliminación'),
+      subtitle:`${tipo==='MOVER'?'Movimiento':'Eliminación'} solicitado por ${row?.solicitante_nombre||'el usuario'}`,
+      message:`¿${aprobar?'Aprobar':'Rechazar'} la solicitud sobre ${nombre}?`,
+      detail:aprobar
+        ? (esMover
+            ? `Google Drive moverá el elemento a ${row?.carpeta_destino_nombre||'la carpeta seleccionada'}.`
+            : 'El elemento se enviará a la papelera de Google Drive.')
+        : 'La solicitud quedará rechazada y Google Drive no será modificado.',
+      confirmText:aprobar?'Sí, aprobar':'Sí, rechazar',
+      cancelText:'Cancelar'
+    });
+
+    if(!confirmado)return;
+
+    const originalHtml=buttonEl?.innerHTML;
+    try{
+      if(buttonEl){
+        buttonEl.disabled=true;
+        buttonEl.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Procesando...';
+      }
+
+      const res=await fetch(`${API_URL}/operations/decision`,{
+        method:'POST',
+        headers:await authHeaders(),
+        body:JSON.stringify({
+          solicitud_id:id,
+          decision:aprobar?'APROBAR':'RECHAZAR'
+        })
+      });
+      const data=await res.json().catch(()=>({}));
+      if(!res.ok)throw new Error(typeof data.detail==='string'?data.detail:`Error HTTP ${res.status}`);
+
+      await loadCola();
+      if(typeof loadRoleHome==='function')await loadRoleHome();
+      if(typeof loadFilesView==='function' && document.getElementById('view-gestor')?.classList.contains('active'))await loadFilesView();
+      if(typeof loadAudit==='function')await loadAudit();
+
+      const finalState=String(data?.estado||'').toUpperCase();
+      await dvShowMessageModal({
+        type:finalState==='RECHAZADO'?'success':'success',
+        title:data?.status==='already_processed'
+          ? 'Solicitud ya procesada'
+          : (aprobar?'Solicitud aprobada':'Solicitud rechazada'),
+        message:data?.status==='already_processed'
+          ? `La solicitud ya tenía estado ${finalState||'resuelto'}.`
+          : (aprobar
+              ? (esMover?'El movimiento fue aprobado y ejecutado en Google Drive.':'La eliminación fue aprobada y el elemento fue enviado a la papelera de Google Drive.')
+              : 'La solicitud fue rechazada. Google Drive no fue modificado.'),
+        buttonText:'Entendido'
+      });
+    }catch(err){
+      await dvShowMessageModal({
+        type:'error',
+        title:aprobar?'No se pudo aprobar':'No se pudo rechazar',
+        message:String(err?.message||err||'Ocurrió un error inesperado.'),
+        buttonText:'Cerrar'
+      });
+    }finally{
+      if(buttonEl && document.body.contains(buttonEl)){
+        buttonEl.disabled=false;
+        if(originalHtml!=null)buttonEl.innerHTML=originalHtml;
+      }
+    }
+  };
+
+  function operationDecisionButtons(id){
+    if(!isAdmin()||!id)return '—';
+    const safeId=escapeHtml(String(id));
+    return `<div class="flex flex-wrap items-center gap-1.5">
+      <button type="button" class="secondary-btn approve-outline !px-2 !py-1 !text-[9px]" onclick="resolvePendingOperation('${safeId}','APROBAR',this)"><i class="fa-solid fa-check"></i> Aprobar</button>
+      <button type="button" class="secondary-btn danger-outline !px-2 !py-1 !text-[9px]" onclick="resolvePendingOperation('${safeId}','RECHAZAR',this)"><i class="fa-solid fa-xmark"></i> Rechazar</button>
+    </div>`;
+  }
+
   function requestMine(r){return !myUid() || String(r?.solicitante_id||'')===myUid();}
   function opLabel(r){return String(r.tipo_operacion||'').toUpperCase()==='MOVER'?'Mover':'Eliminar';}
 
@@ -5925,7 +6010,7 @@ window.addEventListener('DOMContentLoaded',()=>{
       dest:String(r.tipo_operacion||'').toUpperCase()==='MOVER'?(r.carpeta_destino_nombre||'—'):'Papelera',
       user:r.solicitante_nombre||'—',email:r.solicitante_correo||'',userId:r.solicitante_id||'',
       date:r.fecha_solicitud,state:String(r.estado||'PENDIENTE').toUpperCase(),pendingChildren:0,
-      action:isAdmin()&&String(r.estado||'').toUpperCase()==='PENDIENTE'?'Resolver en Telegram':'—'
+      action:isAdmin()&&String(r.estado||'').toUpperCase()==='PENDIENTE'?'WEB_DECISION':'—'
     }));
 
     rows.sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
@@ -5938,8 +6023,12 @@ window.addEventListener('DOMContentLoaded',()=>{
     const renderDetailRow=(r,groupId='')=>{
       const groupAttrs=groupId?` data-dv-user-group="${groupId}" class="${dvApprovalExpandedUsers.has(groupId.replace('dv-approval-user-',''))?'':'dv-user-collapsed'}"`:'';
       const actionHtml=isAdmin()&&r.kind==='UPLOAD'&&r.state==='PENDIENTE'
-        ? custodyDecisionButtons(r.id,'ARCHIVO')
-        : (r.action==='—'?'—':`<span class="text-[9px] text-blue-600 font-semibold"><i class="fa-brands fa-telegram mr-1"></i>${r.action}</span>`);
+        ? (r.type==='Subida de carpeta'
+            ? custodyDecisionButtons(r.id,'CARPETA',{folder:true})
+            : custodyDecisionButtons(r.id,'ARCHIVO'))
+        : (isAdmin()&&r.kind==='OP'&&r.state==='PENDIENTE'
+            ? operationDecisionButtons(r.id)
+            : '—');
       return `<tr${groupAttrs}><td>#${escapeHtml(String(r.id||'').slice(-8))}</td><td>${escapeHtml(r.type)}</td><td>${escapeHtml(r.origin)}</td><td>${escapeHtml(r.dest)}</td><td>${escapeHtml(r.user)}</td><td>${formatShortDate(r.date)}</td><td>${statusPill(r.state)}</td><td>${actionHtml}</td></tr>`;
     };
 
@@ -5960,7 +6049,9 @@ window.addEventListener('DOMContentLoaded',()=>{
             ? (r.type==='Subida de carpeta'
                 ? custodyDecisionButtons(r.id,'CARPETA',{folder:true})
                 : custodyDecisionButtons(r.id,'ARCHIVO'))
-            : (r.action==='—'?'—':`<span class="text-[9px] text-blue-600 font-semibold"><i class="fa-brands fa-telegram mr-1"></i>${r.action}</span>`);
+            : (r.kind==='OP'&&r.state==='PENDIENTE'
+                ? operationDecisionButtons(r.id)
+                : '—');
           html.push(`<tr data-dv-user-group="${groupId}" class="${expanded?'':'dv-user-collapsed'}"><td>#${escapeHtml(String(r.id||'').slice(-8))}</td><td>${escapeHtml(r.type)}</td><td>${escapeHtml(r.origin)}</td><td>${escapeHtml(r.dest)}</td><td>${escapeHtml(r.user)}</td><td>${formatShortDate(r.date)}</td><td>${statusPill(r.state)}</td><td>${actionHtml}</td></tr>`);
         });
       }
