@@ -1,3 +1,4 @@
+
 import hashlib
 import io
 import mimetypes
@@ -6345,6 +6346,68 @@ async def solicitar_operacion(
     }
 
 
+@app.post("/operations/decision")
+async def decidir_operacion_desde_web(request: Request):
+    """Aprueba o rechaza MOVER/ELIMINAR desde la cuenta web del administrador.
+
+    Telegram sigue siendo una segunda vía de resolución. La función central
+    procesar_solicitud_operacion evita que una misma solicitud se ejecute dos veces.
+    """
+
+    usuario = obtener_usuario_supabase_desde_request(request)
+
+    if usuario.get("rol") != "jefe":
+        raise HTTPException(
+            status_code=403,
+            detail="Solo el administrador puede aprobar o rechazar operaciones."
+        )
+
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail="El cuerpo de la solicitud no es JSON válido."
+        )
+
+    solicitud_raw = str(payload.get("solicitud_id") or "").strip()
+    decision = str(payload.get("decision") or "").upper().strip()
+
+    try:
+        solicitud_id = str(UUID(solicitud_raw))
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(status_code=400, detail="solicitud_id inválido.")
+
+    if decision not in ("APROBAR", "RECHAZAR"):
+        raise HTTPException(status_code=400, detail="decision inválida.")
+
+    try:
+        solicitud, cambio = procesar_solicitud_operacion(
+            solicitud_id,
+            decision == "APROBAR",
+            f"WEB:{usuario.get('id')}",
+        )
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error))
+    except HTTPException:
+        raise
+    except Exception as error:
+        print("[OPERATIONS WEB DECISION ERROR]", error)
+        raise HTTPException(
+            status_code=500,
+            detail=f"No se pudo procesar la operación: {error}"
+        )
+
+    estado = str(solicitud.get("estado") or "").upper()
+
+    return {
+        "status": "ok" if cambio else "already_processed",
+        "cambio": bool(cambio),
+        "estado": estado,
+        "solicitud": solicitud,
+    }
+
+
 @app.get("/operations/requests")
 def listar_solicitudes_operacion_web(request: Request):
     """Lista solicitudes de mover/eliminar respetando el rol autenticado.
@@ -8009,28 +8072,9 @@ async def recibir_respuesta_telegram(
                 },
             )
 
-            if chat_id and message_id:
-                texto_original = str(message.get("text") or "").strip()
-                if "¿Autorizar operación?" in texto_original:
-                    texto_procesando = texto_original.replace(
-                        "¿Autorizar operación?",
-                        "⏳ Procesando operación..."
-                    )
-                else:
-                    texto_procesando = (
-                        texto_original
-                        + "\n\n⏳ Procesando operación..."
-                    ).strip()
-
-                telegram_request(
-                    "editMessageText",
-                    {
-                        "chat_id": chat_id,
-                        "message_id": message_id,
-                        "text": texto_procesando,
-                    },
-                )
-
+            # No editamos el mensaje aquí. Esa segunda llamada a Telegram
+            # hacía esperar innecesariamente al webhook. answerCallbackQuery
+            # corta el spinner y el procesamiento pesado continúa en background.
             background_tasks.add_task(
                 procesar_operacion_telegram_background,
                 solicitud_id,
