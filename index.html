@@ -2226,9 +2226,18 @@ body {
       <div class="explorer-foot"><span><i class="fa-solid fa-shield-halved"></i> Custodia DLP activa</span></div>
     </div>
     <div class="file-content-panel">
-      <div class="file-content-head"><div><span class="breadcrumb">Corporativo <i class="fa-solid fa-chevron-right"></i> <b id="currentFolderLabel">Todos los archivos</b></span><h3 id="filePanelTitle">Mis archivos</h3></div><select id="fileFolderFilter" class="hidden"><option value="">Todas las carpetas</option></select><div class="flex flex-wrap gap-2"><button onclick="document.getElementById('fileInput').click()" class="primary-btn"><i class="fa-solid fa-file-arrow-up"></i>Seleccionar archivos</button><button type="button" onclick="event.stopPropagation();document.getElementById('folderInput').click()" class="secondary-btn"><i class="fa-solid fa-folder-open"></i>Seleccionar carpeta</button></div></div>
+      <div class="file-content-head"><div><span class="breadcrumb">Corporativo <i class="fa-solid fa-chevron-right"></i> <b id="currentFolderLabel">Todos los archivos</b></span><h3 id="filePanelTitle">Mis archivos</h3></div><select id="fileFolderFilter" class="hidden"><option value="">Todas las carpetas</option></select><div id="dvFileOperationBar" class="dv-file-operation-bar"><button type="button" class="primary-btn" onclick="dvActivateFileOperation('SUBIR')"><i class="fa-solid fa-file-arrow-up"></i>Subir</button><button type="button" class="secondary-btn" onclick="dvActivateFileOperation('MOVER')"><i class="fa-solid fa-arrows-turn-right"></i>Mover</button><button type="button" class="secondary-btn dv-delete-operation" onclick="dvActivateFileOperation('ELIMINAR')"><i class="fa-solid fa-trash"></i>Eliminar</button></div></div>
       <div id="dropZone" class="upload-zone compact-upload"><i class="fa-solid fa-arrow-up-from-bracket"></i><div><b>Arrastra archivos aquí</b><span>o selecciona archivos / una carpeta completa para enviarlos a custodia</span></div><div class="flex flex-wrap gap-2 justify-center"><button type="button" class="secondary-btn" onclick="event.stopPropagation();document.getElementById('fileInput').click()"><i class="fa-solid fa-file"></i>Seleccionar archivos</button><button type="button" class="secondary-btn" onclick="event.stopPropagation();document.getElementById('folderInput').click()"><i class="fa-solid fa-folder-open"></i>Seleccionar carpeta</button></div><input type="file" id="fileInput" class="hidden" multiple onclick="event.stopPropagation()" onchange="handleFilesSelected(this.files,false)"><input type="file" id="folderInput" class="hidden" webkitdirectory directory multiple onclick="event.stopPropagation()" onchange="handleFilesSelected(this.files,true)"></div>
       <div id="selectedFilesList" class="mt-3 hidden rounded-lg border border-slate-200 bg-slate-50 p-3"></div>
+      <div id="dvUploadDestinationPanel" class="mt-3 hidden dv-upload-destination-panel">
+        <div class="dv-upload-destination-head">
+          <div><b><i class="fa-solid fa-folder-tree mr-2"></i>Destino en Google Drive</b><span>Elige dónde quedará el archivo o la carpeta cuando el custodio apruebe la subida.</span></div>
+          <div class="flex items-center gap-2"><button type="button" class="icon-btn" title="Actualizar carpetas de Drive" onclick="dvEnsureUploadDestinationFolders(true)"><i class="fa-solid fa-rotate"></i></button><span class="dv-upload-required">Obligatorio</span></div>
+        </div>
+        <div class="dv-folder-search"><i class="fa-solid fa-magnifying-glass"></i><input id="dvUploadDestinationSearch" class="input-modern w-full" placeholder="Buscar carpeta o subcarpeta..." autocomplete="off" oninput="dvFilterUploadDestinations()"></div>
+        <div id="dvUploadDestinationList" class="dv-folder-tree mt-2"><div class="p-4 text-center text-xs text-slate-400"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Cargando carpetas...</div></div>
+        <div id="dvUploadDestinationSelection" class="dv-move-selection mt-2">Selecciona una carpeta. Para dejar archivos sueltos, selecciona explícitamente <b>DRIVE PROYECTO</b>.</div>
+      </div>
       <div id="batchActionBar" class="mt-3 hidden flex flex-wrap items-center gap-2"><button onclick="submitUploadBatch()" id="uploadBatchBtn" class="primary-btn" disabled><i class="fa-solid fa-paper-plane"></i>Enviar lote</button><button onclick="clearSelectedBatch()" id="clearSelectionBtn" class="secondary-btn"><i class="fa-solid fa-trash-can"></i>Limpiar</button><button onclick="cancelUploadBatch()" id="cancelUploadBtn" class="secondary-btn hidden" style="color:#dc2626;border-color:#fecaca"><i class="fa-solid fa-ban"></i>Cancelar carga</button><span id="batchSelectionMeta" class="text-[10px] text-slate-500 ml-auto"></span></div>
       <div id="uploadStatus" class="mt-3 text-sm font-semibold hidden"></div>
       <div class="file-table-wrap"><table class="data-table"><thead><tr><th>Nombre</th><th>Carpeta</th><th>Integridad</th><th>Estado</th><th>Modificado</th></tr></thead><tbody id="filesTableBody"><tr><td colspan="5" class="p-8 text-center text-slate-400">Cargando archivos...</td></tr></tbody></table></div>
@@ -2249,7 +2258,7 @@ body {
     <div><span class="module-kicker">Gestión de operaciones</span><h2>Operaciones de archivo</h2><p>Sube, mueve o solicita la eliminación de archivos corporativos. Todas las acciones se procesan por lote y respetan las reglas de aprobación.</p></div>
     <div class="flex items-center gap-2"><span class="live-badge"><i class="fa-solid fa-shield-halved"></i>Custodia DLP activa</span></div>
   </div>
-    <div class="dashboard-card overflow-hidden operations-card"><div class="section-head"><div><h3>Operaciones de archivo</h3><p>Las acciones se procesan por lote y respetan las reglas de aprobación.</p></div></div><div class="p-4"><div class="flex gap-5 border-b border-slate-200"><button onclick="showTab('subir')" data-tab="subir" class="tab-btn active">Subir archivo</button><button type="button" data-tab="mover" class="tab-btn opacity-40 cursor-not-allowed" disabled title="Backend aún no implementado">Mover · Próximamente</button><button type="button" data-tab="eliminar" class="tab-btn opacity-40 cursor-not-allowed" disabled title="Backend aún no implementado">Eliminar · Próximamente</button></div>
+    <div class="dashboard-card overflow-hidden operations-card"><div class="section-head"><div><h3>Operaciones de archivo</h3><p>Las acciones se procesan por lote y respetan las reglas de aprobación.</p></div></div><div class="p-4"><div class="flex gap-5 border-b border-slate-200"><button type="button" onclick="showView('gestor');setTimeout(()=>dvActivateFileOperation('SUBIR'),0)" data-tab="subir" class="tab-btn active">Subir</button><button type="button" onclick="showView('gestor');setTimeout(()=>dvActivateFileOperation('MOVER'),0)" data-tab="mover" class="tab-btn">Mover</button><button type="button" onclick="showView('gestor');setTimeout(()=>dvActivateFileOperation('ELIMINAR'),0)" data-tab="eliminar" class="tab-btn">Eliminar</button></div>
   <div id="tab-subir" class="tab-content space-y-4 pt-5"><div class="info-strip"><i class="fa-solid fa-folder-open"></i><span>La carga actual se realiza desde el Explorador de archivos para conservar <b>lote_id</b>, <b>ruta_relativa</b>, subcarpetas y aprobación agrupada en Telegram.</span><strong><button type="button" onclick="showView('gestor')" class="text-blue-700 font-bold">Abrir explorador →</button></strong></div></div>
   <div id="tab-mover" class="tab-content hidden space-y-4 pt-5"><div class="flex flex-wrap gap-4"><div><label class="field-label">Carpeta origen</label><select id="moverOrigen" onchange="cargarArchivosCarpeta('mover')" class="input-modern w-56"></select></div><div><label class="field-label">Carpeta destino</label><select id="moverDestino" class="input-modern w-56"></select></div></div><div id="moverFilesList" class="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-80 overflow-y-auto"><p class="p-4 text-center text-slate-400 text-sm">Selecciona una carpeta origen.</p></div><button onclick="submitMoveBatch()" id="moverBatchBtn" class="primary-btn" disabled>Solicitar movimiento</button><div id="moverStatus" class="mt-3 text-sm font-semibold hidden"></div></div>
   <div id="tab-eliminar" class="tab-content hidden space-y-4 pt-5"><label class="field-label">Carpeta origen</label><select id="eliminarOrigen" onchange="cargarArchivosCarpeta('eliminar')" class="input-modern w-56"></select><div id="eliminarFilesList" class="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-80 overflow-y-auto"><p class="p-4 text-center text-slate-400 text-sm">Selecciona una carpeta origen.</p></div><button onclick="submitDeleteBatch()" id="eliminarBatchBtn" class="danger-btn" disabled><i class="fa-solid fa-trash"></i>Solicitar eliminación</button><p class="text-xs text-slate-400">Toda eliminación requiere aprobación explícita del jefe / custodio.</p><div id="eliminarStatus" class="mt-3 text-sm font-semibold hidden"></div></div></div></div>
@@ -3894,9 +3903,105 @@ let dvSelectedFolderName = '';
 let dvUploadController = null;
 let dvUploadInProgress = false;
 let dvExplorerFolder = '';
+let dvUploadDestinationFolders = [];
+let dvUploadDestinationSelectedId = '';
+let dvUploadDestinationSelectedPath = '';
+let dvUploadDestinationLoading = false;
 
 function dvEntryKey(entry){
   return [entry.relativePath, entry.file.size, entry.file.lastModified].join('|');
+}
+
+function dvResetUploadDestination(){
+  dvUploadDestinationSelectedId='';
+  dvUploadDestinationSelectedPath='';
+  const search=document.getElementById('dvUploadDestinationSearch');
+  if(search)search.value='';
+  const selection=document.getElementById('dvUploadDestinationSelection');
+  if(selection)selection.innerHTML='Selecciona una carpeta. Para dejar archivos sueltos, selecciona explícitamente <b>DRIVE PROYECTO</b>.';
+  dvRenderUploadDestinationFolders();
+  dvRefreshUploadButtonState();
+}
+
+function dvRefreshUploadButtonState(){
+  const btn=document.getElementById('uploadBatchBtn');
+  if(btn)btn.disabled=!!dvUploadInProgress || !dvSelectedEntries.length || !dvUploadDestinationSelectedId;
+}
+
+async function dvUploadAuthHeaders(){
+  const {data,error}=await supabaseClient.auth.getSession();
+  if(error)throw error;
+  const token=data?.session?.access_token;
+  if(!token)throw new Error('Tu sesión expiró. Inicia sesión nuevamente.');
+  return {Authorization:`Bearer ${token}`};
+}
+
+async function dvEnsureUploadDestinationFolders(force=false){
+  const panel=document.getElementById('dvUploadDestinationPanel');
+  if(!dvSelectedEntries.length){if(panel)panel.classList.add('hidden');return;}
+  if(panel)panel.classList.remove('hidden');
+  if(dvUploadDestinationFolders.length && !force){dvRenderUploadDestinationFolders();return;}
+  if(dvUploadDestinationLoading)return;
+  dvUploadDestinationLoading=true;
+  const list=document.getElementById('dvUploadDestinationList');
+  if(list)list.innerHTML='<div class="p-4 text-center text-xs text-slate-400"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Cargando carpetas de Google Drive...</div>';
+  try{
+    const res=await fetch(`${API_URL}/drive-folders`,{headers:await dvUploadAuthHeaders()});
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok)throw new Error(typeof data.detail==='string'?data.detail:`Error HTTP ${res.status}`);
+    dvUploadDestinationFolders=(Array.isArray(data.folders)?data.folders:[]).slice().sort((a,b)=>{
+      if(Boolean(a?.root)!==Boolean(b?.root))return a?.root?-1:1;
+      return String(a?.path||a?.name||'').localeCompare(String(b?.path||b?.name||''),'es',{numeric:true,sensitivity:'base'});
+    });
+    dvRenderUploadDestinationFolders();
+  }catch(err){
+    if(list)list.innerHTML=`<div class="p-4 text-center text-xs text-red-500"><i class="fa-solid fa-circle-exclamation mr-2"></i>${escapeHtml(err?.message||'No se pudieron cargar las carpetas.')}</div>`;
+  }finally{dvUploadDestinationLoading=false;}
+}
+
+function dvRenderUploadDestinationFolders(){
+  const list=document.getElementById('dvUploadDestinationList');
+  if(!list)return;
+  if(!dvUploadDestinationFolders.length){
+    if(!dvUploadDestinationLoading)list.innerHTML='<div class="p-4 text-center text-xs text-slate-400">Selecciona archivos para cargar los destinos disponibles.</div>';
+    return;
+  }
+  const q=String(document.getElementById('dvUploadDestinationSearch')?.value||'').trim().toLowerCase();
+  const folders=dvUploadDestinationFolders.filter(f=>!q||String(`${f?.name||''} ${f?.path||''}`).toLowerCase().includes(q));
+  if(!folders.length){list.innerHTML='<div class="p-4 text-center text-xs text-slate-400"><i class="fa-solid fa-folder-open mr-2"></i>No se encontraron carpetas.</div>';return;}
+  list.innerHTML=folders.map(f=>{
+    const id=String(f?.id||'');
+    const selected=id===String(dvUploadDestinationSelectedId||'');
+    const depth=Math.min(Number(f?.depth||0),8);
+    const root=!!f?.root || Number(f?.depth||0)===0;
+    const path=String(f?.path||f?.name||'Carpeta');
+    const note=root
+      ? (dvSelectionMode==='folder'?'La carpeta seleccionada se creará aquí':'Raíz: los archivos quedarán sueltos aquí')
+      : path;
+    return `<button type="button" class="dv-folder-option${selected?' selected':''}" data-dv-upload-folder-id="${escapeHtml(id)}" style="padding-left:${9+(depth*15)}px" title="${escapeHtml(path)}">
+      <i class="fa-solid ${root?'fa-hard-drive':'fa-folder'} text-amber-500"></i>
+      <span class="folder-main"><span class="folder-name">${escapeHtml(f?.name||'Carpeta')}</span><span class="folder-path">${escapeHtml(note)}</span></span>
+      ${selected?'<span class="folder-note"><i class="fa-solid fa-check"></i> Seleccionada</span>':''}
+    </button>`;
+  }).join('');
+  list.querySelectorAll('[data-dv-upload-folder-id]').forEach(btn=>btn.addEventListener('click',()=>dvSelectUploadDestination(btn.dataset.dvUploadFolderId)));
+}
+
+function dvFilterUploadDestinations(){dvRenderUploadDestinationFolders();}
+
+function dvSelectUploadDestination(folderId){
+  const folder=(dvUploadDestinationFolders||[]).find(f=>String(f?.id||'')===String(folderId||''));
+  if(!folder)return;
+  dvUploadDestinationSelectedId=String(folder.id||'');
+  dvUploadDestinationSelectedPath=String(folder.path||folder.name||'DRIVE PROYECTO');
+  dvRenderUploadDestinationFolders();
+  const selection=document.getElementById('dvUploadDestinationSelection');
+  if(selection){
+    const root=!!folder.root || Number(folder.depth||0)===0;
+    const extra=root && dvSelectionMode!=='folder'?' · los archivos quedarán sueltos en la raíz':'';
+    selection.innerHTML=`Destino seleccionado:<br><strong><i class="fa-solid fa-folder mr-1 text-amber-500"></i>${escapeHtml(dvUploadDestinationSelectedPath)}</strong>${escapeHtml(extra)}`;
+  }
+  dvRefreshUploadButtonState();
 }
 
 // Selector real de carpeta para navegadores Chromium (Chrome/Brave/Edge).
@@ -3924,7 +4029,10 @@ async function seleccionarCarpetaReal(){
 handleFilesSelected = function(fileList, fromFolder=false){
   if(dvUploadInProgress || !fileList || !fileList.length) return;
   const mode = fromFolder ? 'folder' : 'files';
-  if(dvSelectionMode && dvSelectionMode !== mode) dvSelectedEntries = [];
+  const hadEntries=dvSelectedEntries.length>0;
+  const changedMode=!!dvSelectionMode && dvSelectionMode !== mode;
+  if(changedMode) dvSelectedEntries = [];
+  if(!hadEntries || changedMode || fromFolder) dvResetUploadDestination();
   dvSelectionMode = mode;
   if(fromFolder){
     dvSelectedEntries = [];
@@ -3942,19 +4050,21 @@ handleFilesSelected = function(fileList, fromFolder=false){
   const fi=document.getElementById('fileInput'); if(fi) fi.value='';
   const fo=document.getElementById('folderInput'); if(fo) fo.value='';
   renderSelectedFiles();
+  dvEnsureUploadDestinationFolders();
 };
 
 removeSelectedFile = function(index){
   if(dvUploadInProgress) return;
   if(index<0 || index>=dvSelectedEntries.length) return;
   dvSelectedEntries.splice(index,1);
-  if(!dvSelectedEntries.length){dvSelectionMode=null;dvSelectedFolderName='';}
+  if(!dvSelectedEntries.length){dvSelectionMode=null;dvSelectedFolderName='';dvResetUploadDestination();}
   renderSelectedFiles();
 };
 
 function clearSelectedBatch(){
   if(dvUploadInProgress) return;
   dvSelectedEntries=[]; dvSelectionMode=null; dvSelectedFolderName='';
+  dvResetUploadDestination();
   const fi=document.getElementById('fileInput'); if(fi) fi.value='';
   const fo=document.getElementById('folderInput'); if(fo) fo.value='';
   const status=document.getElementById('uploadStatus'); if(status){status.classList.add('hidden');status.innerHTML='';}
@@ -3963,8 +4073,9 @@ function clearSelectedBatch(){
 
 function dvSetUploading(flag){
   dvUploadInProgress=flag;
-  ['uploadBatchBtn','clearSelectionBtn'].forEach(id=>{const el=document.getElementById(id);if(el){el.disabled=flag;el.classList.toggle('opacity-50',flag)}});
+  const clear=document.getElementById('clearSelectionBtn');if(clear){clear.disabled=flag;clear.classList.toggle('opacity-50',flag)}
   const c=document.getElementById('cancelUploadBtn'); if(c)c.classList.toggle('hidden',!flag);
+  dvRefreshUploadButtonState();
 }
 
 function cancelUploadBatch(){
@@ -3985,6 +4096,7 @@ renderSelectedFiles = function(){
   if(!dvSelectedEntries.length){
     box.classList.add('hidden');
     if(bar)bar.classList.add('hidden');
+    document.getElementById('dvUploadDestinationPanel')?.classList.add('hidden');
     box.innerHTML='';
     if(btn)btn.disabled=true;
     if(meta)meta.textContent='';
@@ -3994,7 +4106,8 @@ renderSelectedFiles = function(){
   const total=dvSelectedEntries.reduce((s,e)=>s+e.file.size,0);
   box.classList.remove('hidden');
   if(bar)bar.classList.remove('hidden');
-  if(btn)btn.disabled=false;
+  document.getElementById('dvUploadDestinationPanel')?.classList.remove('hidden');
+  dvRefreshUploadButtonState();
 
   if(dvSelectionMode==='folder'){
     // Mostrar el contenido completo de la carpeta ANTES de subirlo.
@@ -4037,13 +4150,22 @@ renderSelectedFiles = function(){
   }
 
   if(meta){
-    meta.textContent=`${formatBytes(total)} · ${dvSelectedEntries.length} archivo(s) ${dvSelectionMode==='folder'?'de carpeta':'sueltos'}`;
+    const destino=dvUploadDestinationSelectedPath?` · Destino: ${dvUploadDestinationSelectedPath}`:' · Selecciona destino';
+    meta.textContent=`${formatBytes(total)} · ${dvSelectedEntries.length} archivo(s) ${dvSelectionMode==='folder'?'de carpeta':'sueltos'}${destino}`;
   }
+  dvRenderUploadDestinationFolders();
+  dvRefreshUploadButtonState();
 };
 
 submitUploadBatch = async function(){
   if(!dvSelectedEntries.length || dvUploadInProgress) return;
   const status=document.getElementById('uploadStatus');
+  if(!dvUploadDestinationSelectedId){
+    status.classList.remove('hidden');status.className='mt-3 text-sm font-semibold text-amber-600';
+    status.innerHTML='<i class="fa-solid fa-folder-circle-exclamation mr-2"></i>Selecciona primero una carpeta destino en Google Drive.';
+    document.getElementById('dvUploadDestinationPanel')?.scrollIntoView({behavior:'smooth',block:'center'});
+    return;
+  }
   status.classList.remove('hidden'); status.className='mt-3 text-sm font-semibold text-amber-600';
   status.innerHTML=`<i class="fa-solid fa-spinner fa-spin mr-2"></i>Procesando ${dvSelectedEntries.length} archivo(s) en RAM...`;
   dvSetUploading(true); dvUploadController=new AbortController();
@@ -4055,20 +4177,21 @@ submitUploadBatch = async function(){
     const fd=new FormData();
     dvSelectedEntries.forEach(e=>{fd.append('files',e.file,e.file.name);fd.append('relative_paths',e.relativePath);});
     fd.append('carpeta','PLANOS');
+    fd.append('carpeta_destino_id',dvUploadDestinationSelectedId);
     const res=await fetch(`${API_URL}/upload-batch`,{method:'POST',headers:{Authorization:`Bearer ${token}`},body:fd,signal:dvUploadController.signal});
     let data={}; try{data=await res.json();}catch(_){ }
     if(!res.ok){let msg=`Error HTTP ${res.status}`;if(typeof data.detail==='string')msg=data.detail;else if(data.detail&&typeof data.detail==='object')msg=data.detail.mensaje||msg;throw new Error(msg);}
     const n=data.total_registrados??dvSelectedEntries.length;
     status.className=(data.total_errores||0)>0?'mt-3 text-sm font-semibold text-amber-600':'mt-3 text-sm font-semibold text-emerald-600';
-    status.innerHTML=`<i class="fa-solid fa-circle-check mr-2"></i>${dvSelectionMode==='folder'?'Carpeta':'Lote'} registrado: ${n} archivo(s). ID de lote: ${escapeHtml(data.lote_id||'')}`;
-    dvSelectedEntries=[];dvSelectionMode=null;dvSelectedFolderName='';renderSelectedFiles();
+    status.innerHTML=`<i class="fa-solid fa-circle-check mr-2"></i>${dvSelectionMode==='folder'?'Carpeta':'Lote'} registrado: ${n} archivo(s). Destino solicitado: ${escapeHtml(data?.destino_drive?.path||dvUploadDestinationSelectedPath||'Google Drive')}.`;
+    dvSelectedEntries=[];dvSelectionMode=null;dvSelectedFolderName='';dvResetUploadDestination();renderSelectedFiles();
     await loadAudit(); await loadFilesView(); await loadCola();
   }catch(err){
     if(err?.name==='AbortError') return;
     console.error('UPLOAD BATCH ACTUAL ERROR',err);
     status.className='mt-3 text-sm font-semibold text-red-600';status.innerHTML='<i class="fa-solid fa-circle-xmark mr-2"></i>Error: '+escapeHtml(err?.message||'Error desconocido');
   }finally{
-    dvUploadController=null; dvSetUploading(false); if(dvSelectedEntries.length)document.getElementById('uploadBatchBtn').disabled=false;
+    dvUploadController=null; dvSetUploading(false); dvRefreshUploadButtonState();
   }
 };
 
@@ -4199,8 +4322,8 @@ updateDashboardVisuals = function(){
 };
 
 window.addEventListener('DOMContentLoaded',()=>{
-  // El backend actual no expone todavía mover/eliminar por HTTP.
-  document.querySelectorAll('[data-tab="mover"],[data-tab="eliminar"]').forEach(b=>{b.disabled=true;b.title='Pendiente de implementación en backend';});
+  // Las operaciones Subir / Mover / Eliminar se ejecutan directamente
+  // desde la sección Archivos usando el backend actual.
   renderSelectedFiles();
 });
 </script>
@@ -4297,7 +4420,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     // El admin supervisa: no necesita controles de carga en su explorador.
     const drop=document.getElementById('dropZone');
     if(drop) drop.classList.toggle('role-hidden',admin);
-    ['batchActionBar','selectedFilesList'].forEach(id=>{const e=document.getElementById(id);if(e && admin)e.classList.add('role-hidden');else if(e)e.classList.remove('role-hidden');});
+    ['batchActionBar','selectedFilesList','dvUploadDestinationPanel','dvFileOperationBar'].forEach(id=>{const e=document.getElementById(id);if(e && admin)e.classList.add('role-hidden');else if(e)e.classList.remove('role-hidden');});
     document.querySelectorAll('#view-gestor .file-content-head button').forEach(btn=>{
       const click=btn.getAttribute('onclick')||'';
       if(/fileInput|folderInput|seleccionarCarpeta/i.test(click)) btn.classList.toggle('role-hidden',admin);
@@ -5129,6 +5252,25 @@ window.addEventListener('DOMContentLoaded',()=>{
 
 
 <style id="datavault-operations-v1-css">
+.dv-file-operation-bar{display:flex;align-items:center;gap:7px;flex-wrap:wrap;justify-content:flex-end}
+.dv-file-operation-bar .dv-delete-operation{color:#b42318;border-color:#fecaca;background:#fff7f7}
+.dv-file-operation-bar .dv-delete-operation:hover{background:#feecec}
+.dv-upload-destination-panel{margin-left:16px;margin-right:16px;border:1px solid #dbe4ea;background:#fbfdfe;border-radius:11px;padding:12px}
+.dv-upload-destination-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px}
+.dv-upload-destination-head b{display:block;font-size:11px;color:#294252}
+.dv-upload-destination-head span:not(.dv-upload-required){display:block;font-size:9px;color:#83939c;margin-top:3px;line-height:1.4}
+.dv-upload-required{font-size:8px;font-weight:800;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;border-radius:999px;padding:4px 7px;white-space:nowrap}
+.dv-source-list{border:1px solid #dbe4ea;border-radius:10px;max-height:330px;overflow:auto;background:#fbfdfe;padding:5px}
+.dv-source-option{width:100%;border:0;background:transparent;border-radius:8px;padding:10px;display:flex;align-items:center;gap:10px;text-align:left;cursor:pointer}
+.dv-source-option:hover{background:#eef4f7}
+.dv-source-option:disabled{opacity:.5;cursor:not-allowed;background:#f8fafc}
+.dv-source-option .source-icon{width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:8px;background:#fff;border:1px solid #e2e8f0;flex:none}
+.dv-source-option .source-main{min-width:0;flex:1}
+.dv-source-option .source-name{display:block;font-size:10px;font-weight:800;color:#334e5f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dv-source-option .source-meta{display:block;font-size:8px;color:#94a3b8;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dv-source-option .source-note{font-size:8px;font-weight:800;color:#a16207;white-space:nowrap}
+#dvSourceOperationModal{position:fixed;inset:0;z-index:9998;background:rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center;padding:18px}
+#dvSourceOperationModal.dv-hidden{display:none!important}
 .dv-op-actions{display:flex;gap:6px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
 .dv-op-btn{border:1px solid #d8e1e6;background:#fff;color:#385264;border-radius:7px;padding:6px 9px;font-size:9px;font-weight:700;white-space:nowrap;cursor:pointer}
 .dv-op-btn:hover{background:#f4f8fa;border-color:#b8c8d1}
@@ -5172,6 +5314,8 @@ window.addEventListener('DOMContentLoaded',()=>{
   let dvCurrentMove=null;
   let dvMoveFolders=[];
   let dvMoveSelectedId='';
+  let dvSourceOperationType='';
+  let dvSourceOperationUnits=[];
 
   const norm=v=>String(v??'').trim().toLowerCase();
   const isAdmin=()=>['jefe','admin','administrador'].includes(norm(currentRole));
@@ -5253,6 +5397,100 @@ window.addEventListener('DOMContentLoaded',()=>{
         : String(r?.auditoria_id||'')===target;
     })||null;
   }
+
+  function ensureSourceOperationModal(){
+    if(document.getElementById('dvSourceOperationModal'))return;
+    const modal=document.createElement('div');
+    modal.id='dvSourceOperationModal';modal.className='dv-hidden';
+    modal.innerHTML=`<div class="dv-op-modal-card">
+      <div class="dv-op-modal-head"><div><p class="text-[10px] uppercase tracking-widest text-slate-400 font-bold" id="dvSourceOperationKicker">Operación de archivo</p><h3 class="text-lg font-extrabold text-slate-800 mt-1" id="dvSourceOperationTitle">Seleccionar elemento</h3><p class="text-xs text-slate-500 mt-1" id="dvSourceOperationHelp">Selecciona un archivo o carpeta aprobada que ya exista en Google Drive.</p></div><button type="button" class="icon-btn" onclick="dvCloseSourceOperationModal()"><i class="fa-solid fa-xmark"></i></button></div>
+      <div class="dv-op-modal-body space-y-4">
+        <div><label class="field-label">Buscar archivo o carpeta</label><div class="dv-folder-search"><i class="fa-solid fa-magnifying-glass"></i><input id="dvSourceOperationSearch" class="input-modern w-full" placeholder="Buscar por nombre o ubicación..." autocomplete="off" oninput="dvFilterSourceOperations()"></div></div>
+        <div id="dvSourceOperationList" class="dv-source-list"><div class="p-4 text-center text-xs text-slate-400">Cargando elementos...</div></div>
+        <div class="text-[9px] text-slate-400"><i class="fa-solid fa-shield-halved mr-1"></i>Solo se muestran elementos aprobados y vinculados a Google Drive. La operación se ejecutará únicamente después de la aprobación del custodio.</div>
+      </div>
+    </div>`;
+    modal.addEventListener('click',e=>{if(e.target===modal)dvCloseSourceOperationModal();});
+    document.body.appendChild(modal);
+  }
+
+  window.dvCloseSourceOperationModal=function(){
+    document.getElementById('dvSourceOperationModal')?.classList.add('dv-hidden');
+    dvSourceOperationType='';dvSourceOperationUnits=[];
+  };
+
+  function dvBuildSourceOperationUnits(){
+    const all=(auditCache||[]).filter(rowMine);
+    return dvGroupedUnits(all).map(u=>{
+      if(u.type==='folder'){
+        const rows=u.rows||[];const r=rows[0]||{};
+        const approved=rows.length>0&&rows.every(x=>String(x?.estado||'').toUpperCase()==='APROBADO')&&!rows.some(deleted);
+        const linked=!!String(r?.drive_folder_id||'').trim();
+        return {kind:'CARPETA',id:String(u.id||''),name:dvRoot(r)||'Carpeta',location:r?.ubicacion_drive||'DRIVE PROYECTO',count:rows.length,approved,linked,pending:pendingOperation('CARPETA',u.id)};
+      }
+      const r=u.row||{};
+      const approved=String(r?.estado||'').toUpperCase()==='APROBADO'&&!deleted(r);
+      const linked=!!String(r?.drive_file_id||'').trim();
+      return {kind:'ARCHIVO',id:String(r?.id||''),name:r?.nombre_archivo||'Archivo',location:r?.ubicacion_drive||'DRIVE PROYECTO',count:1,approved,linked,pending:pendingOperation('ARCHIVO',r?.id)};
+    }).filter(u=>u.approved&&u.linked);
+  }
+
+  function dvRenderSourceOperationUnits(){
+    const list=document.getElementById('dvSourceOperationList');if(!list)return;
+    const q=norm(document.getElementById('dvSourceOperationSearch')?.value||'');
+    const units=(dvSourceOperationUnits||[]).map((u,index)=>({u,index})).filter(item=>!q||norm(`${item.u.name} ${item.u.location}`).includes(q));
+    if(!units.length){list.innerHTML='<div class="p-5 text-center text-xs text-slate-400"><i class="fa-solid fa-box-open mr-2"></i>No hay archivos o carpetas aprobadas disponibles.</div>';return;}
+    list.innerHTML=units.map(item=>{
+      const u=item.u;const i=item.index;
+      const blocked=!!u.pending;
+      const pendingText=blocked?(String(u.pending?.tipo_operacion||'').toUpperCase()==='MOVER'?'Movimiento pendiente':'Eliminación pendiente'):'';
+      return `<button type="button" class="dv-source-option" data-dv-source-index="${i}" ${blocked?'disabled':''}>
+        <span class="source-icon"><i class="fa-solid ${u.kind==='CARPETA'?'fa-folder text-amber-500':dvIconFor(u.name)+' text-blue-400'}"></i></span>
+        <span class="source-main"><span class="source-name">${escapeHtml(u.name)}</span><span class="source-meta">${escapeHtml(u.location)}${u.kind==='CARPETA'?` · ${u.count} archivo(s)`:''}</span></span>
+        ${blocked?`<span class="source-note"><i class="fa-solid fa-clock mr-1"></i>${escapeHtml(pendingText)}</span>`:`<i class="fa-solid fa-chevron-right text-slate-300"></i>`}
+      </button>`;
+    }).join('');
+    list.querySelectorAll('[data-dv-source-index]:not(:disabled)').forEach(btn=>btn.addEventListener('click',()=>dvChooseSourceOperation(Number(btn.dataset.dvSourceIndex))));
+  }
+
+  window.dvFilterSourceOperations=function(){dvRenderSourceOperationUnits();};
+
+  window.dvChooseSourceOperation=async function(index){
+    const u=dvSourceOperationUnits[index];if(!u||u.pending)return;
+    const op=dvSourceOperationType;
+    dvCloseSourceOperationModal();
+    if(op==='MOVER')return dvRequestMove(u.kind,u.id);
+    if(op==='ELIMINAR')return dvRequestDelete(u.kind,u.id);
+  };
+
+  window.dvOpenSourceOperation=async function(type){
+    if(isAdmin())return;
+    const op=String(type||'').toUpperCase();
+    if(!['MOVER','ELIMINAR'].includes(op))return;
+    try{
+      if(typeof loadFilesView==='function')await loadFilesView();
+      ensureSourceOperationModal();
+      dvSourceOperationType=op;
+      dvSourceOperationUnits=dvBuildSourceOperationUnits();
+      const modal=document.getElementById('dvSourceOperationModal');modal.classList.remove('dv-hidden');
+      const search=document.getElementById('dvSourceOperationSearch');if(search)search.value='';
+      document.getElementById('dvSourceOperationKicker').textContent=op==='MOVER'?'Solicitud de movimiento':'Solicitud de eliminación';
+      document.getElementById('dvSourceOperationTitle').textContent=op==='MOVER'?'¿Qué quieres mover?':'¿Qué quieres eliminar?';
+      document.getElementById('dvSourceOperationHelp').textContent=op==='MOVER'?'Selecciona un archivo o carpeta aprobada; después elegirás la carpeta destino.':'Selecciona el archivo o carpeta aprobada que quieres enviar a la papelera de Google Drive.';
+      dvRenderSourceOperationUnits();
+    }catch(err){alert('No se pudieron cargar tus archivos: '+(err?.message||err));}
+  };
+
+  window.dvActivateFileOperation=function(type){
+    if(isAdmin())return;
+    const op=String(type||'').toUpperCase();
+    if(op==='SUBIR'){
+      const zone=document.getElementById('dropZone');
+      if(zone)zone.scrollIntoView({behavior:'smooth',block:'center'});
+      return;
+    }
+    return dvOpenSourceOperation(op);
+  };
 
   function operationButtons(kind, id, rowsOrRow){
     if(isAdmin()) return '<span class="dv-op-legacy">Supervisión</span>';
@@ -5570,7 +5808,7 @@ window.addEventListener('DOMContentLoaded',()=>{
       </td>
       <td>Carpeta / lote</td>
       <td>${escapeHtml(root)}</td>
-      <td>Google Drive</td>
+      <td>${escapeHtml(rows[0]?.ubicacion_drive||'DRIVE PROYECTO')}</td>
       <td>${escapeHtml(rows[0]?.solicitante_nombre||rows[0]?.usuario_solicitante||'—')}</td>
       <td>${formatShortDate(rows.map(r=>r?.fecha_solicitud||'').sort().reverse()[0])}</td>
       <td><span class="status-pill ${dvStatusClass(state)}">${escapeHtml(state)}</span></td>
@@ -5596,7 +5834,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     let ops=dvOpsRequestCache.filter(r=>isAdmin()||requestMine(r));
 
     const rows=[];
-    uploads.forEach((u,i)=>{const isF=u.type==='folder',r=isF?u.rows[0]:u.row,state=groupState(isF?u.rows:[r]),name=isF?(dvRoot(r)||'Carpeta'):(r.nombre_archivo||'Archivo'),pendingChildren=isF?dvQueueFolderPendingCount(u.rows):state==='PENDIENTE'?1:0;rows.push({kind:'UPLOAD',unit:u,id:isF?u.id:r.id,type:isF?'Carga de carpeta':'Carga de archivo',origin:name,dest:'Google Drive',user:r.solicitante_nombre||r.usuario_solicitante||'—',date:u.date,state,pendingChildren,action:isAdmin()&&state==='PENDIENTE'?'Resolver en Telegram':'—'});});
+    uploads.forEach((u,i)=>{const isF=u.type==='folder',r=isF?u.rows[0]:u.row,state=groupState(isF?u.rows:[r]),name=isF?(dvRoot(r)||'Carpeta'):(r.nombre_archivo||'Archivo'),pendingChildren=isF?dvQueueFolderPendingCount(u.rows):state==='PENDIENTE'?1:0;rows.push({kind:'UPLOAD',unit:u,id:isF?u.id:r.id,type:isF?'Carga de carpeta':'Carga de archivo',origin:name,dest:r.ubicacion_drive||'DRIVE PROYECTO',user:r.solicitante_nombre||r.usuario_solicitante||'—',date:u.date,state,pendingChildren,action:isAdmin()&&state==='PENDIENTE'?'Resolver en Telegram':'—'});});
     ops.forEach(r=>rows.push({kind:'OP',id:r.id,type:opLabel(r),origin:r.nombre_objeto||r.carpeta_origen||'—',dest:r.tipo_operacion==='MOVER'?(r.carpeta_destino_nombre||'—'):'Papelera',user:r.solicitante_nombre||'—',date:r.fecha_solicitud,state:String(r.estado||'PENDIENTE').toUpperCase(),pendingChildren:0,action:isAdmin()&&String(r.estado).toUpperCase()==='PENDIENTE'?'Resolver en Telegram':'—'}));
     rows.sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
     const filtered=rows.filter(r=>{
