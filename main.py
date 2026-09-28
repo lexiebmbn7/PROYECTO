@@ -497,6 +497,19 @@ supabase: Client = create_client(
 )
 
 
+# Cliente exclusivo del backend para operaciones administrativas.
+# Si la service role está disponible, permite gestionar solicitudes_operacion
+# aunque la tabla tenga RLS activado. Nunca se expone esta clave al navegador.
+supabase_admin: Client = (
+    create_client(
+        SUPABASE_URL,
+        SUPABASE_SERVICE_ROLE_KEY
+    )
+    if SUPABASE_SERVICE_ROLE_KEY
+    else supabase
+)
+
+
 # ============================================================
 # IDENTIDAD REAL DEL USUARIO DESDE SUPABASE AUTH
 # ============================================================
@@ -1093,11 +1106,16 @@ def procesar_solicitud_operacion(
     aprobar: bool,
     resuelto_por: str
 ):
+    """Procesa una solicitud MOVER/ELIMINAR.
+
+    El destino de un movimiento ya fue validado cuando el usuario creó la
+    solicitud. En la aprobación de Telegram reutilizamos ese ID guardado para
+    evitar recorrer otra vez todo el árbol de Google Drive.
+    """
 
     with DECISION_LOCK:
-
         respuesta = (
-            supabase
+            supabase_admin
             .table("solicitudes_operacion")
             .select("*")
             .eq("id", solicitud_id)
@@ -1106,135 +1124,90 @@ def procesar_solicitud_operacion(
         )
 
         if not respuesta.data:
-            raise RuntimeError(
-                "La solicitud no existe."
-            )
+            raise RuntimeError("La solicitud no existe.")
 
         solicitud = respuesta.data[0]
 
-        if str(
-            solicitud.get("estado") or ""
-        ).upper() != "PENDIENTE":
+        if str(solicitud.get("estado") or "").upper() != "PENDIENTE":
             return solicitud, False
 
         if not aprobar:
-
             actualizado = (
-                supabase
+                supabase_admin
                 .table("solicitudes_operacion")
                 .update({
                     "estado": "RECHAZADO",
                     "fecha_resolucion": ahora_iso(),
                     "resuelto_por": str(resuelto_por),
-                    "resultado": (
-                        "Operación rechazada por el custodio."
-                    ),
+                    "resultado": "Operación rechazada por el custodio.",
                 })
                 .eq("id", solicitud_id)
                 .eq("estado", "PENDIENTE")
                 .execute()
             )
-
-            return (
-                actualizado.data
-                or [solicitud]
-            )[0], True
+            return (actualizado.data or [solicitud])[0], True
 
         objeto = obtener_objeto_operable(
-            str(
-                solicitud.get("solicitante_id")
-                or ""
-            ),
+            str(solicitud.get("solicitante_id") or ""),
             solicitud.get("objeto_tipo"),
             auditoria_id=solicitud.get("auditoria_id"),
             lote_id=solicitud.get("lote_id"),
         )
 
-        tipo = str(
-            solicitud.get("tipo_operacion")
-            or ""
-        ).upper()
-
-        cambios = {
-            "fecha_ultima_operacion": ahora_iso()
-        }
+        tipo = str(solicitud.get("tipo_operacion") or "").upper()
+        cambios = {"fecha_ultima_operacion": ahora_iso()}
 
         if tipo == "ELIMINAR":
-
-            enviar_a_papelera_google_drive(
-                objeto["drive_id"]
-            )
-
+            enviar_a_papelera_google_drive(objeto["drive_id"])
             cambios.update({
                 "en_drive": False,
                 "estado_archivo": "ELIMINADO",
                 "fecha_eliminacion": ahora_iso(),
             })
-
-            resultado_texto = (
-                "Elemento enviado a la papelera de Google Drive."
-            )
+            resultado_texto = "Elemento enviado a la papelera de Google Drive."
 
         elif tipo == "MOVER":
+            destino_id = str(
+                solicitud.get("carpeta_destino_id") or ""
+            ).strip()
 
-            destino = validar_destino_drive(
-                solicitud.get("carpeta_destino_id")
-            )
+            if not destino_id:
+                raise RuntimeError("La solicitud no tiene carpeta de destino.")
 
-            if destino["id"] == objeto["drive_parent_id"]:
-                raise RuntimeError(
-                    "El elemento ya se encuentra en esa carpeta."
-                )
+            if destino_id == objeto["drive_parent_id"]:
+                raise RuntimeError("El elemento ya se encuentra en esa carpeta.")
 
-            if objeto["tipo"] == "CARPETA":
+            if objeto["tipo"] == "CARPETA" and destino_id == objeto["drive_id"]:
+                raise RuntimeError("Una carpeta no puede moverse dentro de sí misma.")
 
-                if destino["id"] == objeto["drive_id"]:
-                    raise RuntimeError(
-                        "Una carpeta no puede moverse dentro de sí misma."
-                    )
-
-                if objeto["drive_id"] in (
-                    destino.get("ancestors")
-                    or []
-                ):
-                    raise RuntimeError(
-                        "Una carpeta no puede moverse dentro "
-                        "de una de sus subcarpetas."
-                    )
-
+            # La validación de descendientes ya se realizó al crear la solicitud
+            # en /operations/request. Aquí evitamos repetir el recorrido recursivo
+            # de Drive para que la aprobación desde Telegram responda más rápido.
             mover_objeto_google_drive(
                 objeto["drive_id"],
-                destino["id"]
+                destino_id
             )
 
-            ubicacion_destino = (
-                destino.get("path")
-                or destino["name"]
-            )
+            ubicacion_destino = str(
+                solicitud.get("carpeta_destino_nombre")
+                or "DRIVE PROYECTO"
+            ).strip()
 
             cambios.update({
                 "en_drive": True,
                 "estado_archivo": "ACTIVO",
-                "drive_parent_id": destino["id"],
+                "drive_parent_id": destino_id,
                 "ubicacion_drive": ubicacion_destino,
             })
-
-            resultado_texto = (
-                f"Elemento movido a {ubicacion_destino}."
-            )
+            resultado_texto = f"Elemento movido a {ubicacion_destino}."
 
         else:
-            raise RuntimeError(
-                "Tipo de operación no soportado."
-            )
+            raise RuntimeError("Tipo de operación no soportado.")
 
-        actualizar_auditoria_operacion(
-            objeto,
-            cambios
-        )
+        actualizar_auditoria_operacion(objeto, cambios)
 
         actualizado = (
-            supabase
+            supabase_admin
             .table("solicitudes_operacion")
             .update({
                 "estado": "APROBADO",
@@ -1247,10 +1220,92 @@ def procesar_solicitud_operacion(
             .execute()
         )
 
-        return (
-            actualizado.data
-            or [solicitud]
-        )[0], True
+        return (actualizado.data or [solicitud])[0], True
+
+
+def procesar_operacion_telegram_background(
+    solicitud_id: str,
+    aprobar_operacion: bool,
+    user_id: str,
+    chat_id,
+    message_id
+):
+    """Completa MOVER/ELIMINAR fuera de la respuesta inmediata del webhook."""
+
+    try:
+        solicitud, cambio = procesar_solicitud_operacion(
+            solicitud_id,
+            aprobar_operacion,
+            str(user_id),
+        )
+
+        estado_final = str(
+            solicitud.get("estado") or ""
+        ).upper()
+
+        if not cambio:
+            texto = (
+                "🛡️ DataVault DLP - GM Ingenieros\n\n"
+                "⚠️ SOLICITUD YA PROCESADA\n\n"
+                f"Estado actual: {estado_final or 'DESCONOCIDO'}"
+            )
+            reply_markup = None
+        else:
+            tipo = solicitud.get("tipo_operacion") or "OPERACIÓN"
+            icono = "✅" if estado_final == "APROBADO" else "❌"
+            texto = (
+                "🛡️ DataVault DLP - GM Ingenieros\n\n"
+                f"{icono} {tipo}: {estado_final}\n\n"
+                f"👤 Usuario: {solicitud.get('solicitante_nombre') or 'Usuario'}\n"
+                f"📄 Objeto: {solicitud.get('nombre_objeto') or 'Archivo/Carpeta'}\n"
+                f"📌 Tipo: {solicitud.get('objeto_tipo') or '—'}\n"
+                f"📂 Origen: {solicitud.get('carpeta_origen') or 'DRIVE PROYECTO'}\n"
+            )
+
+            if solicitud.get("carpeta_destino_nombre"):
+                texto += (
+                    f"➡️ Destino: {solicitud.get('carpeta_destino_nombre')}\n"
+                )
+
+            if solicitud.get("resultado"):
+                texto += f"\n📝 {solicitud.get('resultado')}\n"
+
+            texto += f"\n👤 Procesado por Telegram ID: {user_id}"
+            reply_markup = None
+
+    except Exception as error:
+        print("[OPERACION BACKGROUND ERROR]", error)
+        texto = (
+            "🛡️ DataVault DLP - GM Ingenieros\n\n"
+            "❌ NO SE PUDO COMPLETAR LA OPERACIÓN\n\n"
+            f"Motivo: {str(error)[:800]}\n\n"
+            "La solicitud no se marcó como completada. "
+            "Puedes volver a intentarlo desde estos botones."
+        )
+        reply_markup = {
+            "inline_keyboard": [
+                [
+                    {
+                        "text": "✅ Aprobar",
+                        "callback_data": f"opap:{solicitud_id}",
+                    },
+                    {
+                        "text": "❌ Rechazar",
+                        "callback_data": f"opre:{solicitud_id}",
+                    },
+                ]
+            ]
+        }
+
+    if chat_id and message_id:
+        payload = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": texto,
+        }
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
+        telegram_request("editMessageText", payload)
 
 
 # ============================================================
@@ -6082,11 +6137,9 @@ async def solicitar_operacion(
 
     pendientes = (
 
-        supabase
+        supabase_admin
 
-        .table(
-            "solicitudes_operacion"
-        )
+        .table("solicitudes_operacion")
 
         .select(
             "id,tipo_operacion,objeto_tipo,"
@@ -6240,11 +6293,9 @@ async def solicitar_operacion(
 
     respuesta = (
 
-        supabase
+        supabase_admin
 
-        .table(
-            "solicitudes_operacion"
-        )
+        .table("solicitudes_operacion")
 
         .insert(
             registro
@@ -6291,6 +6342,43 @@ async def solicitar_operacion(
         "solicitud":
             solicitud,
 
+    }
+
+
+@app.get("/operations/requests")
+def listar_solicitudes_operacion_web(request: Request):
+    """Lista solicitudes de mover/eliminar respetando el rol autenticado.
+
+    El administrador ve todas; un subordinado únicamente sus propias
+    solicitudes. La consulta se hace en el backend para no depender de acceso
+    directo del navegador a solicitudes_operacion.
+    """
+
+    usuario = obtener_usuario_supabase_desde_request(request)
+
+    query = (
+        supabase_admin
+        .table("solicitudes_operacion")
+        .select("*")
+        .order("fecha_solicitud", desc=True)
+        .limit(1000)
+    )
+
+    if usuario.get("rol") != "jefe":
+        query = query.eq("solicitante_id", usuario["id"])
+
+    try:
+        respuesta = query.execute()
+    except Exception as error:
+        print("[OPERATIONS LIST ERROR]", error)
+        raise HTTPException(
+            status_code=500,
+            detail="No se pudieron consultar las solicitudes de operaciones."
+        )
+
+    return {
+        "status": "ok",
+        "solicitudes": respuesta.data or [],
     }
 
 
@@ -7288,7 +7376,8 @@ def reconciliar_drive(
 
 @app.post("/telegram-webhook")
 async def recibir_respuesta_telegram(
-    request: Request
+    request: Request,
+    background_tasks: BackgroundTasks
 ):
 
     data = await request.json()
@@ -7890,271 +7979,72 @@ async def recibir_respuesta_telegram(
         # ----------------------------------------------------
 
         if (
-            action_data.startswith(
-                "opap:"
-            )
-            or
-            action_data.startswith(
-                "opre:"
-            )
+            action_data.startswith("opap:")
+            or action_data.startswith("opre:")
         ):
-
-            prefijo, solicitud_raw = (
-                action_data.split(
-                    ":",
-                    1
-                )
-            )
-
+            prefijo, solicitud_raw = action_data.split(":", 1)
 
             try:
-
-                solicitud_id = str(
-                    UUID(
-                        solicitud_raw.strip()
-                    )
-                )
-
-
-            except (
-                ValueError,
-                TypeError,
-                AttributeError
-            ):
-
+                solicitud_id = str(UUID(solicitud_raw.strip()))
+            except (ValueError, TypeError, AttributeError):
                 telegram_request(
-
                     "answerCallbackQuery",
-
                     {
-                        "callback_query_id":
-                            callback_id,
-
-                        "text":
-                            "❌ ID de solicitud inválido.",
-
-                        "show_alert":
-                            True,
+                        "callback_query_id": callback_id,
+                        "text": "❌ ID de solicitud inválido.",
+                        "show_alert": True,
                     },
-
                 )
+                return {"status": "callback_error"}
 
+            aprobar_operacion = prefijo == "opap"
 
-                return {
-                    "status":
-                        "callback_error"
-                }
-
-
-            aprobar_operacion = (
-                prefijo
-                == "opap"
-            )
-
-
-            try:
-
-                solicitud, cambio = (
-                    procesar_solicitud_operacion(
-
-                        solicitud_id,
-
-                        aprobar_operacion,
-
-                        str(
-                            user_id
-                        ),
-
-                    )
-                )
-
-
-            except Exception as error:
-
-                print(
-                    "[OPERACION CALLBACK ERROR]",
-                    error
-                )
-
-
-                telegram_request(
-
-                    "answerCallbackQuery",
-
-                    {
-                        "callback_query_id":
-                            callback_id,
-
-                        "text":
-                            (
-                                "❌ No se pudo procesar: "
-                                f"{error}"
-                            )[:200],
-
-                        "show_alert":
-                            True,
-                    },
-
-                )
-
-
-                return {
-
-                    "status":
-                        "operation_callback_error",
-
-                    "error":
-                        str(error),
-
-                }
-
-
-            estado_final = str(
-                solicitud.get(
-                    "estado"
-                )
-                or ""
-            ).upper()
-
-
-            if not cambio:
-
-                telegram_request(
-
-                    "answerCallbackQuery",
-
-                    {
-                        "callback_query_id":
-                            callback_id,
-
-                        "text":
-                            (
-                                "⚠️ La solicitud ya fue procesada: "
-                                f"{estado_final}"
-                            ),
-
-                        "show_alert":
-                            True,
-                    },
-
-                )
-
-
-                return {
-                    "status":
-                        "operation_already_processed"
-                }
-
-
+            # Telegram recibe respuesta inmediata. El trabajo pesado con
+            # Google Drive y Supabase continúa como tarea de fondo.
             telegram_request(
-
                 "answerCallbackQuery",
-
                 {
-                    "callback_query_id":
-                        callback_id,
-
-                    "text":
-                        (
-                            "Operación actualizada a: "
-                            f"{estado_final}"
-                        ),
+                    "callback_query_id": callback_id,
+                    "text": "⏳ Procesando operación...",
                 },
-
             )
-
-
-            tipo = (
-                solicitud.get(
-                    "tipo_operacion"
-                )
-                or
-                "OPERACIÓN"
-            )
-
-
-            icono = (
-                "✅"
-                if estado_final
-                == "APROBADO"
-                else
-                "❌"
-            )
-
-
-            texto = (
-                "🛡️ DataVault DLP - GM Ingenieros\n\n"
-                f"{icono} {tipo}: {estado_final}\n\n"
-                f"👤 Usuario: "
-                f"{solicitud.get('solicitante_nombre') or 'Usuario'}\n"
-                f"📄 Objeto: "
-                f"{solicitud.get('nombre_objeto') or 'Archivo/Carpeta'}\n"
-                f"📌 Tipo: "
-                f"{solicitud.get('objeto_tipo') or '—'}\n"
-            )
-
-
-            if solicitud.get(
-                "carpeta_destino_nombre"
-            ):
-
-                texto += (
-                    f"➡️ Destino: "
-                    f"{solicitud.get('carpeta_destino_nombre')}\n"
-                )
-
-
-            if solicitud.get(
-                "resultado"
-            ):
-
-                texto += (
-                    f"\n📝 "
-                    f"{solicitud.get('resultado')}\n"
-                )
-
-
-            texto += (
-                f"\n👤 Procesado por "
-                f"Telegram ID: {user_id}"
-            )
-
 
             if chat_id and message_id:
+                texto_original = str(message.get("text") or "").strip()
+                if "¿Autorizar operación?" in texto_original:
+                    texto_procesando = texto_original.replace(
+                        "¿Autorizar operación?",
+                        "⏳ Procesando operación..."
+                    )
+                else:
+                    texto_procesando = (
+                        texto_original
+                        + "\n\n⏳ Procesando operación..."
+                    ).strip()
 
                 telegram_request(
-
                     "editMessageText",
-
                     {
-                        "chat_id":
-                            chat_id,
-
-                        "message_id":
-                            message_id,
-
-                        "text":
-                            texto,
+                        "chat_id": chat_id,
+                        "message_id": message_id,
+                        "text": texto_procesando,
                     },
-
                 )
 
+            background_tasks.add_task(
+                procesar_operacion_telegram_background,
+                solicitud_id,
+                aprobar_operacion,
+                str(user_id),
+                chat_id,
+                message_id,
+            )
 
             return {
-
-                "status":
-                    "operation_processed",
-
-                "estado":
-                    estado_final,
-
-                "solicitud_id":
-                    solicitud_id,
-
+                "status": "operation_processing",
+                "solicitud_id": solicitud_id,
             }
 
-
-        # ----------------------------------------------------
         # NAVEGACIÓN: DETALLE DE UNA CARPETA / LOTE
         # ----------------------------------------------------
 
