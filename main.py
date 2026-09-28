@@ -553,6 +553,7 @@ def obtener_usuario_supabase_desde_request(request: Request) -> dict:
         or metadata.get("role")
         or "subordinado"
     ).strip().lower()
+
     if rol in ("admin", "administrador"):
         rol = "jefe"
 
@@ -597,11 +598,14 @@ def listar_carpetas_drive_raiz():
     Se conserva porque otras funciones del proyecto la utilizan para operaciones
     sobre la raíz. Para el selector de movimiento se usa la versión recursiva.
     """
+
     service = obtener_servicio_google_drive()
+
     consulta = (
         f"'{GOOGLE_FOLDER_ID}' in parents and "
         "mimeType='application/vnd.google-apps.folder' and trashed=false"
     )
+
     respuesta = (
         service
         .files()
@@ -615,6 +619,7 @@ def listar_carpetas_drive_raiz():
         )
         .execute()
     )
+
     return respuesta.get("files") or []
 
 
@@ -625,13 +630,16 @@ def listar_carpetas_drive_recursivas():
     explorador buscable en la web y validar que una carpeta no se mueva dentro
     de sí misma o de una de sus subcarpetas.
     """
+
     service = obtener_servicio_google_drive()
+
     pendientes = [{
         "id": GOOGLE_FOLDER_ID,
         "path": "DRIVE PROYECTO",
         "depth": 0,
         "ancestors": [],
     }]
+
     visitados = {GOOGLE_FOLDER_ID}
     carpetas = []
 
@@ -644,6 +652,7 @@ def listar_carpetas_drive_recursivas():
                 f"'{padre['id']}' in parents and "
                 "mimeType='application/vnd.google-apps.folder' and trashed=false"
             )
+
             respuesta = (
                 service
                 .files()
@@ -661,13 +670,24 @@ def listar_carpetas_drive_recursivas():
 
             for carpeta in respuesta.get("files") or []:
                 carpeta_id = str(carpeta.get("id") or "").strip()
+
                 if not carpeta_id or carpeta_id in visitados:
                     continue
 
                 visitados.add(carpeta_id)
-                nombre = str(carpeta.get("name") or "Carpeta").strip() or "Carpeta"
+
+                nombre = (
+                    str(carpeta.get("name") or "Carpeta").strip()
+                    or "Carpeta"
+                )
+
                 path = f"{padre['path']} / {nombre}"
-                ancestors = [*padre["ancestors"], padre["id"]]
+
+                ancestors = [
+                    *padre["ancestors"],
+                    padre["id"]
+                ]
+
                 item = {
                     "id": carpeta_id,
                     "name": nombre,
@@ -676,14 +696,15 @@ def listar_carpetas_drive_recursivas():
                     "depth": int(padre["depth"]) + 1,
                     "ancestors": ancestors,
                 }
+
                 carpetas.append(item)
                 pendientes.append(item)
 
-                # Protección para no recorrer accidentalmente árboles enormes.
                 if len(carpetas) >= 2000:
                     return carpetas
 
             page_token = respuesta.get("nextPageToken")
+
             if not page_token:
                 break
 
@@ -691,7 +712,9 @@ def listar_carpetas_drive_recursivas():
 
 
 def validar_destino_drive(destino_id: str):
+
     destino_id = str(destino_id or "").strip()
+
     if not destino_id or destino_id == GOOGLE_FOLDER_ID:
         return {
             "id": GOOGLE_FOLDER_ID,
@@ -703,40 +726,73 @@ def validar_destino_drive(destino_id: str):
         }
 
     for carpeta in listar_carpetas_drive_recursivas():
+
         if str(carpeta.get("id")) == destino_id:
             return carpeta
 
     raise HTTPException(
         status_code=400,
-        detail="La carpeta destino no pertenece al directorio autorizado de DataVault.",
+        detail=(
+            "La carpeta destino no pertenece al "
+            "directorio autorizado de DataVault."
+        ),
     )
 
 
-def mover_objeto_google_drive(file_id: str, destino_id: str):
-    service = obtener_servicio_google_drive()
-    actual = obtener_archivo_drive(service, file_id)
-    if actual.get("trashed"):
-        raise RuntimeError("El elemento ya está en la papelera de Google Drive.")
+def mover_objeto_google_drive(
+    file_id: str,
+    destino_id: str
+):
 
-    padres = [str(x) for x in (actual.get("parents") or []) if x]
+    service = obtener_servicio_google_drive()
+
+    actual = obtener_archivo_drive(
+        service,
+        file_id
+    )
+
+    if actual.get("trashed"):
+        raise RuntimeError(
+            "El elemento ya está en la papelera de Google Drive."
+        )
+
+    padres = [
+        str(x)
+        for x in (actual.get("parents") or [])
+        if x
+    ]
+
     if destino_id in padres and len(padres) == 1:
         return actual
 
-    remove_parents = ",".join([p for p in padres if p != destino_id])
+    remove_parents = ",".join([
+        p
+        for p in padres
+        if p != destino_id
+    ])
+
     kwargs = {
         "fileId": file_id,
         "addParents": destino_id,
         "fields": "id,name,parents,trashed",
         "supportsAllDrives": True,
     }
+
     if remove_parents:
         kwargs["removeParents"] = remove_parents
 
-    return service.files().update(**kwargs).execute()
+    return (
+        service
+        .files()
+        .update(**kwargs)
+        .execute()
+    )
 
 
 def enviar_a_papelera_google_drive(file_id: str):
+
     service = obtener_servicio_google_drive()
+
     return (
         service
         .files()
@@ -750,12 +806,25 @@ def enviar_a_papelera_google_drive(file_id: str):
     )
 
 
-def obtener_objeto_operable(usuario_id: str, objeto_tipo: str, auditoria_id=None, lote_id=None):
-    objeto_tipo = str(objeto_tipo or "").upper().strip()
+def obtener_objeto_operable(
+    usuario_id: str,
+    objeto_tipo: str,
+    auditoria_id=None,
+    lote_id=None
+):
+
+    objeto_tipo = str(
+        objeto_tipo or ""
+    ).upper().strip()
 
     if objeto_tipo == "CARPETA":
+
         if not lote_id:
-            raise HTTPException(status_code=400, detail="Falta lote_id.")
+            raise HTTPException(
+                status_code=400,
+                detail="Falta lote_id."
+            )
+
         respuesta = (
             supabase
             .table("auditoria_custodia")
@@ -764,20 +833,53 @@ def obtener_objeto_operable(usuario_id: str, objeto_tipo: str, auditoria_id=None
             .eq("solicitante_id", usuario_id)
             .execute()
         )
+
         filas = respuesta.data or []
+
         if not filas:
-            raise HTTPException(status_code=404, detail="No se encontró la carpeta del usuario.")
-        if any(str(f.get("estado") or "").upper() != "APROBADO" for f in filas):
-            raise HTTPException(status_code=409, detail="Solo se pueden operar carpetas aprobadas.")
-        if any(str(f.get("estado_archivo") or "").upper().startswith("ELIMINADO") for f in filas):
-            raise HTTPException(status_code=409, detail="La carpeta ya fue eliminada.")
-        drive_id = str(filas[0].get("drive_folder_id") or "").strip()
+            raise HTTPException(
+                status_code=404,
+                detail="No se encontró la carpeta del usuario."
+            )
+
+        if any(
+            str(f.get("estado") or "").upper() != "APROBADO"
+            for f in filas
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Solo se pueden operar carpetas aprobadas."
+            )
+
+        if any(
+            str(f.get("estado_archivo") or "").upper().startswith("ELIMINADO")
+            for f in filas
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="La carpeta ya fue eliminada."
+            )
+
+        drive_id = str(
+            filas[0].get("drive_folder_id") or ""
+        ).strip()
+
         if not drive_id:
             raise HTTPException(
                 status_code=409,
-                detail="Esta carpeta es anterior al registro de IDs de Drive. Carga una carpeta nueva para operar sobre ella.",
+                detail=(
+                    "Esta carpeta es anterior al registro de IDs de Drive. "
+                    "Carga una carpeta nueva para operar sobre ella."
+                ),
             )
-        nombre = obtener_carpeta_desde_ruta(filas[0].get("ruta_relativa")) or "Carpeta"
+
+        nombre = (
+            obtener_carpeta_desde_ruta(
+                filas[0].get("ruta_relativa")
+            )
+            or "Carpeta"
+        )
+
         return {
             "tipo": "CARPETA",
             "drive_id": drive_id,
@@ -785,13 +887,24 @@ def obtener_objeto_operable(usuario_id: str, objeto_tipo: str, auditoria_id=None
             "filas": filas,
             "lote_id": str(lote_id),
             "auditoria_id": None,
-            "ubicacion": filas[0].get("ubicacion_drive") or "DRIVE PROYECTO",
-            "drive_parent_id": str(filas[0].get("drive_parent_id") or GOOGLE_FOLDER_ID),
+            "ubicacion": (
+                filas[0].get("ubicacion_drive")
+                or "DRIVE PROYECTO"
+            ),
+            "drive_parent_id": str(
+                filas[0].get("drive_parent_id")
+                or GOOGLE_FOLDER_ID
+            ),
         }
 
     if objeto_tipo == "ARCHIVO":
+
         if not auditoria_id:
-            raise HTTPException(status_code=400, detail="Falta auditoria_id.")
+            raise HTTPException(
+                status_code=400,
+                detail="Falta auditoria_id."
+            )
+
         respuesta = (
             supabase
             .table("auditoria_custodia")
@@ -801,49 +914,118 @@ def obtener_objeto_operable(usuario_id: str, objeto_tipo: str, auditoria_id=None
             .limit(1)
             .execute()
         )
+
         if not respuesta.data:
-            raise HTTPException(status_code=404, detail="No se encontró el archivo del usuario.")
+            raise HTTPException(
+                status_code=404,
+                detail="No se encontró el archivo del usuario."
+            )
+
         fila = respuesta.data[0]
-        if str(fila.get("estado") or "").upper() != "APROBADO":
-            raise HTTPException(status_code=409, detail="Solo se pueden operar archivos aprobados.")
-        if str(fila.get("estado_archivo") or "").upper().startswith("ELIMINADO"):
-            raise HTTPException(status_code=409, detail="El archivo ya fue eliminado.")
-        drive_id = str(fila.get("drive_file_id") or "").strip()
+
+        if str(
+            fila.get("estado") or ""
+        ).upper() != "APROBADO":
+            raise HTTPException(
+                status_code=409,
+                detail="Solo se pueden operar archivos aprobados."
+            )
+
+        if str(
+            fila.get("estado_archivo") or ""
+        ).upper().startswith("ELIMINADO"):
+            raise HTTPException(
+                status_code=409,
+                detail="El archivo ya fue eliminado."
+            )
+
+        drive_id = str(
+            fila.get("drive_file_id") or ""
+        ).strip()
+
         if not drive_id:
             raise HTTPException(
                 status_code=409,
-                detail="Este archivo es anterior al registro de IDs de Drive. Carga un archivo nuevo para operar sobre él.",
+                detail=(
+                    "Este archivo es anterior al registro de IDs de Drive. "
+                    "Carga un archivo nuevo para operar sobre él."
+                ),
             )
+
         return {
             "tipo": "ARCHIVO",
             "drive_id": drive_id,
-            "nombre": fila.get("nombre_archivo") or "Archivo",
+            "nombre": (
+                fila.get("nombre_archivo")
+                or "Archivo"
+            ),
             "filas": [fila],
             "lote_id": None,
             "auditoria_id": str(auditoria_id),
-            "ubicacion": fila.get("ubicacion_drive") or "DRIVE PROYECTO",
-            "drive_parent_id": str(fila.get("drive_parent_id") or GOOGLE_FOLDER_ID),
+            "ubicacion": (
+                fila.get("ubicacion_drive")
+                or "DRIVE PROYECTO"
+            ),
+            "drive_parent_id": str(
+                fila.get("drive_parent_id")
+                or GOOGLE_FOLDER_ID
+            ),
         }
 
-    raise HTTPException(status_code=400, detail="objeto_tipo inválido.")
+    raise HTTPException(
+        status_code=400,
+        detail="objeto_tipo inválido."
+    )
 
 
-def actualizar_auditoria_operacion(objeto: dict, cambios: dict):
-    query = supabase.table("auditoria_custodia").update(cambios)
+def actualizar_auditoria_operacion(
+    objeto: dict,
+    cambios: dict
+):
+
+    query = (
+        supabase
+        .table("auditoria_custodia")
+        .update(cambios)
+    )
+
     if objeto["tipo"] == "CARPETA":
-        query = query.eq("lote_id", objeto["lote_id"])
+        query = query.eq(
+            "lote_id",
+            objeto["lote_id"]
+        )
+
     else:
-        query = query.eq("id", objeto["auditoria_id"])
+        query = query.eq(
+            "id",
+            objeto["auditoria_id"]
+        )
+
     return query.execute()
 
 
-def notificar_solicitud_operacion_telegram(solicitud: dict):
+def notificar_solicitud_operacion_telegram(
+    solicitud: dict
+):
+
     if not TELEGRAM_TOKEN or not AUTHORIZED_CHAT_IDS:
         return
 
-    tipo = str(solicitud.get("tipo_operacion") or "").upper()
-    icono = "↔️" if tipo == "MOVER" else "🗑️"
-    destino = solicitud.get("carpeta_destino_nombre") or "—"
+    tipo = str(
+        solicitud.get("tipo_operacion") or ""
+    ).upper()
+
+    icono = (
+        "↔️"
+        if tipo == "MOVER"
+        else "🗑️"
+    )
+
+    destino = (
+        solicitud.get("carpeta_destino_nombre")
+        or "—"
+    )
+
     texto = (
         "🛡️ DataVault DLP - GM Ingenieros\n\n"
         f"{icono} SOLICITUD DE {tipo}\n\n"
@@ -852,31 +1034,54 @@ def notificar_solicitud_operacion_telegram(solicitud: dict):
         f"📌 Tipo: {solicitud.get('objeto_tipo') or '—'}\n"
         f"📂 Origen: {solicitud.get('carpeta_origen') or 'DRIVE PROYECTO'}\n"
     )
+
     if tipo == "MOVER":
         texto += f"➡️ Destino: {destino}\n"
+
     texto += "\n¿Autorizar operación?"
 
     botones = {
         "inline_keyboard": [
             [
-                {"text": "✅ Aprobar", "callback_data": f"opap:{solicitud['id']}"},
-                {"text": "❌ Rechazar", "callback_data": f"opre:{solicitud['id']}"},
+                {
+                    "text": "✅ Aprobar",
+                    "callback_data": f"opap:{solicitud['id']}"
+                },
+                {
+                    "text": "❌ Rechazar",
+                    "callback_data": f"opre:{solicitud['id']}"
+                },
             ]
         ]
     }
 
     for chat_id in AUTHORIZED_CHAT_IDS:
+
         try:
             telegram_request(
                 "sendMessage",
-                {"chat_id": chat_id, "text": texto, "reply_markup": botones},
+                {
+                    "chat_id": chat_id,
+                    "text": texto,
+                    "reply_markup": botones
+                },
             )
+
         except Exception as error:
-            print("[TELEGRAM OPERACION ERROR]", error)
+            print(
+                "[TELEGRAM OPERACION ERROR]",
+                error
+            )
 
 
-def procesar_solicitud_operacion(solicitud_id: str, aprobar: bool, resuelto_por: str):
+def procesar_solicitud_operacion(
+    solicitud_id: str,
+    aprobar: bool,
+    resuelto_por: str
+):
+
     with DECISION_LOCK:
+
         respuesta = (
             supabase
             .table("solicitudes_operacion")
@@ -885,14 +1090,21 @@ def procesar_solicitud_operacion(solicitud_id: str, aprobar: bool, resuelto_por:
             .limit(1)
             .execute()
         )
+
         if not respuesta.data:
-            raise RuntimeError("La solicitud no existe.")
+            raise RuntimeError(
+                "La solicitud no existe."
+            )
 
         solicitud = respuesta.data[0]
-        if str(solicitud.get("estado") or "").upper() != "PENDIENTE":
+
+        if str(
+            solicitud.get("estado") or ""
+        ).upper() != "PENDIENTE":
             return solicitud, False
 
         if not aprobar:
+
             actualizado = (
                 supabase
                 .table("solicitudes_operacion")
@@ -900,58 +1112,112 @@ def procesar_solicitud_operacion(solicitud_id: str, aprobar: bool, resuelto_por:
                     "estado": "RECHAZADO",
                     "fecha_resolucion": ahora_iso(),
                     "resuelto_por": str(resuelto_por),
-                    "resultado": "Operación rechazada por el custodio.",
+                    "resultado": (
+                        "Operación rechazada por el custodio."
+                    ),
                 })
                 .eq("id", solicitud_id)
                 .eq("estado", "PENDIENTE")
                 .execute()
             )
-            return (actualizado.data or [solicitud])[0], True
+
+            return (
+                actualizado.data
+                or [solicitud]
+            )[0], True
 
         objeto = obtener_objeto_operable(
-            str(solicitud.get("solicitante_id") or ""),
+            str(
+                solicitud.get("solicitante_id")
+                or ""
+            ),
             solicitud.get("objeto_tipo"),
             auditoria_id=solicitud.get("auditoria_id"),
             lote_id=solicitud.get("lote_id"),
         )
 
-        tipo = str(solicitud.get("tipo_operacion") or "").upper()
-        cambios = {"fecha_ultima_operacion": ahora_iso()}
+        tipo = str(
+            solicitud.get("tipo_operacion")
+            or ""
+        ).upper()
+
+        cambios = {
+            "fecha_ultima_operacion": ahora_iso()
+        }
 
         if tipo == "ELIMINAR":
-            enviar_a_papelera_google_drive(objeto["drive_id"])
+
+            enviar_a_papelera_google_drive(
+                objeto["drive_id"]
+            )
+
             cambios.update({
                 "en_drive": False,
                 "estado_archivo": "ELIMINADO",
                 "fecha_eliminacion": ahora_iso(),
             })
-            resultado_texto = "Elemento enviado a la papelera de Google Drive."
+
+            resultado_texto = (
+                "Elemento enviado a la papelera de Google Drive."
+            )
 
         elif tipo == "MOVER":
-            destino = validar_destino_drive(solicitud.get("carpeta_destino_id"))
+
+            destino = validar_destino_drive(
+                solicitud.get("carpeta_destino_id")
+            )
 
             if destino["id"] == objeto["drive_parent_id"]:
-                raise RuntimeError("El elemento ya se encuentra en esa carpeta.")
+                raise RuntimeError(
+                    "El elemento ya se encuentra en esa carpeta."
+                )
 
             if objeto["tipo"] == "CARPETA":
-                if destino["id"] == objeto["drive_id"]:
-                    raise RuntimeError("Una carpeta no puede moverse dentro de sí misma.")
-                if objeto["drive_id"] in (destino.get("ancestors") or []):
-                    raise RuntimeError("Una carpeta no puede moverse dentro de una de sus subcarpetas.")
 
-            mover_objeto_google_drive(objeto["drive_id"], destino["id"])
-            ubicacion_destino = destino.get("path") or destino["name"]
+                if destino["id"] == objeto["drive_id"]:
+                    raise RuntimeError(
+                        "Una carpeta no puede moverse dentro de sí misma."
+                    )
+
+                if objeto["drive_id"] in (
+                    destino.get("ancestors")
+                    or []
+                ):
+                    raise RuntimeError(
+                        "Una carpeta no puede moverse dentro "
+                        "de una de sus subcarpetas."
+                    )
+
+            mover_objeto_google_drive(
+                objeto["drive_id"],
+                destino["id"]
+            )
+
+            ubicacion_destino = (
+                destino.get("path")
+                or destino["name"]
+            )
+
             cambios.update({
                 "en_drive": True,
                 "estado_archivo": "ACTIVO",
                 "drive_parent_id": destino["id"],
                 "ubicacion_drive": ubicacion_destino,
             })
-            resultado_texto = f"Elemento movido a {ubicacion_destino}."
-        else:
-            raise RuntimeError("Tipo de operación no soportado.")
 
-        actualizar_auditoria_operacion(objeto, cambios)
+            resultado_texto = (
+                f"Elemento movido a {ubicacion_destino}."
+            )
+
+        else:
+            raise RuntimeError(
+                "Tipo de operación no soportado."
+            )
+
+        actualizar_auditoria_operacion(
+            objeto,
+            cambios
+        )
 
         actualizado = (
             supabase
@@ -966,7 +1232,11 @@ def procesar_solicitud_operacion(solicitud_id: str, aprobar: bool, resuelto_por:
             .eq("estado", "PENDIENTE")
             .execute()
         )
-        return (actualizado.data or [solicitud])[0], True
+
+        return (
+            actualizado.data
+            or [solicitud]
+        )[0], True
 
 
 # ============================================================
@@ -1014,21 +1284,29 @@ def telegram_request(
             }
 
 
-        # Telegram responde HTTP 400 cuando se intenta editar un mensaje
-        # con exactamente el mismo contenido/botones. Para la navegación del
-        # panel esto no representa un fallo real.
         if (
             metodo == "editMessageText"
             and response.status_code == 400
             and "message is not modified"
-            in str(data.get("description", "")).lower()
+            in str(
+                data.get(
+                    "description",
+                    ""
+                )
+            ).lower()
         ):
-            print("[TELEGRAM] editMessageText sin cambios; se considera OK")
+
+            print(
+                "[TELEGRAM] editMessageText "
+                "sin cambios; se considera OK"
+            )
+
             return {
                 "ok": True,
                 "unchanged": True,
                 "description": "Sin cambios",
             }
+
 
         print(
             f"[TELEGRAM] {metodo} "
@@ -1054,8 +1332,6 @@ def telegram_request(
         }
 
 
-
-
 # ============================================================
 # PANEL PRINCIPAL INLINE DE TELEGRAM
 # ============================================================
@@ -1066,43 +1342,70 @@ def quitar_teclado_inferior(chat_id):
     Versiones anteriores del bot mostraban un teclado persistente abajo.
     El panel actual usa exclusivamente botones inline dentro del mensaje.
     """
+
     resultado = telegram_request(
         "sendMessage",
         {
             "chat_id": chat_id,
             "text": "Actualizando panel de custodia…",
-            "reply_markup": {"remove_keyboard": True},
+            "reply_markup": {
+                "remove_keyboard": True
+            },
             "disable_notification": True,
         },
     )
 
-    # El mensaje solo sirve para retirar el teclado; si Telegram devuelve su ID,
-    # se elimina para no ensuciar el chat.
     try:
-        message_id = (resultado.get("result") or {}).get("message_id")
+
+        message_id = (
+            resultado.get("result")
+            or {}
+        ).get("message_id")
+
         if resultado.get("ok") and message_id:
+
             telegram_request(
                 "deleteMessage",
-                {"chat_id": chat_id, "message_id": message_id},
+                {
+                    "chat_id": chat_id,
+                    "message_id": message_id
+                },
             )
+
     except Exception as error:
-        print("[TELEGRAM REMOVE KEYBOARD]", error)
+
+        print(
+            "[TELEGRAM REMOVE KEYBOARD]",
+            error
+        )
 
     return resultado
 
 
 def obtener_resumen_panel():
     """Resumen simple para el panel principal del custodio."""
+
     try:
+
         respuesta = (
             supabase
             .table("auditoria_custodia")
-            .select("estado,solicitante_id,lote_id,ruta_relativa")
+            .select(
+                "estado,solicitante_id,"
+                "lote_id,ruta_relativa"
+            )
             .execute()
         )
+
         registros = respuesta.data or []
+
     except Exception as error:
-        print("[PANEL RESUMEN ERROR]", error)
+
+        print(
+            "[PANEL RESUMEN ERROR]",
+            error
+        )
+
         return {
             "pendientes": 0,
             "aprobados": 0,
@@ -1112,9 +1415,27 @@ def obtener_resumen_panel():
             "archivos_sueltos_pendientes": 0,
         }
 
-    pendientes = [r for r in registros if r.get("estado") == "PENDIENTE"]
-    aprobados = sum(1 for r in registros if r.get("estado") == "APROBADO")
-    rechazados = sum(1 for r in registros if r.get("estado") == "RECHAZADO")
+
+    pendientes = [
+        r
+        for r in registros
+        if r.get("estado") == "PENDIENTE"
+    ]
+
+
+    aprobados = sum(
+        1
+        for r in registros
+        if r.get("estado") == "APROBADO"
+    )
+
+
+    rechazados = sum(
+        1
+        for r in registros
+        if r.get("estado") == "RECHAZADO"
+    )
+
 
     usuarios = {
         str(r.get("solicitante_id"))
@@ -1122,16 +1443,31 @@ def obtener_resumen_panel():
         if r.get("solicitante_id")
     }
 
+
     carpetas = set()
     archivos_sueltos = 0
 
+
     for registro in pendientes:
-        lote_id = str(registro.get("lote_id") or "").strip()
-        ruta = str(registro.get("ruta_relativa") or "").replace("\\", "/").strip("/")
+
+        lote_id = str(
+            registro.get("lote_id")
+            or ""
+        ).strip()
+
+        ruta = str(
+            registro.get("ruta_relativa")
+            or ""
+        ).replace("\\", "/").strip("/")
+
         if lote_id and "/" in ruta:
+
             carpetas.add(lote_id)
+
         else:
+
             archivos_sueltos += 1
+
 
     return {
         "pendientes": len(pendientes),
@@ -1139,94 +1475,171 @@ def obtener_resumen_panel():
         "rechazados": rechazados,
         "usuarios_pendientes": len(usuarios),
         "carpetas_pendientes": len(carpetas),
-        "archivos_sueltos_pendientes": archivos_sueltos,
+        "archivos_sueltos_pendientes":
+            archivos_sueltos,
     }
 
 
-def mostrar_panel_principal(chat_id, message_id=None):
+def mostrar_panel_principal(
+    chat_id,
+    message_id=None
+):
+
     resumen = obtener_resumen_panel()
+
 
     texto = (
         "🛡️ DataVault DLP - GM Ingenieros\n\n"
         "Panel de custodia\n\n"
-        f"👥 Usuarios con pendientes: {resumen['usuarios_pendientes']}\n"
-        f"📁 Carpetas pendientes: {resumen['carpetas_pendientes']}\n"
-        f"📄 Archivos sueltos: {resumen['archivos_sueltos_pendientes']}\n"
-        f"🟡 Documentos pendientes: {resumen['pendientes']}"
+        f"👥 Usuarios con pendientes: "
+        f"{resumen['usuarios_pendientes']}\n"
+        f"📁 Carpetas pendientes: "
+        f"{resumen['carpetas_pendientes']}\n"
+        f"📄 Archivos sueltos: "
+        f"{resumen['archivos_sueltos_pendientes']}\n"
+        f"🟡 Documentos pendientes: "
+        f"{resumen['pendientes']}"
     )
 
+
     payload = {
-        "chat_id": chat_id,
-        "text": texto,
+
+        "chat_id":
+            chat_id,
+
+        "text":
+            texto,
+
         "reply_markup": {
+
             "inline_keyboard": [
+
                 [
                     {
-                        "text": "👥 Usuarios",
-                        "callback_data": "panel:usuarios",
+                        "text":
+                            "👥 Usuarios",
+
+                        "callback_data":
+                            "panel:usuarios",
                     },
+
                     {
-                        "text": "🔄 Actualizar",
-                        "callback_data": "panel:actualizar",
+                        "text":
+                            "🔄 Actualizar",
+
+                        "callback_data":
+                            "panel:actualizar",
                     },
                 ],
+
                 [
                     {
-                        "text": "📊 Estado",
-                        "callback_data": "panel:estado",
+                        "text":
+                            "📊 Estado",
+
+                        "callback_data":
+                            "panel:estado",
                     }
                 ],
+
             ]
         },
+
     }
 
+
     if message_id:
-        payload["message_id"] = message_id
-        return telegram_request("editMessageText", payload)
 
-    return telegram_request("sendMessage", payload)
+        payload[
+            "message_id"
+        ] = message_id
+
+        return telegram_request(
+            "editMessageText",
+            payload
+        )
 
 
-def mostrar_estado_panel(chat_id, message_id):
+    return telegram_request(
+        "sendMessage",
+        payload
+    )
+
+
+def mostrar_estado_panel(
+    chat_id,
+    message_id
+):
+
     resumen = obtener_resumen_panel()
+
 
     texto = (
         "📊 ESTADO DATAVAULT\n\n"
         f"🟡 Pendientes: {resumen['pendientes']}\n"
         f"🟢 Aprobados: {resumen['aprobados']}\n"
         f"🔴 Rechazados: {resumen['rechazados']}\n\n"
-        f"👥 Usuarios con pendientes: {resumen['usuarios_pendientes']}\n"
-        f"📁 Carpetas pendientes: {resumen['carpetas_pendientes']}\n"
-        f"📄 Archivos sueltos: {resumen['archivos_sueltos_pendientes']}"
+        f"👥 Usuarios con pendientes: "
+        f"{resumen['usuarios_pendientes']}\n"
+        f"📁 Carpetas pendientes: "
+        f"{resumen['carpetas_pendientes']}\n"
+        f"📄 Archivos sueltos: "
+        f"{resumen['archivos_sueltos_pendientes']}"
     )
 
+
     return telegram_request(
+
         "editMessageText",
+
         {
-            "chat_id": chat_id,
-            "message_id": message_id,
-            "text": texto,
+
+            "chat_id":
+                chat_id,
+
+            "message_id":
+                message_id,
+
+            "text":
+                texto,
+
             "reply_markup": {
+
                 "inline_keyboard": [
+
                     [
                         {
-                            "text": "👥 Usuarios",
-                            "callback_data": "panel:usuarios",
+                            "text":
+                                "👥 Usuarios",
+
+                            "callback_data":
+                                "panel:usuarios",
                         },
+
                         {
-                            "text": "🔄 Actualizar",
-                            "callback_data": "panel:estado",
+                            "text":
+                                "🔄 Actualizar",
+
+                            "callback_data":
+                                "panel:estado",
                         },
                     ],
+
                     [
                         {
-                            "text": "🏠 Panel",
-                            "callback_data": "panel:inicio",
+                            "text":
+                                "🏠 Panel",
+
+                            "callback_data":
+                                "panel:inicio",
                         }
                     ],
+
                 ]
             },
+
         },
+
     )
 
 
@@ -1236,206 +1649,516 @@ def mostrar_estado_panel(chat_id, message_id):
 
 def obtener_documentos_pendientes():
     """Obtiene documentos PENDIENTES con datos para agrupar carpetas."""
+
     try:
+
         respuesta = (
             supabase
             .table("auditoria_custodia")
             .select(
-                "id,nombre_archivo,hash_sha256,tamano_bytes,estado,fecha_solicitud,"
-                "solicitante_id,solicitante_nombre,solicitante_correo,"
-                "lote_id,ruta_relativa"
+                "id,nombre_archivo,hash_sha256,"
+                "tamano_bytes,estado,fecha_solicitud,"
+                "solicitante_id,solicitante_nombre,"
+                "solicitante_correo,lote_id,ruta_relativa"
             )
-            .eq("estado", "PENDIENTE")
+            .eq(
+                "estado",
+                "PENDIENTE"
+            )
             .execute()
         )
+
         return respuesta.data or []
+
     except Exception as error:
-        print("[MENU TELEGRAM ERROR]", error)
+
+        print(
+            "[MENU TELEGRAM ERROR]",
+            error
+        )
+
         return []
 
 
-def info_carpeta_documento(documento: dict):
-    lote_id = str(documento.get("lote_id") or "").strip()
-    ruta = str(documento.get("ruta_relativa") or "").replace("\\", "/").strip("/")
+def info_carpeta_documento(
+    documento: dict
+):
+
+    lote_id = str(
+        documento.get("lote_id")
+        or ""
+    ).strip()
+
+    ruta = str(
+        documento.get("ruta_relativa")
+        or ""
+    ).replace("\\", "/").strip("/")
+
 
     if not lote_id or "/" not in ruta:
         return None
 
-    nombre_carpeta = obtener_carpeta_desde_ruta(ruta)
+
+    nombre_carpeta = obtener_carpeta_desde_ruta(
+        ruta
+    )
+
+
     if not nombre_carpeta:
         return None
 
+
     return {
-        "lote_id": lote_id,
-        "nombre": nombre_carpeta,
+        "lote_id":
+            lote_id,
+
+        "nombre":
+            nombre_carpeta,
     }
 
 
-def mostrar_menu_usuarios(chat_id, message_id=None):
-    """Muestra usuarios; una carpeta completa cuenta como una sola unidad."""
+def mostrar_menu_usuarios(
+    chat_id,
+    message_id=None
+):
+
     documentos = obtener_documentos_pendientes()
+
     usuarios = {}
 
+
     for documento in documentos:
-        solicitante_id = str(documento.get("solicitante_id") or "").strip()
+
+        solicitante_id = str(
+            documento.get("solicitante_id")
+            or ""
+        ).strip()
+
+
         if not solicitante_id:
             continue
 
+
         if solicitante_id not in usuarios:
-            usuarios[solicitante_id] = {
-                "nombre": (
-                    documento.get("solicitante_nombre")
-                    or documento.get("solicitante_correo")
-                    or "Usuario"
-                ),
-                "correo": documento.get("solicitante_correo") or "",
-                "carpetas": set(),
-                "archivos_sueltos": 0,
+
+            usuarios[
+                solicitante_id
+            ] = {
+
+                "nombre":
+                    (
+                        documento.get(
+                            "solicitante_nombre"
+                        )
+                        or
+                        documento.get(
+                            "solicitante_correo"
+                        )
+                        or
+                        "Usuario"
+                    ),
+
+                "correo":
+                    documento.get(
+                        "solicitante_correo"
+                    )
+                    or "",
+
+                "carpetas":
+                    set(),
+
+                "archivos_sueltos":
+                    0,
             }
 
-        info_carpeta = info_carpeta_documento(documento)
+
+        info_carpeta = info_carpeta_documento(
+            documento
+        )
+
+
         if info_carpeta:
-            usuarios[solicitante_id]["carpetas"].add(info_carpeta["lote_id"])
+
+            usuarios[
+                solicitante_id
+            ][
+                "carpetas"
+            ].add(
+                info_carpeta[
+                    "lote_id"
+                ]
+            )
+
         else:
-            usuarios[solicitante_id]["archivos_sueltos"] += 1
+
+            usuarios[
+                solicitante_id
+            ][
+                "archivos_sueltos"
+            ] += 1
+
 
     usuarios_ordenados = sorted(
+
         usuarios.items(),
-        key=lambda item: str(item[1]["nombre"]).lower(),
+
+        key=lambda item:
+            str(
+                item[1]["nombre"]
+            ).lower(),
+
     )
+
 
     botones = []
 
+
     for uid, usuario in usuarios_ordenados:
-        n_carpetas = len(usuario["carpetas"])
-        n_archivos = usuario["archivos_sueltos"]
+
+        n_carpetas = len(
+            usuario["carpetas"]
+        )
+
+        n_archivos = (
+            usuario[
+                "archivos_sueltos"
+            ]
+        )
+
         partes = []
 
+
         if n_carpetas:
-            partes.append(f"{n_carpetas} carpeta" if n_carpetas == 1 else f"{n_carpetas} carpetas")
+
+            partes.append(
+                f"{n_carpetas} carpeta"
+                if n_carpetas == 1
+                else
+                f"{n_carpetas} carpetas"
+            )
+
+
         if n_archivos:
-            partes.append(f"{n_archivos} archivo" if n_archivos == 1 else f"{n_archivos} archivos")
 
-        resumen = " + ".join(partes) if partes else "sin pendientes"
+            partes.append(
+                f"{n_archivos} archivo"
+                if n_archivos == 1
+                else
+                f"{n_archivos} archivos"
+            )
 
-        botones.append([{
-            "text": f"👤 {usuario['nombre']} · {resumen}",
-            "callback_data": f"usr:{uid}",
-        }])
 
-    botones.append([{
-        "text": "🔄 Actualizar",
-        "callback_data": "menu:usuarios",
-    }])
+        resumen = (
+            " + ".join(partes)
+            if partes
+            else
+            "sin pendientes"
+        )
+
+
+        botones.append([
+            {
+                "text":
+                    (
+                        f"👤 {usuario['nombre']} "
+                        f"· {resumen}"
+                    ),
+
+                "callback_data":
+                    f"usr:{uid}",
+            }
+        ])
+
+
+    botones.append([
+        {
+            "text":
+                "🔄 Actualizar",
+
+            "callback_data":
+                "menu:usuarios",
+        }
+    ])
+
 
     if usuarios:
+
         texto = (
             "🛡️ DataVault DLP - GM Ingenieros\n\n"
             "📂 DOCUMENTOS PENDIENTES\n\n"
             "Seleccione un usuario:"
         )
+
     else:
+
         texto = (
             "🛡️ DataVault DLP - GM Ingenieros\n\n"
             "✅ No existen documentos pendientes."
         )
 
+
     payload = {
-        "chat_id": chat_id,
-        "text": texto,
-        "reply_markup": {"inline_keyboard": botones},
+
+        "chat_id":
+            chat_id,
+
+        "text":
+            texto,
+
+        "reply_markup": {
+            "inline_keyboard":
+                botones
+        },
+
     }
 
+
     if message_id:
-        payload["message_id"] = message_id
-        return telegram_request("editMessageText", payload)
 
-    return telegram_request("sendMessage", payload)
+        payload[
+            "message_id"
+        ] = message_id
+
+        return telegram_request(
+            "editMessageText",
+            payload
+        )
 
 
-def mostrar_archivos_usuario(chat_id, message_id, solicitante_id):
-    """Muestra carpetas como una sola opción y archivos sueltos individualmente."""
+    return telegram_request(
+        "sendMessage",
+        payload
+    )
+
+
+def mostrar_archivos_usuario(
+    chat_id,
+    message_id,
+    solicitante_id
+):
+
     try:
+
         respuesta = (
             supabase
             .table("auditoria_custodia")
             .select(
-                "id,nombre_archivo,tamano_bytes,fecha_solicitud,"
-                "solicitante_id,solicitante_nombre,solicitante_correo,"
+                "id,nombre_archivo,tamano_bytes,"
+                "fecha_solicitud,solicitante_id,"
+                "solicitante_nombre,solicitante_correo,"
                 "lote_id,ruta_relativa"
             )
-            .eq("solicitante_id", solicitante_id)
-            .eq("estado", "PENDIENTE")
-            .order("fecha_solicitud", desc=True)
+            .eq(
+                "solicitante_id",
+                solicitante_id
+            )
+            .eq(
+                "estado",
+                "PENDIENTE"
+            )
+            .order(
+                "fecha_solicitud",
+                desc=True
+            )
             .execute()
         )
+
         archivos = respuesta.data or []
+
     except Exception as error:
-        print("[ARCHIVOS USUARIO ERROR]", error)
+
+        print(
+            "[ARCHIVOS USUARIO ERROR]",
+            error
+        )
+
         archivos = []
 
+
     if not archivos:
-        return mostrar_menu_usuarios(chat_id, message_id)
+
+        return mostrar_menu_usuarios(
+            chat_id,
+            message_id
+        )
+
 
     nombre_usuario = (
-        archivos[0].get("solicitante_nombre")
-        or archivos[0].get("solicitante_correo")
-        or "Usuario"
+        archivos[0].get(
+            "solicitante_nombre"
+        )
+        or
+        archivos[0].get(
+            "solicitante_correo"
+        )
+        or
+        "Usuario"
     )
-    correo = archivos[0].get("solicitante_correo") or ""
+
+
+    correo = (
+        archivos[0].get(
+            "solicitante_correo"
+        )
+        or ""
+    )
+
 
     carpetas = {}
     sueltos = []
 
+
     for archivo in archivos:
-        info = info_carpeta_documento(archivo)
+
+        info = info_carpeta_documento(
+            archivo
+        )
+
 
         if info:
-            lote_id = info["lote_id"]
+
+            lote_id = info[
+                "lote_id"
+            ]
+
+
             if lote_id not in carpetas:
-                carpetas[lote_id] = {
-                    "nombre": info["nombre"],
-                    "cantidad": 0,
-                    "tamano": 0,
+
+                carpetas[
+                    lote_id
+                ] = {
+
+                    "nombre":
+                        info[
+                            "nombre"
+                        ],
+
+                    "cantidad":
+                        0,
+
+                    "tamano":
+                        0,
                 }
-            carpetas[lote_id]["cantidad"] += 1
-            carpetas[lote_id]["tamano"] += int(archivo.get("tamano_bytes") or 0)
+
+
+            carpetas[
+                lote_id
+            ][
+                "cantidad"
+            ] += 1
+
+
+            carpetas[
+                lote_id
+            ][
+                "tamano"
+            ] += int(
+                archivo.get(
+                    "tamano_bytes"
+                )
+                or 0
+            )
+
+
         else:
-            sueltos.append(archivo)
+
+            sueltos.append(
+                archivo
+            )
+
 
     botones = []
 
-    # Una carpeta = un único botón, aunque contenga 80 archivos.
+
     for lote_id, carpeta in carpetas.items():
-        nombre = carpeta["nombre"]
+
+        nombre = carpeta[
+            "nombre"
+        ]
+
+
         if len(nombre) > 30:
-            nombre = nombre[:27] + "..."
 
-        botones.append([{
-            "text": f"📁 {nombre} · {carpeta['cantidad']} archivos",
-            "callback_data": f"lot:{lote_id}",
-        }])
+            nombre = (
+                nombre[:27]
+                + "..."
+            )
 
-    # Los archivos seleccionados de forma suelta siguen siendo individuales.
+
+        botones.append([
+            {
+                "text":
+                    (
+                        f"📁 {nombre} · "
+                        f"{carpeta['cantidad']} archivos"
+                    ),
+
+                "callback_data":
+                    f"lot:{lote_id}",
+            }
+        ])
+
+
     for archivo in sueltos:
-        nombre = archivo.get("nombre_archivo") or "Archivo"
-        nombre_boton = nombre if len(nombre) <= 42 else nombre[:39] + "..."
 
-        botones.append([{
-            "text": f"📄 {nombre_boton}",
-            "callback_data": f"doc:{archivo['id']}",
-        }])
+        nombre = (
+            archivo.get(
+                "nombre_archivo"
+            )
+            or
+            "Archivo"
+        )
 
-    botones.append([{
-        "text": "🔙 Usuarios",
-        "callback_data": "menu:usuarios",
-    }])
+
+        nombre_boton = (
+            nombre
+            if len(nombre) <= 42
+            else
+            nombre[:39] + "..."
+        )
+
+
+        botones.append([
+            {
+                "text":
+                    f"📄 {nombre_boton}",
+
+                "callback_data":
+                    (
+                        f"doc:"
+                        f"{archivo['id']}"
+                    ),
+            }
+        ])
+
+
+    botones.append([
+        {
+            "text":
+                "🔙 Usuarios",
+
+            "callback_data":
+                "menu:usuarios",
+        }
+    ])
+
 
     resumen = []
+
+
     if carpetas:
-        resumen.append(f"{len(carpetas)} carpeta(s)")
+
+        resumen.append(
+            f"{len(carpetas)} carpeta(s)"
+        )
+
+
     if sueltos:
-        resumen.append(f"{len(sueltos)} archivo(s) suelto(s)")
+
+        resumen.append(
+            f"{len(sueltos)} archivo(s) suelto(s)"
+        )
+
 
     texto = (
         f"👤 {nombre_usuario}\n"
@@ -1444,84 +2167,264 @@ def mostrar_archivos_usuario(chat_id, message_id, solicitante_id):
         "Seleccione una carpeta o archivo:"
     )
 
+
     return telegram_request(
+
         "editMessageText",
+
         {
-            "chat_id": chat_id,
-            "message_id": message_id,
-            "text": texto,
-            "reply_markup": {"inline_keyboard": botones},
+
+            "chat_id":
+                chat_id,
+
+            "message_id":
+                message_id,
+
+            "text":
+                texto,
+
+            "reply_markup": {
+                "inline_keyboard":
+                    botones
+            },
+
         },
+
     )
 
 
-def mostrar_detalle_lote(chat_id, message_id, lote_id):
-    """Muestra una carpeta/lote completo como una sola decisión."""
+def mostrar_detalle_lote(
+    chat_id,
+    message_id,
+    lote_id
+):
+
     try:
+
         respuesta = (
             supabase
             .table("auditoria_custodia")
             .select(
-                "id,nombre_archivo,hash_sha256,tamano_bytes,estado,"
-                "solicitante_id,solicitante_nombre,solicitante_correo,"
+                "id,nombre_archivo,hash_sha256,"
+                "tamano_bytes,estado,solicitante_id,"
+                "solicitante_nombre,solicitante_correo,"
                 "lote_id,ruta_relativa"
             )
-            .eq("lote_id", lote_id)
-            .eq("estado", "PENDIENTE")
-            .order("fecha_solicitud", desc=False)
+            .eq(
+                "lote_id",
+                lote_id
+            )
+            .eq(
+                "estado",
+                "PENDIENTE"
+            )
+            .order(
+                "fecha_solicitud",
+                desc=False
+            )
             .execute()
         )
-        documentos = respuesta.data or []
-    except Exception as error:
-        print("[DETALLE LOTE ERROR]", error)
-        documentos = []
 
-    if not documentos:
-        return telegram_request(
-            "editMessageText",
-            {
-                "chat_id": chat_id,
-                "message_id": message_id,
-                "text": (
-                    "🛡️ DataVault DLP - GM Ingenieros\n\n"
-                    "⚠️ Esta carpeta ya no tiene documentos pendientes."
-                ),
-                "reply_markup": {
-                    "inline_keyboard": [[{
-                        "text": "👥 Usuarios",
-                        "callback_data": "menu:usuarios",
-                    }]]
-                },
-            },
+        documentos = respuesta.data or []
+
+    except Exception as error:
+
+        print(
+            "[DETALLE LOTE ERROR]",
+            error
         )
 
+        documentos = []
+
+
+    if not documentos:
+
+        return telegram_request(
+
+            "editMessageText",
+
+            {
+
+                "chat_id":
+                    chat_id,
+
+                "message_id":
+                    message_id,
+
+                "text":
+                    (
+                        "🛡️ DataVault DLP - GM Ingenieros\n\n"
+                        "⚠️ Esta carpeta ya no tiene "
+                        "documentos pendientes."
+                    ),
+
+                "reply_markup": {
+
+                    "inline_keyboard": [[
+                        {
+                            "text":
+                                "👥 Usuarios",
+
+                            "callback_data":
+                                "menu:usuarios",
+                        }
+                    ]]
+
+                },
+
+            },
+
+        )
+
+
     primer = documentos[0]
-    solicitante_id = str(primer.get("solicitante_id") or "").strip()
-    nombre_usuario = primer.get("solicitante_nombre") or "Usuario"
-    correo = primer.get("solicitante_correo") or ""
-    nombre_carpeta = obtener_carpeta_desde_ruta(primer.get("ruta_relativa")) or f"LOTE_{lote_id[:8]}"
-    total_bytes = sum(int(d.get("tamano_bytes") or 0) for d in documentos)
+
+
+    solicitante_id = str(
+        primer.get(
+            "solicitante_id"
+        )
+        or ""
+    ).strip()
+
+
+    nombre_usuario = (
+        primer.get(
+            "solicitante_nombre"
+        )
+        or
+        "Usuario"
+    )
+
+
+    correo = (
+        primer.get(
+            "solicitante_correo"
+        )
+        or ""
+    )
+
+
+    nombre_carpeta = (
+        obtener_carpeta_desde_ruta(
+            primer.get(
+                "ruta_relativa"
+            )
+        )
+        or
+        f"LOTE_{lote_id[:8]}"
+    )
+
+
+    total_bytes = sum(
+        int(
+            d.get(
+                "tamano_bytes"
+            )
+            or 0
+        )
+        for d in documentos
+    )
+
 
     def formato_bytes(valor):
-        unidades = ["B", "KB", "MB", "GB"]
-        numero = float(valor or 0)
+
+        unidades = [
+            "B",
+            "KB",
+            "MB",
+            "GB"
+        ]
+
+        numero = float(
+            valor or 0
+        )
+
         indice = 0
-        while numero >= 1024 and indice < len(unidades) - 1:
+
+
+        while (
+            numero >= 1024
+            and
+            indice < len(unidades) - 1
+        ):
+
             numero /= 1024
             indice += 1
-        return f"{numero:.2f} {unidades[indice]}" if indice else f"{int(numero)} B"
+
+
+        return (
+            f"{numero:.2f} "
+            f"{unidades[indice]}"
+            if indice
+            else
+            f"{int(numero)} B"
+        )
+
 
     nombres = []
-    for doc in documentos[:8]:
-        ruta = str(doc.get("ruta_relativa") or doc.get("nombre_archivo") or "Archivo").replace("\\", "/")
-        partes = [p for p in ruta.split("/") if p]
-        if partes and partes[0] == nombre_carpeta:
-            partes = partes[1:]
-        nombres.append("/".join(partes) if partes else (doc.get("nombre_archivo") or "Archivo"))
 
-    contenido = "\n".join(f"• {nombre}" for nombre in nombres)
+
+    for doc in documentos[:8]:
+
+        ruta = str(
+            doc.get(
+                "ruta_relativa"
+            )
+            or
+            doc.get(
+                "nombre_archivo"
+            )
+            or
+            "Archivo"
+        ).replace("\\", "/")
+
+
+        partes = [
+            p
+            for p in ruta.split("/")
+            if p
+        ]
+
+
+        if (
+            partes
+            and
+            partes[0]
+            == nombre_carpeta
+        ):
+
+            partes = partes[1:]
+
+
+        nombres.append(
+            "/".join(partes)
+            if partes
+            else
+            (
+                doc.get(
+                    "nombre_archivo"
+                )
+                or
+                "Archivo"
+            )
+        )
+
+
+    contenido = "\n".join(
+        f"• {nombre}"
+        for nombre in nombres
+    )
+
+
     if len(documentos) > len(nombres):
-        contenido += f"\n• ... y {len(documentos) - len(nombres)} archivo(s) más"
+
+        contenido += (
+            f"\n• ... y "
+            f"{len(documentos) - len(nombres)} "
+            f"archivo(s) más"
+        )
+
 
     texto = (
         "🛡️ DataVault DLP - GM Ingenieros\n\n"
@@ -1531,139 +2434,282 @@ def mostrar_detalle_lote(chat_id, message_id, lote_id):
         f"📄 Archivos: {len(documentos)}\n"
         f"📦 Tamaño total: {formato_bytes(total_bytes)}\n\n"
         f"Contenido:\n{contenido}\n\n"
-        "¿Autoriza la transferencia de TODA la carpeta a Google Drive?"
+        "¿Autoriza la transferencia de TODA "
+        "la carpeta a Google Drive?"
     )
+
 
     botones = [
+
         [
             {
-                "text": "✅ Aprobar carpeta",
-                "callback_data": f"aplot:{lote_id}",
+                "text":
+                    "✅ Aprobar carpeta",
+
+                "callback_data":
+                    f"aplot:{lote_id}",
             },
+
             {
-                "text": "❌ Rechazar carpeta",
-                "callback_data": f"relot:{lote_id}",
+                "text":
+                    "❌ Rechazar carpeta",
+
+                "callback_data":
+                    f"relot:{lote_id}",
             },
         ],
+
         [
             {
-                "text": "🔙 Volver",
-                "callback_data": f"usr:{solicitante_id}",
+                "text":
+                    "🔙 Volver",
+
+                "callback_data":
+                    f"usr:{solicitante_id}",
             },
+
             {
-                "text": "👥 Usuarios",
-                "callback_data": "menu:usuarios",
+                "text":
+                    "👥 Usuarios",
+
+                "callback_data":
+                    "menu:usuarios",
             },
         ],
+
     ]
 
+
     return telegram_request(
+
         "editMessageText",
+
         {
-            "chat_id": chat_id,
-            "message_id": message_id,
-            "text": texto,
-            "reply_markup": {"inline_keyboard": botones},
+
+            "chat_id":
+                chat_id,
+
+            "message_id":
+                message_id,
+
+            "text":
+                texto,
+
+            "reply_markup": {
+                "inline_keyboard":
+                    botones
+            },
+
         },
+
     )
 
 
-def mostrar_detalle_documento(chat_id, message_id, auditoria_id):
-    """Muestra un archivo suelto y sus botones Aprobar/Rechazar."""
+def mostrar_detalle_documento(
+    chat_id,
+    message_id,
+    auditoria_id
+):
+
     try:
+
         respuesta = (
             supabase
-            .table("auditoria_custodia")
-            .select(
-                "id,nombre_archivo,hash_sha256,estado,"
-                "solicitante_id,solicitante_nombre,solicitante_correo"
+            .table(
+                "auditoria_custodia"
             )
-            .eq("id", auditoria_id)
+            .select(
+                "id,nombre_archivo,hash_sha256,"
+                "estado,solicitante_id,"
+                "solicitante_nombre,solicitante_correo"
+            )
+            .eq(
+                "id",
+                auditoria_id
+            )
             .limit(1)
             .execute()
         )
 
+
         if not respuesta.data:
-            raise ValueError("No existe el documento seleccionado.")
+
+            raise ValueError(
+                "No existe el documento seleccionado."
+            )
+
 
         documento = respuesta.data[0]
+
+
     except Exception as error:
-        print("[DETALLE DOCUMENTO ERROR]", error)
-        return telegram_request(
-            "editMessageText",
-            {
-                "chat_id": chat_id,
-                "message_id": message_id,
-                "text": (
-                    "🛡️ DataVault DLP - GM Ingenieros\n\n"
-                    "❌ No se pudo cargar el documento seleccionado."
-                ),
-                "reply_markup": {
-                    "inline_keyboard": [[{
-                        "text": "👥 Usuarios",
-                        "callback_data": "menu:usuarios",
-                    }]]
-                },
-            },
+
+        print(
+            "[DETALLE DOCUMENTO ERROR]",
+            error
         )
 
-    solicitante_id = str(documento.get("solicitante_id") or "").strip()
-    estado = documento.get("estado") or "DESCONOCIDO"
+
+        return telegram_request(
+
+            "editMessageText",
+
+            {
+
+                "chat_id":
+                    chat_id,
+
+                "message_id":
+                    message_id,
+
+                "text":
+                    (
+                        "🛡️ DataVault DLP - GM Ingenieros\n\n"
+                        "❌ No se pudo cargar el documento seleccionado."
+                    ),
+
+                "reply_markup": {
+
+                    "inline_keyboard": [[
+                        {
+                            "text":
+                                "👥 Usuarios",
+
+                            "callback_data":
+                                "menu:usuarios",
+                        }
+                    ]]
+
+                },
+
+            },
+
+        )
+
+
+    solicitante_id = str(
+        documento.get(
+            "solicitante_id"
+        )
+        or ""
+    ).strip()
+
+
+    estado = (
+        documento.get(
+            "estado"
+        )
+        or
+        "DESCONOCIDO"
+    )
+
 
     if estado != "PENDIENTE":
+
         texto = (
             "🛡️ DataVault DLP - GM Ingenieros\n\n"
-            f"📁 Archivo: {documento.get('nombre_archivo') or 'Archivo'}\n"
-            f"👤 Solicitante: {documento.get('solicitante_nombre') or 'Usuario'}\n\n"
+            f"📁 Archivo: "
+            f"{documento.get('nombre_archivo') or 'Archivo'}\n"
+            f"👤 Solicitante: "
+            f"{documento.get('solicitante_nombre') or 'Usuario'}\n\n"
             f"⚠️ Este documento ya fue procesado.\n"
             f"Estado actual: {estado}"
         )
-        botones = [[{
-            "text": "👥 Usuarios",
-            "callback_data": "menu:usuarios",
-        }]]
+
+
+        botones = [[
+            {
+                "text":
+                    "👥 Usuarios",
+
+                "callback_data":
+                    "menu:usuarios",
+            }
+        ]]
+
+
     else:
+
         texto = (
             "🛡️ DataVault DLP - GM Ingenieros\n\n"
-            f"📁 Archivo: {documento.get('nombre_archivo') or 'Archivo'}\n"
-            f"👤 Solicitante: {documento.get('solicitante_nombre') or 'Usuario'}\n"
-            f"📧 Correo: {documento.get('solicitante_correo') or ''}\n\n"
-            f"🔑 Hash SHA-256:\n{documento.get('hash_sha256') or ''}\n\n"
-            f"🆔 Auditoría:\n{documento.get('id')}\n\n"
-            "¿Autoriza su transferencia a la custodia corporativa?"
+            f"📁 Archivo: "
+            f"{documento.get('nombre_archivo') or 'Archivo'}\n"
+            f"👤 Solicitante: "
+            f"{documento.get('solicitante_nombre') or 'Usuario'}\n"
+            f"📧 Correo: "
+            f"{documento.get('solicitante_correo') or ''}\n\n"
+            f"🔑 Hash SHA-256:\n"
+            f"{documento.get('hash_sha256') or ''}\n\n"
+            f"🆔 Auditoría:\n"
+            f"{documento.get('id')}\n\n"
+            "¿Autoriza su transferencia "
+            "a la custodia corporativa?"
         )
 
+
         botones = [
+
             [
                 {
-                    "text": "✅ Aprobar",
-                    "callback_data": f"aprobar:{auditoria_id}",
+                    "text":
+                        "✅ Aprobar",
+
+                    "callback_data":
+                        f"aprobar:{auditoria_id}",
                 },
+
                 {
-                    "text": "❌ Rechazar",
-                    "callback_data": f"rechazar:{auditoria_id}",
+                    "text":
+                        "❌ Rechazar",
+
+                    "callback_data":
+                        f"rechazar:{auditoria_id}",
                 },
             ],
+
             [
                 {
-                    "text": "🔙 Archivos",
-                    "callback_data": f"usr:{solicitante_id}",
+                    "text":
+                        "🔙 Archivos",
+
+                    "callback_data":
+                        f"usr:{solicitante_id}",
                 },
+
                 {
-                    "text": "👥 Usuarios",
-                    "callback_data": "menu:usuarios",
+                    "text":
+                        "👥 Usuarios",
+
+                    "callback_data":
+                        "menu:usuarios",
                 },
             ],
+
         ]
 
+
     return telegram_request(
+
         "editMessageText",
+
         {
-            "chat_id": chat_id,
-            "message_id": message_id,
-            "text": texto,
-            "reply_markup": {"inline_keyboard": botones},
+
+            "chat_id":
+                chat_id,
+
+            "message_id":
+                message_id,
+
+            "text":
+                texto,
+
+            "reply_markup": {
+                "inline_keyboard":
+                    botones
+            },
+
         },
+
     )
 
 
@@ -1786,7 +2832,6 @@ def configurar_webhook_url(
         url_actual = ""
 
 
-    # Si ya está bien, no hacer nada.
     if url_actual == webhook_url:
 
         return {
@@ -1850,7 +2895,12 @@ def startup_event():
 
     print(
         "Google Drive:",
-        "CONFIGURADO" if google_drive_configurado() else "NO CONFIGURADO"
+        (
+            "CONFIGURADO"
+            if google_drive_configurado()
+            else
+            "NO CONFIGURADO"
+        )
     )
 
     print(
@@ -1861,7 +2911,8 @@ def startup_event():
     print(
         "PUBLIC_BASE_URL:",
         PUBLIC_BASE_URL
-        or "(se detectará al subir)"
+        or
+        "(se detectará al subir)"
     )
 
     print("=" * 60)
@@ -2014,23 +3065,28 @@ async def registrar_y_solicitar_custodia(
 
 ):
 
-    # --------------------------------------------------------
-    # VALIDAR SESIÓN E IDENTIDAD REAL EN SUPABASE AUTH
-    # --------------------------------------------------------
+    usuario_auth = (
+        obtener_usuario_supabase_desde_request(
+            request
+        )
+    )
 
-    usuario_auth = obtener_usuario_supabase_desde_request(request)
 
-    solicitante_id = usuario_auth["id"]
-    solicitante_nombre = usuario_auth["nombre"]
-    solicitante_correo = usuario_auth["correo"]
+    solicitante_id = (
+        usuario_auth["id"]
+    )
 
-    # Mantener compatibilidad con los mensajes y la columna antigua
+    solicitante_nombre = (
+        usuario_auth["nombre"]
+    )
+
+    solicitante_correo = (
+        usuario_auth["correo"]
+    )
+
+
     usuario = solicitante_nombre
 
-
-    # --------------------------------------------------------
-    # VALIDAR TELEGRAM
-    # --------------------------------------------------------
 
     if not TELEGRAM_TOKEN:
 
@@ -2060,10 +3116,6 @@ async def registrar_y_solicitar_custodia(
         )
 
 
-    # --------------------------------------------------------
-    # ASEGURAR WEBHOOK CORRECTO
-    # --------------------------------------------------------
-
     base_url_actual = obtener_base_url_request(
         request
     )
@@ -2080,10 +3132,6 @@ async def registrar_y_solicitar_custodia(
     )
 
 
-    # --------------------------------------------------------
-    # LEER ARCHIVO EN RAM
-    # --------------------------------------------------------
-
     contenido = await file.read()
 
 
@@ -2099,22 +3147,21 @@ async def registrar_y_solicitar_custodia(
         )
 
 
-    # --------------------------------------------------------
-    # SHA-256
-    # --------------------------------------------------------
-
     hash_sha256 = hashlib.sha256(
         contenido
     ).hexdigest()
 
 
-    # --------------------------------------------------------
-    # RENOMBRAR CORRELATIVO SI YA EXISTE
-    # --------------------------------------------------------
+    nombre_original = (
+        file.filename
+        or
+        "archivo_sin_nombre"
+    )
 
-    nombre_original = file.filename or "archivo_sin_nombre"
 
-    nombre_base, extension = os.path.splitext(nombre_original)
+    nombre_base, extension = os.path.splitext(
+        nombre_original
+    )
 
 
     try:
@@ -2123,29 +3170,48 @@ async def registrar_y_solicitar_custodia(
 
             supabase
 
-            .table("auditoria_custodia")
+            .table(
+                "auditoria_custodia"
+            )
 
-            .select("nombre_archivo")
+            .select(
+                "nombre_archivo"
+            )
 
-            .ilike("nombre_archivo", f"{nombre_base}%{extension}")
+            .ilike(
+                "nombre_archivo",
+                f"{nombre_base}%{extension}"
+            )
 
             .execute()
 
         )
 
 
-        archivos_existentes = res_existentes.data or []
+        archivos_existentes = (
+            res_existentes.data
+            or []
+        )
 
 
         if archivos_existentes:
 
-            contador = len(archivos_existentes) + 1
+            contador = (
+                len(archivos_existentes)
+                + 1
+            )
 
-            nombre_final = f"{nombre_base} ({contador}){extension}"
+            nombre_final = (
+                f"{nombre_base} "
+                f"({contador})"
+                f"{extension}"
+            )
 
         else:
 
-            nombre_final = nombre_original
+            nombre_final = (
+                nombre_original
+            )
 
 
     except Exception as e_nombre:
@@ -2155,12 +3221,10 @@ async def registrar_y_solicitar_custodia(
             e_nombre
         )
 
-        nombre_final = nombre_original
+        nombre_final = (
+            nombre_original
+        )
 
-
-    # --------------------------------------------------------
-    # REGISTRAR EN SUPABASE
-    # --------------------------------------------------------
 
     registro = {
 
@@ -2171,9 +3235,7 @@ async def registrar_y_solicitar_custodia(
             hash_sha256,
 
         "tamano_bytes":
-            len(
-                contenido
-            ),
+            len(contenido),
 
         "estado":
             "PENDIENTE",
@@ -2254,11 +3316,9 @@ async def registrar_y_solicitar_custodia(
     )
 
 
-    # --------------------------------------------------------
-    # ALMACENAR TEMPORALMENTE EN RAM
-    # --------------------------------------------------------
-
-    ARCHIVOS_EN_RAM[str(id_auditoria)] = {
+    ARCHIVOS_EN_RAM[
+        str(id_auditoria)
+    ] = {
 
         "nombre":
             nombre_final,
@@ -2278,30 +3338,42 @@ async def registrar_y_solicitar_custodia(
     }
 
 
-    # --------------------------------------------------------
-    # NOTIFICAR MENÚ DE PENDIENTES A LOS CUSTODIOS
-    # --------------------------------------------------------
-
     resultados_telegram = []
     enviados_correctamente = 0
 
+
     for chat_id in AUTHORIZED_CHAT_IDS:
-        resultado = mostrar_menu_usuarios(chat_id)
-        ok = bool(resultado.get("ok"))
+
+        resultado = mostrar_menu_usuarios(
+            chat_id
+        )
+
+        ok = bool(
+            resultado.get("ok")
+        )
+
 
         if ok:
+
             enviados_correctamente += 1
 
+
         resultados_telegram.append({
-            "chat_id": chat_id,
-            "ok": ok,
-            "description": resultado.get("description", "OK"),
+
+            "chat_id":
+                chat_id,
+
+            "ok":
+                ok,
+
+            "description":
+                resultado.get(
+                    "description",
+                    "OK"
+                ),
+
         })
 
-
-    # --------------------------------------------------------
-    # NADIE RECIBIÓ LA ALERTA
-    # --------------------------------------------------------
 
     if enviados_correctamente == 0:
 
@@ -2335,7 +3407,8 @@ async def registrar_y_solicitar_custodia(
         "mensaje":
             (
                 "Documento registrado "
-                "y menú de pendientes notificado a Telegram."
+                "y menú de pendientes "
+                "notificado a Telegram."
             ),
 
         "id_auditoria":
@@ -2360,47 +3433,130 @@ async def registrar_y_solicitar_custodia(
 # APOYO PARA CARGA POR LOTES
 # ============================================================
 
-def normalizar_ruta_relativa(ruta: str, nombre_archivo: str) -> str:
-    """Normaliza una ruta enviada por el navegador sin escribir nada a disco."""
-    ruta_limpia = str(ruta or nombre_archivo or "archivo_sin_nombre")
-    ruta_limpia = ruta_limpia.replace("\\", "/").lstrip("/")
+def normalizar_ruta_relativa(
+    ruta: str,
+    nombre_archivo: str
+) -> str:
+
+    ruta_limpia = str(
+        ruta
+        or
+        nombre_archivo
+        or
+        "archivo_sin_nombre"
+    )
+
+    ruta_limpia = (
+        ruta_limpia
+        .replace("\\", "/")
+        .lstrip("/")
+    )
+
 
     partes = [
+
         parte
-        for parte in ruta_limpia.split("/")
-        if parte not in ("", ".", "..")
-    ]
 
-    if not partes:
-        return nombre_archivo or "archivo_sin_nombre"
+        for parte
+        in ruta_limpia.split("/")
 
-    return "/".join(partes)
-
-
-def obtener_nombre_correlativo(nombre_original: str) -> str:
-    """Conserva la misma lógica de correlativos del endpoint individual."""
-    nombre_original = nombre_original or "archivo_sin_nombre"
-    nombre_base, extension = os.path.splitext(nombre_original)
-
-    try:
-        res_existentes = (
-            supabase
-            .table("auditoria_custodia")
-            .select("nombre_archivo")
-            .ilike("nombre_archivo", f"{nombre_base}%{extension}")
-            .execute()
+        if parte not in (
+            "",
+            ".",
+            ".."
         )
 
-        archivos_existentes = res_existentes.data or []
+    ]
+
+
+    if not partes:
+
+        return (
+            nombre_archivo
+            or
+            "archivo_sin_nombre"
+        )
+
+
+    return "/".join(
+        partes
+    )
+
+
+def obtener_nombre_correlativo(
+    nombre_original: str
+) -> str:
+
+    nombre_original = (
+        nombre_original
+        or
+        "archivo_sin_nombre"
+    )
+
+
+    nombre_base, extension = (
+        os.path.splitext(
+            nombre_original
+        )
+    )
+
+
+    try:
+
+        res_existentes = (
+
+            supabase
+
+            .table(
+                "auditoria_custodia"
+            )
+
+            .select(
+                "nombre_archivo"
+            )
+
+            .ilike(
+                "nombre_archivo",
+                f"{nombre_base}%{extension}"
+            )
+
+            .execute()
+
+        )
+
+
+        archivos_existentes = (
+            res_existentes.data
+            or []
+        )
+
 
         if archivos_existentes:
-            contador = len(archivos_existentes) + 1
-            return f"{nombre_base} ({contador}){extension}"
+
+            contador = (
+                len(
+                    archivos_existentes
+                )
+                + 1
+            )
+
+            return (
+                f"{nombre_base} "
+                f"({contador})"
+                f"{extension}"
+            )
+
 
         return nombre_original
 
+
     except Exception as error:
-        print("[CORRELATIVO BATCH ERROR]", error)
+
+        print(
+            "[CORRELATIVO BATCH ERROR]",
+            error
+        )
+
         return nombre_original
 
 
@@ -2408,23 +3564,51 @@ def obtener_nombre_correlativo(nombre_original: str) -> str:
 # NOTIFICACIÓN TELEGRAM EN SEGUNDO PLANO
 # ============================================================
 
-def notificar_menu_pendientes_background(base_url: str = ""):
-    # Revalidar/configurar el webhook usando el dominio REAL de la petición
-    # sin bloquear la respuesta del navegador. Esto evita que Telegram quede
-    # apuntando a un dominio anterior de Railway después de un redeploy/cambio.
+def notificar_menu_pendientes_background(
+    base_url: str = ""
+):
+
     if base_url:
+
         try:
-            estado_webhook = configurar_webhook_url(base_url)
-            print(f"[WEBHOOK BATCH BG] {estado_webhook}")
+
+            estado_webhook = configurar_webhook_url(
+                base_url
+            )
+
+            print(
+                f"[WEBHOOK BATCH BG] "
+                f"{estado_webhook}"
+            )
+
         except Exception as error:
-            print(f"[WEBHOOK BATCH BG ERROR] {error}")
+
+            print(
+                f"[WEBHOOK BATCH BG ERROR] "
+                f"{error}"
+            )
+
 
     for chat_id in AUTHORIZED_CHAT_IDS:
+
         try:
-            resultado = mostrar_menu_usuarios(chat_id)
-            print(f"[TELEGRAM BATCH BG] chat={chat_id} resultado={resultado}")
+
+            resultado = mostrar_menu_usuarios(
+                chat_id
+            )
+
+            print(
+                f"[TELEGRAM BATCH BG] "
+                f"chat={chat_id} "
+                f"resultado={resultado}"
+            )
+
         except Exception as error:
-            print(f"[TELEGRAM BATCH BG ERROR] chat={chat_id}: {error}")
+
+            print(
+                f"[TELEGRAM BATCH BG ERROR] "
+                f"chat={chat_id}: {error}"
+            )
 
 
 # ============================================================
@@ -2433,226 +3617,527 @@ def notificar_menu_pendientes_background(base_url: str = ""):
 
 @app.post("/upload-batch")
 async def registrar_lote_custodia(
+
     request: Request,
-    background_tasks: BackgroundTasks,
-    files: List[UploadFile] = File(...),
-    relative_paths: List[str] = Form(default=[]),
-    carpeta: str = Form("PLANOS"),
-    lote_id: str = Form("")
+
+    background_tasks:
+        BackgroundTasks,
+
+    files:
+        List[UploadFile]
+        = File(...),
+
+    relative_paths:
+        List[str]
+        = Form(default=[]),
+
+    carpeta:
+        str
+        = Form("PLANOS"),
+
+    lote_id:
+        str
+        = Form("")
+
 ):
-    """
-    Registra un lote completo manteniendo cada archivo como una auditoría
-    independiente. Todos los registros comparten lote_id y conservan su
-    ruta relativa cuando provienen de una carpeta seleccionada en la web.
-    """
 
-    # --------------------------------------------------------
-    # IDENTIDAD REAL DESDE SUPABASE AUTH
-    # --------------------------------------------------------
-    usuario_auth = obtener_usuario_supabase_desde_request(request)
-    solicitante_id = usuario_auth["id"]
-    solicitante_nombre = usuario_auth["nombre"]
-    solicitante_correo = usuario_auth["correo"]
+    usuario_auth = (
+        obtener_usuario_supabase_desde_request(
+            request
+        )
+    )
 
-    # --------------------------------------------------------
-    # VALIDACIONES GENERALES DEL LOTE
-    # --------------------------------------------------------
+
+    solicitante_id = (
+        usuario_auth["id"]
+    )
+
+    solicitante_nombre = (
+        usuario_auth["nombre"]
+    )
+
+    solicitante_correo = (
+        usuario_auth["correo"]
+    )
+
+
     if not files:
-        raise HTTPException(status_code=400, detail="No se recibieron archivos.")
+
+        raise HTTPException(
+            status_code=400,
+            detail=
+                "No se recibieron archivos."
+        )
+
 
     if len(files) > MAX_BATCH_FILES:
+
         raise HTTPException(
+
             status_code=400,
+
             detail=(
-                f"El lote contiene {len(files)} archivos. "
-                f"El máximo permitido actualmente es {MAX_BATCH_FILES}."
+                f"El lote contiene "
+                f"{len(files)} archivos. "
+                f"El máximo permitido actualmente "
+                f"es {MAX_BATCH_FILES}."
             )
+
         )
 
-    if relative_paths and len(relative_paths) != len(files):
+
+    if (
+        relative_paths
+        and
+        len(relative_paths) != len(files)
+    ):
+
         raise HTTPException(
+
             status_code=400,
-            detail="La cantidad de rutas relativas no coincide con la cantidad de archivos."
+
+            detail=(
+                "La cantidad de rutas relativas "
+                "no coincide con la cantidad "
+                "de archivos."
+            )
+
         )
+
 
     if not TELEGRAM_TOKEN:
-        raise HTTPException(status_code=500, detail="TELEGRAM_TOKEN no está configurado.")
+
+        raise HTTPException(
+            status_code=500,
+            detail=
+                "TELEGRAM_TOKEN no está configurado."
+        )
+
 
     if not AUTHORIZED_CHAT_IDS:
-        raise HTTPException(status_code=500, detail="No hay Telegram IDs autorizados.")
 
-    # --------------------------------------------------------
-    # LOTE UUID
-    # --------------------------------------------------------
+        raise HTTPException(
+            status_code=500,
+            detail=
+                "No hay Telegram IDs autorizados."
+        )
+
+
     if lote_id.strip():
-        try:
-            lote_uuid = str(UUID(lote_id.strip()))
-        except (ValueError, TypeError, AttributeError):
-            raise HTTPException(status_code=400, detail="lote_id inválido.")
-    else:
-        lote_uuid = str(uuid4())
 
-    # --------------------------------------------------------
-    # WEBHOOK TELEGRAM
-    # --------------------------------------------------------
-    # Capturamos el dominio REAL de esta petición. La corrección del webhook
-    # se hará en segundo plano para no retrasar la respuesta de /upload-batch.
-    base_url_actual = obtener_base_url_request(request)
+        try:
+
+            lote_uuid = str(
+                UUID(
+                    lote_id.strip()
+                )
+            )
+
+        except (
+            ValueError,
+            TypeError,
+            AttributeError
+        ):
+
+            raise HTTPException(
+                status_code=400,
+                detail="lote_id inválido."
+            )
+
+    else:
+
+        lote_uuid = str(
+            uuid4()
+        )
+
+
+    base_url_actual = (
+        obtener_base_url_request(
+            request
+        )
+    )
+
+
     estado_webhook = {
-        "ok": True,
-        "changed": False,
-        "source": "background",
-        "base_url": base_url_actual
+
+        "ok":
+            True,
+
+        "changed":
+            False,
+
+        "source":
+            "background",
+
+        "base_url":
+            base_url_actual
     }
+
 
     procesados = []
     errores = []
     cancelado = False
 
-    # --------------------------------------------------------
-    # PROCESAR ARCHIVOS UNO A UNO EN RAM
-    # --------------------------------------------------------
-    for indice, archivo in enumerate(files):
+
+    for indice, archivo in enumerate(
+        files
+    ):
+
         try:
-            # Si el navegador canceló la petición, detener los pendientes.
+
             if await request.is_disconnected():
+
                 cancelado = True
-                print(f"[BATCH CANCELLED] lote={lote_uuid} indice={indice}")
+
+                print(
+                    f"[BATCH CANCELLED] "
+                    f"lote={lote_uuid} "
+                    f"indice={indice}"
+                )
+
                 break
+
         except Exception:
-            # Si la plataforma no puede informar desconexión, continuar.
+
             pass
 
-        nombre_original = archivo.filename or f"archivo_{indice + 1}"
-        ruta_original = (
-            relative_paths[indice]
-            if indice < len(relative_paths)
-            else nombre_original
+
+        nombre_original = (
+            archivo.filename
+            or
+            f"archivo_{indice + 1}"
         )
-        ruta_relativa = normalizar_ruta_relativa(ruta_original, nombre_original)
+
+
+        ruta_original = (
+
+            relative_paths[indice]
+
+            if indice < len(relative_paths)
+
+            else nombre_original
+
+        )
+
+
+        ruta_relativa = (
+            normalizar_ruta_relativa(
+                ruta_original,
+                nombre_original
+            )
+        )
+
 
         try:
+
             contenido = await archivo.read()
 
+
             if not contenido:
+
                 errores.append({
-                    "archivo": nombre_original,
-                    "ruta_relativa": ruta_relativa,
-                    "error": "Archivo vacío"
+
+                    "archivo":
+                        nombre_original,
+
+                    "ruta_relativa":
+                        ruta_relativa,
+
+                    "error":
+                        "Archivo vacío"
+
                 })
+
                 continue
+
 
             if len(contenido) > MAX_FILE_SIZE_BYTES:
+
                 errores.append({
-                    "archivo": nombre_original,
-                    "ruta_relativa": ruta_relativa,
-                    "error": f"Supera el límite de {MAX_FILE_SIZE_MB} MB"
+
+                    "archivo":
+                        nombre_original,
+
+                    "ruta_relativa":
+                        ruta_relativa,
+
+                    "error":
+                        (
+                            f"Supera el límite de "
+                            f"{MAX_FILE_SIZE_MB} MB"
+                        )
+
                 })
+
                 continue
 
-            hash_sha256 = hashlib.sha256(contenido).hexdigest()
-            nombre_final = obtener_nombre_correlativo(nombre_original)
 
-            registro = {
-                "nombre_archivo": nombre_final,
-                "hash_sha256": hash_sha256,
-                "tamano_bytes": len(contenido),
-                "estado": "PENDIENTE",
-                "usuario_solicitante": solicitante_nombre,
-                "solicitante_id": solicitante_id,
-                "solicitante_nombre": solicitante_nombre,
-                "solicitante_correo": solicitante_correo,
-                "lote_id": lote_uuid,
-                "ruta_relativa": ruta_relativa,
-            }
+            hash_sha256 = hashlib.sha256(
+                contenido
+            ).hexdigest()
 
-            respuesta_db = (
-                supabase
-                .table("auditoria_custodia")
-                .insert(registro)
-                .execute()
+
+            nombre_final = obtener_nombre_correlativo(
+                nombre_original
             )
 
-            if not respuesta_db.data:
-                raise RuntimeError("Supabase no devolvió el registro insertado.")
 
-            id_auditoria = respuesta_db.data[0].get("id")
+            registro = {
 
-            ARCHIVOS_EN_RAM[str(id_auditoria)] = {
-                "nombre": nombre_final,
-                "contenido": contenido,
-                "solicitante_id": solicitante_id,
-                "solicitante_nombre": solicitante_nombre,
-                "solicitante_correo": solicitante_correo,
-                "lote_id": lote_uuid,
-                "ruta_relativa": ruta_relativa,
-                "carpeta": carpeta,
+                "nombre_archivo":
+                    nombre_final,
+
+                "hash_sha256":
+                    hash_sha256,
+
+                "tamano_bytes":
+                    len(contenido),
+
+                "estado":
+                    "PENDIENTE",
+
+                "usuario_solicitante":
+                    solicitante_nombre,
+
+                "solicitante_id":
+                    solicitante_id,
+
+                "solicitante_nombre":
+                    solicitante_nombre,
+
+                "solicitante_correo":
+                    solicitante_correo,
+
+                "lote_id":
+                    lote_uuid,
+
+                "ruta_relativa":
+                    ruta_relativa,
+
             }
 
+
+            respuesta_db = (
+
+                supabase
+
+                .table(
+                    "auditoria_custodia"
+                )
+
+                .insert(
+                    registro
+                )
+
+                .execute()
+
+            )
+
+
+            if not respuesta_db.data:
+
+                raise RuntimeError(
+                    "Supabase no devolvió "
+                    "el registro insertado."
+                )
+
+
+            id_auditoria = (
+                respuesta_db
+                .data[0]
+                .get("id")
+            )
+
+
+            ARCHIVOS_EN_RAM[
+                str(id_auditoria)
+            ] = {
+
+                "nombre":
+                    nombre_final,
+
+                "contenido":
+                    contenido,
+
+                "solicitante_id":
+                    solicitante_id,
+
+                "solicitante_nombre":
+                    solicitante_nombre,
+
+                "solicitante_correo":
+                    solicitante_correo,
+
+                "lote_id":
+                    lote_uuid,
+
+                "ruta_relativa":
+                    ruta_relativa,
+
+                "carpeta":
+                    carpeta,
+
+            }
+
+
             procesados.append({
-                "id_auditoria": id_auditoria,
-                "nombre_archivo": nombre_final,
-                "ruta_relativa": ruta_relativa,
-                "sha256": hash_sha256,
-                "tamano_bytes": len(contenido),
+
+                "id_auditoria":
+                    id_auditoria,
+
+                "nombre_archivo":
+                    nombre_final,
+
+                "ruta_relativa":
+                    ruta_relativa,
+
+                "sha256":
+                    hash_sha256,
+
+                "tamano_bytes":
+                    len(contenido),
+
             })
+
 
         except Exception as error:
-            print(f"[BATCH FILE ERROR] {nombre_original}: {error}")
+
+            print(
+                f"[BATCH FILE ERROR] "
+                f"{nombre_original}: {error}"
+            )
+
+
             errores.append({
-                "archivo": nombre_original,
-                "ruta_relativa": ruta_relativa,
-                "error": str(error),
+
+                "archivo":
+                    nombre_original,
+
+                "ruta_relativa":
+                    ruta_relativa,
+
+                "error":
+                    str(error),
+
             })
 
-    # --------------------------------------------------------
-    # TELEGRAM: NOTIFICAR DESPUÉS DE RESPONDER AL NAVEGADOR
-    # --------------------------------------------------------
-    # Así un retraso de Telegram no provoca un 502 visual aunque el lote
-    # ya haya sido registrado correctamente en Supabase/RAM.
+
     resultados_telegram = []
     enviados_correctamente = 0
 
+
     if procesados:
+
         background_tasks.add_task(
             notificar_menu_pendientes_background,
             base_url_actual
         )
 
+
     if not procesados and errores:
+
         raise HTTPException(
+
             status_code=400,
+
             detail={
-                "mensaje": "Ningún archivo del lote pudo registrarse.",
-                "lote_id": lote_uuid,
-                "errores": errores,
+
+                "mensaje":
+                    "Ningún archivo del lote "
+                    "pudo registrarse.",
+
+                "lote_id":
+                    lote_uuid,
+
+                "errores":
+                    errores,
+
             }
+
         )
 
-    estado = "cancelado" if cancelado else ("partial" if errores else "ok")
+
+    estado = (
+
+        "cancelado"
+
+        if cancelado
+
+        else (
+
+            "partial"
+
+            if errores
+
+            else "ok"
+
+        )
+
+    )
+
 
     return {
-        "status": estado,
-        "mensaje": (
-            "Lote cancelado parcialmente."
-            if cancelado
-            else (
-                "Lote registrado con algunas observaciones."
-                if errores
-                else "Lote registrado correctamente."
-            )
-        ),
-        "lote_id": lote_uuid,
-        "total_recibidos": len(files),
-        "total_registrados": len(procesados),
-        "total_errores": len(errores),
-        "cancelado": cancelado,
-        "archivos": procesados,
-        "errores": errores,
-        "telegram_enviados": enviados_correctamente,
-        "telegram": resultados_telegram,
-        "telegram_notificacion": "en_cola" if procesados else "no_aplica",
-        "webhook": estado_webhook,
+
+        "status":
+            estado,
+
+        "mensaje":
+            (
+                "Lote cancelado parcialmente."
+
+                if cancelado
+
+                else (
+
+                    "Lote registrado "
+                    "con algunas observaciones."
+
+                    if errores
+
+                    else
+                    "Lote registrado correctamente."
+
+                )
+            ),
+
+        "lote_id":
+            lote_uuid,
+
+        "total_recibidos":
+            len(files),
+
+        "total_registrados":
+            len(procesados),
+
+        "total_errores":
+            len(errores),
+
+        "cancelado":
+            cancelado,
+
+        "archivos":
+            procesados,
+
+        "errores":
+            errores,
+
+        "telegram_enviados":
+            enviados_correctamente,
+
+        "telegram":
+            resultados_telegram,
+
+        "telegram_notificacion":
+            (
+                "en_cola"
+                if procesados
+                else
+                "no_aplica"
+            ),
+
+        "webhook":
+            estado_webhook,
+
     }
 
 
@@ -2661,752 +4146,3030 @@ async def registrar_lote_custodia(
 # ============================================================
 
 @app.post("/admin/users")
-async def crear_usuario_desde_web(request: Request):
-    """Crea una cuenta de Supabase Auth únicamente para un administrador/jefe.
+async def crear_usuario_desde_web(
+    request: Request
+):
 
-    La clave de servicio nunca se expone al frontend: solo se usa en el backend
-    para llamar al endpoint administrativo de Supabase Auth.
-    """
-    usuario = obtener_usuario_supabase_desde_request(request)
+    usuario = (
+        obtener_usuario_supabase_desde_request(
+            request
+        )
+    )
+
+
     if usuario.get("rol") != "jefe":
-        raise HTTPException(status_code=403, detail="Solo el administrador puede crear usuarios.")
 
-    service_key = SUPABASE_SERVICE_ROLE_KEY
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Solo el administrador "
+                "puede crear usuarios."
+            )
+        )
+
+
+    service_key = (
+        SUPABASE_SERVICE_ROLE_KEY
+    )
+
+
     if not service_key:
+
         raise HTTPException(
             status_code=500,
-            detail="Falta SUPABASE_SERVICE_ROLE_KEY en la configuración del backend."
+            detail=(
+                "Falta SUPABASE_SERVICE_ROLE_KEY "
+                "en la configuración del backend."
+            )
         )
 
-    try:
-        payload = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="El cuerpo de la solicitud no es JSON válido.")
 
-    nombre = str(payload.get("nombre") or "").strip()
-    email = str(payload.get("email") or "").strip().lower()
-    rol = str(payload.get("rol") or "subordinado").strip().lower()
-    password = str(payload.get("password") or "")
+    try:
+
+        payload = await request.json()
+
+    except Exception:
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "El cuerpo de la solicitud "
+                "no es JSON válido."
+            )
+        )
+
+
+    nombre = str(
+        payload.get("nombre")
+        or ""
+    ).strip()
+
+
+    email = str(
+        payload.get("email")
+        or ""
+    ).strip().lower()
+
+
+    rol = str(
+        payload.get("rol")
+        or
+        "subordinado"
+    ).strip().lower()
+
+
+    password = str(
+        payload.get("password")
+        or ""
+    )
+
 
     if not nombre:
-        raise HTTPException(status_code=400, detail="El nombre completo es obligatorio.")
-    if not email or "@" not in email:
-        raise HTTPException(status_code=400, detail="Ingresa un correo electrónico válido.")
-    if rol not in ("jefe", "subordinado"):
-        raise HTTPException(status_code=400, detail="El rol debe ser jefe o subordinado.")
-    if len(password) < 6:
-        raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 6 caracteres.")
-    if len(password) > 128:
-        raise HTTPException(status_code=400, detail="La contraseña no puede superar 128 caracteres.")
 
-    supabase_auth_url = f"{SUPABASE_URL}/auth/v1/admin/users"
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "El nombre completo "
+                "es obligatorio."
+            )
+        )
+
+
+    if not email or "@" not in email:
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Ingresa un correo electrónico válido."
+            )
+        )
+
+
+    if rol not in (
+        "jefe",
+        "subordinado"
+    ):
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "El rol debe ser jefe "
+                "o subordinado."
+            )
+        )
+
+
+    if len(password) < 6:
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "La contraseña debe tener "
+                "al menos 6 caracteres."
+            )
+        )
+
+
+    if len(password) > 128:
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "La contraseña no puede "
+                "superar 128 caracteres."
+            )
+        )
+
+
+    supabase_auth_url = (
+        f"{SUPABASE_URL}"
+        f"/auth/v1/admin/users"
+    )
+
+
     headers = {
-        "apikey": service_key,
-        "Authorization": f"Bearer {service_key}",
-        "Content-Type": "application/json",
+
+        "apikey":
+            service_key,
+
+        "Authorization":
+            f"Bearer {service_key}",
+
+        "Content-Type":
+            "application/json",
+
     }
+
+
     body = {
-        "email": email,
-        "password": password,
-        "email_confirm": True,
+
+        "email":
+            email,
+
+        "password":
+            password,
+
+        "email_confirm":
+            True,
+
         "user_metadata": {
-            "full_name": nombre,
-            "rol": rol,
+
+            "full_name":
+                nombre,
+
+            "rol":
+                rol,
+
         },
+
         "app_metadata": {
-            "rol": rol,
+
+            "rol":
+                rol,
+
         },
+
     }
+
 
     try:
+
         respuesta = requests.post(
+
             supabase_auth_url,
+
             headers=headers,
+
             json=body,
+
             timeout=20,
+
         )
+
+
     except requests.RequestException as error:
-        print("[SUPABASE CREATE USER ERROR]", error)
-        raise HTTPException(status_code=503, detail="No se pudo conectar con Supabase Auth.")
 
-    if respuesta.status_code not in (200, 201):
+        print(
+            "[SUPABASE CREATE USER ERROR]",
+            error
+        )
+
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "No se pudo conectar "
+                "con Supabase Auth."
+            )
+        )
+
+
+    if respuesta.status_code not in (
+        200,
+        201
+    ):
+
         try:
-            detalle = respuesta.json()
-        except ValueError:
-            detalle = {}
-        mensaje = str(detalle.get("msg") or detalle.get("message") or detalle.get("error_description") or "")
-        mensaje_lower = mensaje.lower()
-        if "already" in mensaje_lower or "exist" in mensaje_lower or "duplicate" in mensaje_lower:
-            raise HTTPException(status_code=409, detail="Ya existe un usuario con ese correo.")
-        print("[SUPABASE CREATE USER REJECTED]", respuesta.status_code, respuesta.text[:500])
-        raise HTTPException(status_code=502, detail="Supabase no permitió crear el usuario.")
 
-    creado = respuesta.json() or {}
+            detalle = respuesta.json()
+
+        except ValueError:
+
+            detalle = {}
+
+
+        mensaje = str(
+            detalle.get("msg")
+            or
+            detalle.get("message")
+            or
+            detalle.get("error_description")
+            or
+            ""
+        )
+
+
+        mensaje_lower = mensaje.lower()
+
+
+        if (
+            "already" in mensaje_lower
+            or
+            "exist" in mensaje_lower
+            or
+            "duplicate" in mensaje_lower
+        ):
+
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Ya existe un usuario "
+                    "con ese correo."
+                )
+            )
+
+
+        print(
+            "[SUPABASE CREATE USER REJECTED]",
+            respuesta.status_code,
+            respuesta.text[:500]
+        )
+
+
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Supabase no permitió crear el usuario."
+            )
+        )
+
+
+    creado = (
+        respuesta.json()
+        or {}
+    )
+
+
     return {
-        "status": "ok",
-        "mensaje": "Usuario creado correctamente.",
+
+        "status":
+            "ok",
+
+        "mensaje":
+            "Usuario creado correctamente.",
+
         "usuario": {
-            "id": creado.get("id"),
-            "email": creado.get("email") or email,
-            "nombre": nombre,
-            "rol": rol,
+
+            "id":
+                creado.get("id"),
+
+            "email":
+                creado.get("email")
+                or email,
+
+            "nombre":
+                nombre,
+
+            "rol":
+                rol,
+
         },
+
     }
 
 
 @app.get("/admin/users")
-async def listar_usuarios_desde_web(request: Request):
-    """Devuelve las cuentas de acceso del sistema para que el administrador
-    pueda verlas y gestionarlas desde el panel web."""
-    usuario = obtener_usuario_supabase_desde_request(request)
-    if usuario.get("rol") != "jefe":
-        raise HTTPException(status_code=403, detail="Solo el administrador puede consultar los usuarios.")
+async def listar_usuarios_desde_web(
+    request: Request
+):
 
-    service_key = SUPABASE_SERVICE_ROLE_KEY
+    usuario = (
+        obtener_usuario_supabase_desde_request(
+            request
+        )
+    )
+
+
+    if usuario.get("rol") != "jefe":
+
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Solo el administrador "
+                "puede consultar los usuarios."
+            )
+        )
+
+
+    service_key = (
+        SUPABASE_SERVICE_ROLE_KEY
+    )
+
+
     if not service_key:
-        raise HTTPException(status_code=500, detail="Falta SUPABASE_SERVICE_ROLE_KEY en la configuración del backend.")
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Falta SUPABASE_SERVICE_ROLE_KEY "
+                "en la configuración del backend."
+            )
+        )
+
 
     headers = {
-        "apikey": service_key,
-        "Authorization": f"Bearer {service_key}",
+
+        "apikey":
+            service_key,
+
+        "Authorization":
+            f"Bearer {service_key}",
+
     }
+
+
     try:
+
         respuesta = requests.get(
-            f"{SUPABASE_URL}/auth/v1/admin/users",
+
+            f"{SUPABASE_URL}"
+            f"/auth/v1/admin/users",
+
             headers=headers,
-            params={"page": 1, "per_page": 1000},
+
+            params={
+                "page": 1,
+                "per_page": 1000
+            },
+
             timeout=20,
+
         )
+
+
     except requests.RequestException as error:
-        print("[SUPABASE LIST USERS ERROR]", error)
-        raise HTTPException(status_code=503, detail="No se pudo conectar con Supabase Auth.")
+
+        print(
+            "[SUPABASE LIST USERS ERROR]",
+            error
+        )
+
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "No se pudo conectar "
+                "con Supabase Auth."
+            )
+        )
+
 
     if respuesta.status_code != 200:
-        print("[SUPABASE LIST USERS REJECTED]", respuesta.status_code, respuesta.text[:500])
-        raise HTTPException(status_code=502, detail="Supabase no permitió consultar los usuarios.")
+
+        print(
+            "[SUPABASE LIST USERS REJECTED]",
+            respuesta.status_code,
+            respuesta.text[:500]
+        )
+
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Supabase no permitió "
+                "consultar los usuarios."
+            )
+        )
+
 
     try:
-        data = respuesta.json() or {}
+
+        data = (
+            respuesta.json()
+            or {}
+        )
+
     except ValueError:
-        raise HTTPException(status_code=502, detail="Supabase devolvió una respuesta inválida.")
+
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Supabase devolvió "
+                "una respuesta inválida."
+            )
+        )
+
 
     usuarios = []
-    for item in data.get("users", []):
-        metadata = item.get("user_metadata") or {}
-        app_metadata = item.get("app_metadata") or {}
+
+
+    for item in data.get(
+        "users",
+        []
+    ):
+
+        metadata = (
+            item.get("user_metadata")
+            or {}
+        )
+
+        app_metadata = (
+            item.get("app_metadata")
+            or {}
+        )
+
+
         usuarios.append({
-            "id": item.get("id"),
-            "email": item.get("email") or "",
-            "nombre": metadata.get("full_name") or metadata.get("name") or item.get("email") or "Usuario",
-            "rol": app_metadata.get("rol") or metadata.get("rol") or "subordinado",
-            "created_at": item.get("created_at"),
-            "last_sign_in_at": item.get("last_sign_in_at"),
+
+            "id":
+                item.get("id"),
+
+            "email":
+                item.get("email")
+                or "",
+
+            "nombre":
+                (
+                    metadata.get("full_name")
+                    or
+                    metadata.get("name")
+                    or
+                    item.get("email")
+                    or
+                    "Usuario"
+                ),
+
+            "rol":
+                (
+                    app_metadata.get("rol")
+                    or
+                    metadata.get("rol")
+                    or
+                    "subordinado"
+                ),
+
+            "created_at":
+                item.get("created_at"),
+
+            "last_sign_in_at":
+                item.get("last_sign_in_at"),
+
         })
 
-    return {"status": "ok", "usuarios": usuarios}
+
+    return {
+        "status": "ok",
+        "usuarios": usuarios
+    }
 
 
 @app.delete("/admin/users/{user_id}")
-async def eliminar_usuario_desde_web(user_id: str, request: Request):
-    """Elimina una cuenta de Supabase Auth desde el panel del administrador.
-    El propio administrador no puede eliminar su cuenta desde aquí."""
-    usuario = obtener_usuario_supabase_desde_request(request)
+async def eliminar_usuario_desde_web(
+    user_id: str,
+    request: Request
+):
+
+    usuario = (
+        obtener_usuario_supabase_desde_request(
+            request
+        )
+    )
+
+
     if usuario.get("rol") != "jefe":
-        raise HTTPException(status_code=403, detail="Solo el administrador puede eliminar usuarios.")
+
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Solo el administrador "
+                "puede eliminar usuarios."
+            )
+        )
+
 
     try:
-        target_id = str(UUID(user_id.strip()))
-    except (ValueError, AttributeError):
-        raise HTTPException(status_code=400, detail="ID de usuario inválido.")
 
-    current_id = str(usuario.get("id") or usuario.get("sub") or "").strip()
+        target_id = str(
+            UUID(
+                user_id.strip()
+            )
+        )
+
+    except (
+        ValueError,
+        AttributeError
+    ):
+
+        raise HTTPException(
+            status_code=400,
+            detail="ID de usuario inválido."
+        )
+
+
+    current_id = str(
+        usuario.get("id")
+        or
+        usuario.get("sub")
+        or
+        ""
+    ).strip()
+
+
     if target_id == current_id:
-        raise HTTPException(status_code=400, detail="No puedes eliminar tu propia cuenta.")
 
-    service_key = SUPABASE_SERVICE_ROLE_KEY
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "No puedes eliminar "
+                "tu propia cuenta."
+            )
+        )
+
+
+    service_key = (
+        SUPABASE_SERVICE_ROLE_KEY
+    )
+
+
     if not service_key:
-        raise HTTPException(status_code=500, detail="Falta SUPABASE_SERVICE_ROLE_KEY en la configuración del backend.")
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Falta SUPABASE_SERVICE_ROLE_KEY "
+                "en la configuración del backend."
+            )
+        )
+
 
     headers = {
-        "apikey": service_key,
-        "Authorization": f"Bearer {service_key}",
+
+        "apikey":
+            service_key,
+
+        "Authorization":
+            f"Bearer {service_key}",
+
     }
+
+
     try:
+
         respuesta = requests.delete(
-            f"{SUPABASE_URL}/auth/v1/admin/users/{target_id}",
+
+            f"{SUPABASE_URL}"
+            f"/auth/v1/admin/users/"
+            f"{target_id}",
+
             headers=headers,
+
             timeout=20,
+
         )
+
+
     except requests.RequestException as error:
-        print("[SUPABASE DELETE USER ERROR]", error)
-        raise HTTPException(status_code=503, detail="No se pudo conectar con Supabase Auth.")
 
-    if respuesta.status_code not in (200, 204):
+        print(
+            "[SUPABASE DELETE USER ERROR]",
+            error
+        )
+
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "No se pudo conectar "
+                "con Supabase Auth."
+            )
+        )
+
+
+    if respuesta.status_code not in (
+        200,
+        204
+    ):
+
         try:
-            detalle = respuesta.json()
-        except ValueError:
-            detalle = {}
-        mensaje = str(detalle.get("msg") or detalle.get("message") or detalle.get("error_description") or "")
-        print("[SUPABASE DELETE USER REJECTED]", respuesta.status_code, respuesta.text[:500])
-        raise HTTPException(status_code=502, detail=mensaje or "Supabase no permitió eliminar el usuario.")
 
-    return {"status": "ok", "mensaje": "Usuario eliminado correctamente.", "usuario_id": target_id}
+            detalle = respuesta.json()
+
+        except ValueError:
+
+            detalle = {}
+
+
+        mensaje = str(
+            detalle.get("msg")
+            or
+            detalle.get("message")
+            or
+            detalle.get("error_description")
+            or
+            ""
+        )
+
+
+        print(
+            "[SUPABASE DELETE USER REJECTED]",
+            respuesta.status_code,
+            respuesta.text[:500]
+        )
+
+
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                mensaje
+                or
+                "Supabase no permitió "
+                "eliminar el usuario."
+            )
+        )
+
+
+    return {
+
+        "status":
+            "ok",
+
+        "mensaje":
+            "Usuario eliminado correctamente.",
+
+        "usuario_id":
+            target_id
+
+    }
+
+
+# ============================================================
+# DECISIONES DE CUSTODIA (WEB + TELEGRAM)
+# ============================================================
+
+def resolver_custodia_archivo(
+    auditoria_id: str,
+    aprobar: bool
+):
+
+    auditoria_id = str(
+        UUID(
+            str(
+                auditoria_id
+            ).strip()
+        )
+    )
+
+
+    with DECISION_LOCK:
+
+        consulta = (
+            supabase
+            .table(
+                "auditoria_custodia"
+            )
+            .select(
+                "id,estado,nombre_archivo,hash_sha256,"
+                "solicitante_id,solicitante_nombre,"
+                "solicitante_correo"
+            )
+            .eq(
+                "id",
+                auditoria_id
+            )
+            .limit(1)
+            .execute()
+        )
+
+
+        if not consulta.data:
+
+            raise ValueError(
+                f"No existe la auditoría "
+                f"{auditoria_id}."
+            )
+
+
+        registro = (
+            consulta.data[0]
+        )
+
+
+        estado_actual = str(
+            registro.get("estado")
+            or ""
+        ).upper()
+
+
+        if estado_actual != "PENDIENTE":
+
+            return {
+
+                "procesado":
+                    False,
+
+                "estado":
+                    (
+                        estado_actual
+                        or
+                        "DESCONOCIDO"
+                    ),
+
+                "registro":
+                    registro,
+
+                "drive_id":
+                    registro.get(
+                        "drive_file_id"
+                    ),
+
+                "resultado_update":
+                    None,
+
+            }
+
+
+        drive_id = None
+        resultado_update = None
+
+
+        if aprobar:
+
+            archivo_ram = (
+                ARCHIVOS_EN_RAM.get(
+                    auditoria_id
+                )
+            )
+
+
+            if not archivo_ram:
+
+                raise RuntimeError(
+                    "El archivo ya no está disponible "
+                    "en RAM. No se modificó el estado "
+                    "en Supabase."
+                )
+
+
+            drive_id = subir_a_google_drive(
+
+                archivo_ram[
+                    "nombre"
+                ],
+
+                archivo_ram[
+                    "contenido"
+                ],
+
+                auditoria_id=
+                    auditoria_id,
+
+            )
+
+
+            if not drive_id:
+
+                raise RuntimeError(
+                    "Google Drive no pudo completar "
+                    "la transferencia. "
+                    "El documento sigue PENDIENTE."
+                )
+
+
+            resultado_update = (
+
+                supabase
+
+                .table(
+                    "auditoria_custodia"
+                )
+
+                .update({
+
+                    "estado":
+                        "APROBADO",
+
+                    "drive_file_id":
+                        drive_id,
+
+                    "drive_parent_id":
+                        GOOGLE_FOLDER_ID,
+
+                    "ubicacion_drive":
+                        "DRIVE PROYECTO",
+
+                    "en_drive":
+                        True,
+
+                    "estado_archivo":
+                        "ACTIVO",
+
+                    "fecha_transferencia":
+                        ahora_iso(),
+
+                    "fecha_ultima_operacion":
+                        ahora_iso(),
+
+                })
+
+                .eq(
+                    "id",
+                    auditoria_id
+                )
+
+                .eq(
+                    "estado",
+                    "PENDIENTE"
+                )
+
+                .execute()
+
+            )
+
+
+            if not resultado_update.data:
+
+                try:
+
+                    service = (
+                        obtener_servicio_google_drive()
+                    )
+
+
+                    (
+                        service
+                        .files()
+                        .delete(
+                            fileId=drive_id,
+                            supportsAllDrives=True
+                        )
+                        .execute()
+                    )
+
+
+                except Exception as rollback_error:
+
+                    print(
+                        "[DRIVE/SUPABASE FILE "
+                        "ROLLBACK ERROR]",
+                        rollback_error
+                    )
+
+
+                raise RuntimeError(
+                    "El archivo llegó a Drive, "
+                    "pero Supabase no pudo confirmar "
+                    "el estado APROBADO. "
+                    "Se intentó revertir la transferencia."
+                )
+
+
+            nuevo_estado = (
+                "APROBADO"
+            )
+
+
+        else:
+
+            resultado_update = (
+
+                supabase
+
+                .table(
+                    "auditoria_custodia"
+                )
+
+                .update({
+                    "estado":
+                        "RECHAZADO"
+                })
+
+                .eq(
+                    "id",
+                    auditoria_id
+                )
+
+                .eq(
+                    "estado",
+                    "PENDIENTE"
+                )
+
+                .execute()
+
+            )
+
+
+            if not resultado_update.data:
+
+                raise RuntimeError(
+                    "No se pudo cambiar "
+                    "el documento a RECHAZADO."
+                )
+
+
+            nuevo_estado = (
+                "RECHAZADO"
+            )
+
+
+        ARCHIVOS_EN_RAM.pop(
+            auditoria_id,
+            None
+        )
+
+
+        return {
+
+            "procesado":
+                True,
+
+            "estado":
+                nuevo_estado,
+
+            "registro":
+                registro,
+
+            "drive_id":
+                drive_id,
+
+            "resultado_update":
+                resultado_update,
+
+        }
+
+
+def resolver_custodia_carpeta(
+    lote_id: str,
+    aprobar: bool
+):
+
+    lote_id = str(
+        UUID(
+            str(
+                lote_id
+            ).strip()
+        )
+    )
+
+
+    with DECISION_LOCK:
+
+        consulta_lote = (
+
+            supabase
+
+            .table(
+                "auditoria_custodia"
+            )
+
+            .select(
+                "id,nombre_archivo,hash_sha256,"
+                "tamano_bytes,estado,solicitante_id,"
+                "solicitante_nombre,solicitante_correo,"
+                "lote_id,ruta_relativa"
+            )
+
+            .eq(
+                "lote_id",
+                lote_id
+            )
+
+            .eq(
+                "estado",
+                "PENDIENTE"
+            )
+
+            .execute()
+
+        )
+
+
+        documentos = (
+            consulta_lote.data
+            or []
+        )
+
+
+        if not documentos:
+
+            return {
+
+                "procesado":
+                    False,
+
+                "estado":
+                    "SIN_PENDIENTES",
+
+                "documentos":
+                    [],
+
+                "drive_lote":
+                    None,
+
+                "resultado_update":
+                    None,
+
+            }
+
+
+        nombre_carpeta = (
+            obtener_carpeta_desde_ruta(
+                documentos[0].get(
+                    "ruta_relativa"
+                )
+            )
+        )
+
+
+        if not nombre_carpeta:
+
+            raise RuntimeError(
+                "El lote no corresponde "
+                "a una carpeta completa."
+            )
+
+
+        drive_lote = None
+        resultado_update = None
+
+
+        if aprobar:
+
+            faltantes_ram = [
+
+                str(
+                    doc.get("id")
+                )
+
+                for doc in documentos
+
+                if not ARCHIVOS_EN_RAM.get(
+                    str(
+                        doc.get("id")
+                    )
+                )
+
+            ]
+
+
+            if faltantes_ram:
+
+                raise RuntimeError(
+                    f"{len(faltantes_ram)} "
+                    "archivo(s) ya no están "
+                    "disponibles en RAM. "
+                    "La carpeta no fue transferida."
+                )
+
+
+            drive_lote = (
+                subir_lote_carpeta_a_drive(
+                    documentos
+                )
+            )
+
+
+            if not drive_lote:
+
+                raise RuntimeError(
+                    "Google Drive no pudo completar "
+                    "toda la carpeta. "
+                    "Los documentos siguen PENDIENTES."
+                )
+
+
+            resultado_update = (
+
+                supabase
+
+                .table(
+                    "auditoria_custodia"
+                )
+
+                .update({
+
+                    "estado":
+                        "APROBADO",
+
+                    "drive_folder_id":
+                        drive_lote[
+                            "folder_id"
+                        ],
+
+                    "drive_parent_id":
+                        GOOGLE_FOLDER_ID,
+
+                    "ubicacion_drive":
+                        drive_lote[
+                            "folder_name"
+                        ],
+
+                    "en_drive":
+                        True,
+
+                    "estado_archivo":
+                        "ACTIVO",
+
+                    "fecha_transferencia":
+                        ahora_iso(),
+
+                    "fecha_ultima_operacion":
+                        ahora_iso(),
+
+                })
+
+                .eq(
+                    "lote_id",
+                    lote_id
+                )
+
+                .eq(
+                    "estado",
+                    "PENDIENTE"
+                )
+
+                .execute()
+
+            )
+
+
+            if not resultado_update.data:
+
+                try:
+
+                    service = (
+                        obtener_servicio_google_drive()
+                    )
+
+
+                    (
+                        service
+                        .files()
+                        .delete(
+                            fileId=
+                                drive_lote[
+                                    "folder_id"
+                                ],
+                            supportsAllDrives=True,
+                        )
+                        .execute()
+                    )
+
+
+                except Exception as rollback_error:
+
+                    print(
+                        "[DRIVE/SUPABASE "
+                        "ROLLBACK ERROR]",
+                        rollback_error
+                    )
+
+
+                raise RuntimeError(
+                    "La carpeta llegó a Drive, "
+                    "pero Supabase no pudo "
+                    "confirmar APROBADO."
+                )
+
+
+            nuevo_estado = (
+                "APROBADO"
+            )
+
+
+        else:
+
+            resultado_update = (
+
+                supabase
+
+                .table(
+                    "auditoria_custodia"
+                )
+
+                .update({
+                    "estado":
+                        "RECHAZADO"
+                })
+
+                .eq(
+                    "lote_id",
+                    lote_id
+                )
+
+                .eq(
+                    "estado",
+                    "PENDIENTE"
+                )
+
+                .execute()
+
+            )
+
+
+            if not resultado_update.data:
+
+                raise RuntimeError(
+                    "No se pudo cambiar "
+                    "la carpeta a RECHAZADO."
+                )
+
+
+            nuevo_estado = (
+                "RECHAZADO"
+            )
+
+
+        for doc in documentos:
+
+            ARCHIVOS_EN_RAM.pop(
+                str(
+                    doc.get("id")
+                ),
+                None
+            )
+
+
+        return {
+
+            "procesado":
+                True,
+
+            "estado":
+                nuevo_estado,
+
+            "documentos":
+                documentos,
+
+            "drive_lote":
+                drive_lote,
+
+            "resultado_update":
+                resultado_update,
+
+        }
+
+
+def resolver_payload_custodia_web(
+    payload: dict,
+    aprobar: bool
+):
+
+    objeto_tipo = str(
+        payload.get(
+            "objeto_tipo"
+        )
+        or ""
+    ).upper().strip()
+
+
+    if objeto_tipo not in (
+        "ARCHIVO",
+        "CARPETA"
+    ):
+
+        raise HTTPException(
+            status_code=400,
+            detail="objeto_tipo inválido."
+        )
+
+
+    try:
+
+        if objeto_tipo == "CARPETA":
+
+            lote_id = str(
+                UUID(
+                    str(
+                        payload.get(
+                            "lote_id"
+                        )
+                        or ""
+                    ).strip()
+                )
+            )
+
+
+            resultado = (
+                resolver_custodia_carpeta(
+                    lote_id,
+                    aprobar
+                )
+            )
+
+
+            if not resultado[
+                "procesado"
+            ]:
+
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "La carpeta ya fue procesada "
+                        "o no tiene archivos pendientes."
+                    ),
+                )
+
+
+            return {
+
+                "status":
+                    "ok",
+
+                "objeto_tipo":
+                    "CARPETA",
+
+                "lote_id":
+                    lote_id,
+
+                "estado":
+                    resultado[
+                        "estado"
+                    ],
+
+                "procesados":
+                    len(
+                        resultado[
+                            "documentos"
+                        ]
+                    ),
+
+                "drive_folder_id":
+                    (
+                        resultado[
+                            "drive_lote"
+                        ][
+                            "folder_id"
+                        ]
+
+                        if resultado[
+                            "drive_lote"
+                        ]
+
+                        else None
+                    ),
+
+            }
+
+
+        auditoria_id = str(
+            UUID(
+                str(
+                    payload.get(
+                        "auditoria_id"
+                    )
+                    or ""
+                ).strip()
+            )
+        )
+
+
+        resultado = (
+            resolver_custodia_archivo(
+                auditoria_id,
+                aprobar
+            )
+        )
+
+
+        if not resultado[
+            "procesado"
+        ]:
+
+            raise HTTPException(
+
+                status_code=409,
+
+                detail=(
+                    "El archivo ya fue procesado. "
+                    f"Estado actual: "
+                    f"{resultado['estado']}."
+                ),
+
+            )
+
+
+        return {
+
+            "status":
+                "ok",
+
+            "objeto_tipo":
+                "ARCHIVO",
+
+            "auditoria_id":
+                auditoria_id,
+
+            "estado":
+                resultado[
+                    "estado"
+                ],
+
+            "procesados":
+                1,
+
+            "drive_file_id":
+                resultado.get(
+                    "drive_id"
+                ),
+
+        }
+
+
+    except HTTPException:
+
+        raise
+
+
+    except (
+        ValueError,
+        TypeError,
+        AttributeError
+    ):
+
+        campo = (
+            "lote_id"
+
+            if objeto_tipo
+            == "CARPETA"
+
+            else
+            "auditoria_id"
+        )
+
+
+        raise HTTPException(
+            status_code=400,
+            detail=f"{campo} inválido."
+        )
+
+
+    except RuntimeError as error:
+
+        raise HTTPException(
+            status_code=409,
+            detail=str(error)
+        )
 
 
 # ============================================================
 # OPERACIONES SOLICITADAS DESDE LA WEB
 # ============================================================
 
-@app.post("/custody/cancel")
-async def cancelar_custodia_desde_web(request: Request):
-    """Cancela desde la web una carga PENDIENTE, igualando la decisión
-    de Rechazar disponible en Telegram. Solo el administrador/jefe puede
-    ejecutar esta acción. Los datos en RAM se liberan para evitar conservar
-    contenido que ya no debe procesarse.
-    """
-    usuario = obtener_usuario_supabase_desde_request(request)
+@app.post("/custody/decision")
+async def decidir_custodia_desde_web(
+    request: Request
+):
+
+    usuario = (
+        obtener_usuario_supabase_desde_request(
+            request
+        )
+    )
+
+
     if usuario.get("rol") != "jefe":
-        raise HTTPException(status_code=403, detail="Solo el administrador puede cancelar cargas en cola.")
 
-    payload = await request.json()
-    objeto_tipo = str(payload.get("objeto_tipo") or "").upper().strip()
+        raise HTTPException(
 
-    if objeto_tipo not in ("ARCHIVO", "CARPETA"):
-        raise HTTPException(status_code=400, detail="objeto_tipo inválido.")
+            status_code=403,
 
-    if objeto_tipo == "CARPETA":
-        lote_raw = str(payload.get("lote_id") or "").strip()
-        try:
-            lote_id = str(UUID(lote_raw))
-        except (ValueError, TypeError, AttributeError):
-            raise HTTPException(status_code=400, detail="lote_id inválido.")
+            detail=(
+                "Solo el administrador puede "
+                "aprobar o rechazar cargas en cola."
+            ),
 
-        with DECISION_LOCK:
-            consulta = (
-                supabase
-                .table("auditoria_custodia")
-                .select("id,estado")
-                .eq("lote_id", lote_id)
-                .eq("estado", "PENDIENTE")
-                .execute()
-            )
-            documentos = consulta.data or []
-
-            if not documentos:
-                raise HTTPException(
-                    status_code=404,
-                    detail="La carpeta ya no tiene archivos pendientes de cancelación.",
-                )
-
-            resultado = (
-                supabase
-                .table("auditoria_custodia")
-                .update({"estado": "RECHAZADO"})
-                .eq("lote_id", lote_id)
-                .eq("estado", "PENDIENTE")
-                .execute()
-            )
-
-            cancelados = resultado.data or []
-            for documento in documentos:
-                ARCHIVOS_EN_RAM.pop(str(documento.get("id")), None)
-
-        return {
-            "status": "ok",
-            "objeto_tipo": "CARPETA",
-            "lote_id": lote_id,
-            "estado": "RECHAZADO",
-            "cancelados": len(cancelados),
-        }
-
-    auditoria_raw = str(payload.get("auditoria_id") or "").strip()
-    try:
-        auditoria_id = str(UUID(auditoria_raw))
-    except (ValueError, TypeError, AttributeError):
-        raise HTTPException(status_code=400, detail="auditoria_id inválido.")
-
-    with DECISION_LOCK:
-        consulta = (
-            supabase
-            .table("auditoria_custodia")
-            .select("id,estado")
-            .eq("id", auditoria_id)
-            .limit(1)
-            .execute()
         )
-        if not consulta.data:
-            raise HTTPException(status_code=404, detail="No existe el archivo seleccionado.")
 
-        registro = consulta.data[0]
-        if str(registro.get("estado") or "").upper() != "PENDIENTE":
-            raise HTTPException(
-                status_code=409,
-                detail=f"El archivo ya fue procesado. Estado actual: {registro.get('estado') or 'DESCONOCIDO'}.",
-            )
 
-        resultado = (
-            supabase
-            .table("auditoria_custodia")
-            .update({"estado": "RECHAZADO"})
-            .eq("id", auditoria_id)
-            .eq("estado", "PENDIENTE")
-            .execute()
+    payload = (
+        await request.json()
+    )
+
+
+    decision = str(
+        payload.get(
+            "decision"
         )
-        if not resultado.data:
-            raise HTTPException(status_code=409, detail="El archivo ya no está pendiente.")
+        or ""
+    ).upper().strip()
 
-        ARCHIVOS_EN_RAM.pop(auditoria_id, None)
 
-    return {
-        "status": "ok",
-        "objeto_tipo": "ARCHIVO",
-        "auditoria_id": auditoria_id,
-        "estado": "RECHAZADO",
-        "cancelados": 1,
-    }
+    if decision not in (
+        "APROBAR",
+        "RECHAZAR"
+    ):
+
+        raise HTTPException(
+            status_code=400,
+            detail="decision inválida."
+        )
+
+
+    return (
+        resolver_payload_custodia_web(
+            payload,
+            aprobar=(
+                decision
+                == "APROBAR"
+            )
+        )
+    )
+
+
+@app.post("/custody/cancel")
+async def cancelar_custodia_desde_web(
+    request: Request
+):
+
+    usuario = (
+        obtener_usuario_supabase_desde_request(
+            request
+        )
+    )
+
+
+    if usuario.get("rol") != "jefe":
+
+        raise HTTPException(
+
+            status_code=403,
+
+            detail=(
+                "Solo el administrador puede "
+                "rechazar cargas en cola."
+            ),
+
+        )
+
+
+    payload = (
+        await request.json()
+    )
+
+
+    return (
+        resolver_payload_custodia_web(
+            payload,
+            aprobar=False
+        )
+    )
 
 
 @app.get("/drive-folders")
-def obtener_carpetas_drive(request: Request):
-    obtener_usuario_supabase_desde_request(request)
-    if not google_drive_configurado():
-        raise HTTPException(status_code=503, detail="Google Drive no está configurado.")
+def obtener_carpetas_drive(
+    request: Request
+):
 
-    carpetas = listar_carpetas_drive_recursivas()
+    obtener_usuario_supabase_desde_request(
+        request
+    )
+
+
+    if not google_drive_configurado():
+
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Google Drive no está configurado."
+            )
+        )
+
+
+    carpetas = (
+        listar_carpetas_drive_recursivas()
+    )
+
+
     return {
+
         "folders": [
+
             {
-                "id": GOOGLE_FOLDER_ID,
-                "name": "DRIVE PROYECTO",
-                "parent_id": None,
-                "path": "DRIVE PROYECTO",
-                "depth": 0,
-                "ancestors": [],
-                "root": True,
+                "id":
+                    GOOGLE_FOLDER_ID,
+
+                "name":
+                    "DRIVE PROYECTO",
+
+                "parent_id":
+                    None,
+
+                "path":
+                    "DRIVE PROYECTO",
+
+                "depth":
+                    0,
+
+                "ancestors":
+                    [],
+
+                "root":
+                    True,
             },
+
             *[
+
                 {
-                    "id": c.get("id"),
-                    "name": c.get("name"),
-                    "parent_id": c.get("parent_id"),
-                    "path": c.get("path"),
-                    "depth": c.get("depth", 1),
-                    "ancestors": c.get("ancestors") or [],
-                    "root": False,
+                    "id":
+                        c.get("id"),
+
+                    "name":
+                        c.get("name"),
+
+                    "parent_id":
+                        c.get(
+                            "parent_id"
+                        ),
+
+                    "path":
+                        c.get("path"),
+
+                    "depth":
+                        c.get(
+                            "depth",
+                            1
+                        ),
+
+                    "ancestors":
+                        c.get(
+                            "ancestors"
+                        )
+                        or [],
+
+                    "root":
+                        False,
                 }
+
                 for c in carpetas
+
             ],
+
         ]
+
     }
 
 
 @app.post("/operations/request")
-async def solicitar_operacion(request: Request, background_tasks: BackgroundTasks):
-    usuario = obtener_usuario_supabase_desde_request(request)
-    payload = await request.json()
+async def solicitar_operacion(
+    request: Request,
+    background_tasks: BackgroundTasks
+):
 
-    tipo = str(payload.get("tipo_operacion") or "").upper().strip()
-    objeto_tipo = str(payload.get("objeto_tipo") or "").upper().strip()
-    if tipo not in ("MOVER", "ELIMINAR"):
-        raise HTTPException(status_code=400, detail="tipo_operacion inválido.")
-    if objeto_tipo not in ("ARCHIVO", "CARPETA"):
-        raise HTTPException(status_code=400, detail="objeto_tipo inválido.")
-
-    objeto = obtener_objeto_operable(
-        usuario["id"],
-        objeto_tipo,
-        auditoria_id=payload.get("auditoria_id"),
-        lote_id=payload.get("lote_id"),
+    usuario = (
+        obtener_usuario_supabase_desde_request(
+            request
+        )
     )
 
-    destino = None
-    if tipo == "MOVER":
-        destino = validar_destino_drive(payload.get("carpeta_destino_id"))
 
-        if destino["id"] == objeto["drive_parent_id"]:
-            raise HTTPException(status_code=400, detail="El elemento ya se encuentra en esa carpeta.")
+    payload = (
+        await request.json()
+    )
 
-        if objeto["tipo"] == "CARPETA":
-            if destino["id"] == objeto["drive_id"]:
-                raise HTTPException(status_code=400, detail="Una carpeta no puede moverse dentro de sí misma.")
-            if objeto["drive_id"] in (destino.get("ancestors") or []):
-                raise HTTPException(
-                    status_code=400,
-                    detail="Una carpeta no puede moverse dentro de una de sus subcarpetas.",
-                )
 
-    # Evita solicitudes repetidas pendientes para el mismo objeto.
-    pendientes = (
-        supabase
-        .table("solicitudes_operacion")
-        .select("id,tipo_operacion,objeto_tipo,auditoria_id,lote_id,estado")
-        .eq("solicitante_id", usuario["id"])
-        .eq("estado", "PENDIENTE")
-        .execute()
-    ).data or []
-
-    for item in pendientes:
-        mismo = (
-            objeto_tipo == "CARPETA" and str(item.get("lote_id") or "") == str(objeto.get("lote_id") or "")
-        ) or (
-            objeto_tipo == "ARCHIVO" and str(item.get("auditoria_id") or "") == str(objeto.get("auditoria_id") or "")
+    tipo = str(
+        payload.get(
+            "tipo_operacion"
         )
-        if mismo:
+        or ""
+    ).upper().strip()
+
+
+    objeto_tipo = str(
+        payload.get(
+            "objeto_tipo"
+        )
+        or ""
+    ).upper().strip()
+
+
+    if tipo not in (
+        "MOVER",
+        "ELIMINAR"
+    ):
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "tipo_operacion inválido."
+            )
+        )
+
+
+    if objeto_tipo not in (
+        "ARCHIVO",
+        "CARPETA"
+    ):
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "objeto_tipo inválido."
+            )
+        )
+
+
+    objeto = obtener_objeto_operable(
+
+        usuario["id"],
+
+        objeto_tipo,
+
+        auditoria_id=
+            payload.get(
+                "auditoria_id"
+            ),
+
+        lote_id=
+            payload.get(
+                "lote_id"
+            ),
+
+    )
+
+
+    destino = None
+
+
+    if tipo == "MOVER":
+
+        destino = validar_destino_drive(
+            payload.get(
+                "carpeta_destino_id"
+            )
+        )
+
+
+        if (
+            destino["id"]
+            ==
+            objeto["drive_parent_id"]
+        ):
+
             raise HTTPException(
-                status_code=409,
-                detail="Ya existe una operación pendiente para este elemento.",
+                status_code=400,
+                detail=(
+                    "El elemento ya se encuentra "
+                    "en esa carpeta."
+                )
             )
 
+
+        if objeto["tipo"] == "CARPETA":
+
+            if (
+                destino["id"]
+                ==
+                objeto["drive_id"]
+            ):
+
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Una carpeta no puede moverse "
+                        "dentro de sí misma."
+                    )
+                )
+
+
+            if (
+                objeto["drive_id"]
+                in
+                (
+                    destino.get(
+                        "ancestors"
+                    )
+                    or []
+                )
+            ):
+
+                raise HTTPException(
+
+                    status_code=400,
+
+                    detail=(
+                        "Una carpeta no puede moverse "
+                        "dentro de una de sus subcarpetas."
+                    ),
+
+                )
+
+
+    pendientes = (
+
+        supabase
+
+        .table(
+            "solicitudes_operacion"
+        )
+
+        .select(
+            "id,tipo_operacion,objeto_tipo,"
+            "auditoria_id,lote_id,estado"
+        )
+
+        .eq(
+            "solicitante_id",
+            usuario["id"]
+        )
+
+        .eq(
+            "estado",
+            "PENDIENTE"
+        )
+
+        .execute()
+
+    ).data or []
+
+
+    for item in pendientes:
+
+        mismo = (
+
+            (
+                objeto_tipo
+                == "CARPETA"
+
+                and
+
+                str(
+                    item.get(
+                        "lote_id"
+                    )
+                    or ""
+                )
+                ==
+                str(
+                    objeto.get(
+                        "lote_id"
+                    )
+                    or ""
+                )
+            )
+
+            or
+
+            (
+                objeto_tipo
+                == "ARCHIVO"
+
+                and
+
+                str(
+                    item.get(
+                        "auditoria_id"
+                    )
+                    or ""
+                )
+                ==
+                str(
+                    objeto.get(
+                        "auditoria_id"
+                    )
+                    or ""
+                )
+            )
+
+        )
+
+
+        if mismo:
+
+            raise HTTPException(
+
+                status_code=409,
+
+                detail=(
+                    "Ya existe una operación "
+                    "pendiente para este elemento."
+                ),
+
+            )
+
+
     registro = {
-        "tipo_operacion": tipo,
-        "objeto_tipo": objeto_tipo,
-        "auditoria_id": objeto.get("auditoria_id"),
-        "lote_id": objeto.get("lote_id"),
-        "solicitante_id": usuario["id"],
-        "solicitante_nombre": usuario["nombre"],
-        "solicitante_correo": usuario["correo"],
-        "nombre_objeto": objeto["nombre"],
-        "carpeta_origen": objeto.get("ubicacion") or "DRIVE PROYECTO",
-        "carpeta_destino_id": destino["id"] if destino else None,
-        "carpeta_destino_nombre": (destino.get("path") or destino["name"]) if destino else None,
-        "estado": "PENDIENTE",
+
+        "tipo_operacion":
+            tipo,
+
+        "objeto_tipo":
+            objeto_tipo,
+
+        "auditoria_id":
+            objeto.get(
+                "auditoria_id"
+            ),
+
+        "lote_id":
+            objeto.get(
+                "lote_id"
+            ),
+
+        "solicitante_id":
+            usuario["id"],
+
+        "solicitante_nombre":
+            usuario["nombre"],
+
+        "solicitante_correo":
+            usuario["correo"],
+
+        "nombre_objeto":
+            objeto["nombre"],
+
+        "carpeta_origen":
+            (
+                objeto.get(
+                    "ubicacion"
+                )
+                or
+                "DRIVE PROYECTO"
+            ),
+
+        "carpeta_destino_id":
+            (
+                destino["id"]
+                if destino
+                else None
+            ),
+
+        "carpeta_destino_nombre":
+            (
+                (
+                    destino.get(
+                        "path"
+                    )
+                    or
+                    destino["name"]
+                )
+                if destino
+                else None
+            ),
+
+        "estado":
+            "PENDIENTE",
+
     }
 
-    respuesta = supabase.table("solicitudes_operacion").insert(registro).execute()
-    if not respuesta.data:
-        raise HTTPException(status_code=500, detail="No se pudo registrar la solicitud.")
 
-    solicitud = respuesta.data[0]
-    background_tasks.add_task(notificar_solicitud_operacion_telegram, solicitud)
+    respuesta = (
+
+        supabase
+
+        .table(
+            "solicitudes_operacion"
+        )
+
+        .insert(
+            registro
+        )
+
+        .execute()
+
+    )
+
+
+    if not respuesta.data:
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "No se pudo registrar "
+                "la solicitud."
+            )
+        )
+
+
+    solicitud = (
+        respuesta.data[0]
+    )
+
+
+    background_tasks.add_task(
+        notificar_solicitud_operacion_telegram,
+        solicitud
+    )
+
 
     return {
-        "status": "ok",
-        "mensaje": "Solicitud registrada y enviada al custodio.",
-        "solicitud": solicitud,
+
+        "status":
+            "ok",
+
+        "mensaje":
+            (
+                "Solicitud registrada y enviada "
+                "al custodio."
+            ),
+
+        "solicitud":
+            solicitud,
+
     }
 
 
 @app.post("/drive/backfill-legacy")
-def vincular_drive_legacy(request: Request):
-    """Vincula registros APROBADOS antiguos cuando el nombre en Drive es único.
+def vincular_drive_legacy(
+    request: Request
+):
 
-    Nunca adivina entre duplicados: si hay 0 o más de 1 coincidencias, se omite.
-    Esto permite migrar gradualmente el historial previo a drive_file_id / drive_folder_id.
-    """
-    usuario = obtener_usuario_supabase_desde_request(request)
-    service = obtener_servicio_google_drive()
+    usuario = (
+        obtener_usuario_supabase_desde_request(
+            request
+        )
+    )
+
+
+    service = (
+        obtener_servicio_google_drive()
+    )
+
 
     consulta = (
+
         supabase
-        .table("auditoria_custodia")
-        .select(
-            "id,lote_id,nombre_archivo,ruta_relativa,estado,estado_archivo,"
-            "drive_file_id,drive_folder_id,solicitante_id"
+
+        .table(
+            "auditoria_custodia"
         )
-        .eq("solicitante_id", usuario["id"])
-        .eq("estado", "APROBADO")
+
+        .select(
+            "id,lote_id,nombre_archivo,ruta_relativa,"
+            "estado,estado_archivo,drive_file_id,"
+            "drive_folder_id,solicitante_id"
+        )
+
+        .eq(
+            "solicitante_id",
+            usuario["id"]
+        )
+
+        .eq(
+            "estado",
+            "APROBADO"
+        )
+
         .execute()
+
     )
-    filas = consulta.data or []
+
+
+    filas = (
+        consulta.data
+        or []
+    )
+
+
     vinculados = 0
     omitidos = 0
 
-    def esc_drive(valor: str) -> str:
-        return str(valor or "").replace("\\", "\\\\").replace("'", "\\'")
 
-    # Carpetas por lote.
+    def esc_drive(
+        valor: str
+    ) -> str:
+
+        return str(
+            valor
+            or ""
+        ).replace(
+            "\\",
+            "\\\\"
+        ).replace(
+            "'",
+            "\\'"
+        )
+
+
     lotes = {}
     sueltos = []
+
+
     for fila in filas:
-        if fila.get("lote_id") and obtener_carpeta_desde_ruta(fila.get("ruta_relativa")):
-            lotes.setdefault(str(fila.get("lote_id")), []).append(fila)
+
+        if (
+            fila.get("lote_id")
+            and
+            obtener_carpeta_desde_ruta(
+                fila.get(
+                    "ruta_relativa"
+                )
+            )
+        ):
+
+            lotes.setdefault(
+                str(
+                    fila.get(
+                        "lote_id"
+                    )
+                ),
+                []
+            ).append(
+                fila
+            )
+
         else:
-            sueltos.append(fila)
+
+            sueltos.append(
+                fila
+            )
+
 
     for lote_id, grupo in lotes.items():
-        if str(grupo[0].get("drive_folder_id") or "").strip():
+
+        if str(
+            grupo[0].get(
+                "drive_folder_id"
+            )
+            or ""
+        ).strip():
+
             continue
-        nombre = obtener_carpeta_desde_ruta(grupo[0].get("ruta_relativa"))
-        q = (
-            f"'{GOOGLE_FOLDER_ID}' in parents and "
-            f"name='{esc_drive(nombre)}' and "
-            "mimeType='application/vnd.google-apps.folder'"
+
+
+        nombre = (
+            obtener_carpeta_desde_ruta(
+                grupo[0].get(
+                    "ruta_relativa"
+                )
+            )
         )
+
+
+        q = (
+
+            f"'{GOOGLE_FOLDER_ID}' in parents and "
+
+            f"name='{esc_drive(nombre)}' and "
+
+            "mimeType='application/vnd.google-apps.folder'"
+
+        )
+
+
         encontrados = (
-            service.files().list(
+
+            service
+            .files()
+            .list(
                 q=q,
-                fields="files(id,name,trashed,parents)",
+                fields=
+                    "files(id,name,trashed,parents)",
                 pageSize=20,
                 supportsAllDrives=True,
                 includeItemsFromAllDrives=True,
-            ).execute().get("files") or []
+            )
+            .execute()
+            .get(
+                "files"
+            )
+            or []
+
         )
+
+
         if len(encontrados) != 1:
+
             omitidos += 1
             continue
+
+
         meta = encontrados[0]
+
+
         cambios = {
-            "drive_folder_id": meta["id"],
-            "drive_parent_id": GOOGLE_FOLDER_ID,
-            "ubicacion_drive": nombre,
-            "en_drive": not bool(meta.get("trashed")),
-            "estado_archivo": "ELIMINADO_EXTERNAMENTE" if meta.get("trashed") else "ACTIVO",
-            "fecha_ultima_operacion": ahora_iso(),
+
+            "drive_folder_id":
+                meta["id"],
+
+            "drive_parent_id":
+                GOOGLE_FOLDER_ID,
+
+            "ubicacion_drive":
+                nombre,
+
+            "en_drive":
+                not bool(
+                    meta.get(
+                        "trashed"
+                    )
+                ),
+
+            "estado_archivo":
+                (
+                    "ELIMINADO_EXTERNAMENTE"
+
+                    if meta.get(
+                        "trashed"
+                    )
+
+                    else
+                    "ACTIVO"
+                ),
+
+            "fecha_ultima_operacion":
+                ahora_iso(),
+
         }
+
+
         if meta.get("trashed"):
-            cambios["fecha_eliminacion"] = ahora_iso()
-        supabase.table("auditoria_custodia").update(cambios).eq("lote_id", lote_id).eq("solicitante_id", usuario["id"]).execute()
+
+            cambios[
+                "fecha_eliminacion"
+            ] = ahora_iso()
+
+
+        (
+            supabase
+            .table(
+                "auditoria_custodia"
+            )
+            .update(
+                cambios
+            )
+            .eq(
+                "lote_id",
+                lote_id
+            )
+            .eq(
+                "solicitante_id",
+                usuario["id"]
+            )
+            .execute()
+        )
+
+
         vinculados += 1
+
 
     for fila in sueltos:
-        if str(fila.get("drive_file_id") or "").strip():
+
+        if str(
+            fila.get(
+                "drive_file_id"
+            )
+            or ""
+        ).strip():
+
             continue
-        nombre = str(fila.get("nombre_archivo") or "").strip()
+
+
+        nombre = str(
+            fila.get(
+                "nombre_archivo"
+            )
+            or ""
+        ).strip()
+
+
         if not nombre:
+
             omitidos += 1
             continue
-        q = f"'{GOOGLE_FOLDER_ID}' in parents and name='{esc_drive(nombre)}'"
+
+
+        q = (
+            f"'{GOOGLE_FOLDER_ID}' in parents and "
+            f"name='{esc_drive(nombre)}'"
+        )
+
+
         encontrados = (
-            service.files().list(
+
+            service
+            .files()
+            .list(
                 q=q,
-                fields="files(id,name,mimeType,trashed,parents)",
+                fields=(
+                    "files(id,name,mimeType,"
+                    "trashed,parents)"
+                ),
                 pageSize=20,
                 supportsAllDrives=True,
                 includeItemsFromAllDrives=True,
-            ).execute().get("files") or []
+            )
+            .execute()
+            .get(
+                "files"
+            )
+            or []
+
         )
-        encontrados = [x for x in encontrados if x.get("mimeType") != "application/vnd.google-apps.folder"]
+
+
+        encontrados = [
+
+            x
+
+            for x in encontrados
+
+            if x.get(
+                "mimeType"
+            )
+            !=
+            "application/vnd.google-apps.folder"
+
+        ]
+
+
         if len(encontrados) != 1:
+
             omitidos += 1
             continue
+
+
         meta = encontrados[0]
+
+
         cambios = {
-            "drive_file_id": meta["id"],
-            "drive_parent_id": GOOGLE_FOLDER_ID,
-            "ubicacion_drive": "DRIVE PROYECTO",
-            "en_drive": not bool(meta.get("trashed")),
-            "estado_archivo": "ELIMINADO_EXTERNAMENTE" if meta.get("trashed") else "ACTIVO",
-            "fecha_ultima_operacion": ahora_iso(),
+
+            "drive_file_id":
+                meta["id"],
+
+            "drive_parent_id":
+                GOOGLE_FOLDER_ID,
+
+            "ubicacion_drive":
+                "DRIVE PROYECTO",
+
+            "en_drive":
+                not bool(
+                    meta.get(
+                        "trashed"
+                    )
+                ),
+
+            "estado_archivo":
+                (
+                    "ELIMINADO_EXTERNAMENTE"
+
+                    if meta.get(
+                        "trashed"
+                    )
+
+                    else
+                    "ACTIVO"
+                ),
+
+            "fecha_ultima_operacion":
+                ahora_iso(),
+
         }
+
+
         if meta.get("trashed"):
-            cambios["fecha_eliminacion"] = ahora_iso()
-        supabase.table("auditoria_custodia").update(cambios).eq("id", fila["id"]).eq("solicitante_id", usuario["id"]).execute()
+
+            cambios[
+                "fecha_eliminacion"
+            ] = ahora_iso()
+
+
+        (
+            supabase
+            .table(
+                "auditoria_custodia"
+            )
+            .update(
+                cambios
+            )
+            .eq(
+                "id",
+                fila["id"]
+            )
+            .eq(
+                "solicitante_id",
+                usuario["id"]
+            )
+            .execute()
+        )
+
+
         vinculados += 1
 
-    return {"status": "ok", "vinculados": vinculados, "omitidos": omitidos}
 
+    return {
+
+        "status":
+            "ok",
+
+        "vinculados":
+            vinculados,
+
+        "omitidos":
+            omitidos
+
+    }
 
 
 @app.post("/drive/reconcile")
-def reconciliar_drive(request: Request):
-    """Sincroniza el inventario de DataVault con Google Drive.
+def reconciliar_drive(
+    request: Request
+):
 
-    - Subordinado: revisa únicamente sus archivos/carpetas aprobados.
-    - Jefe/Admin: revisa los archivos/carpetas aprobados de todos los usuarios.
-    - Si un elemento fue borrado directamente en Drive, marca en_drive=False y
-      estado_archivo=ELIMINADO_EXTERNAMENTE sin borrar la auditoría histórica.
-    - Si un elemento fue movido directamente en Drive, actualiza su ubicación.
-    """
-    usuario = obtener_usuario_supabase_desde_request(request)
-    service = obtener_servicio_google_drive()
-    es_admin = str(usuario.get("rol") or "").lower() == "jefe"
-
-    query = (
-        supabase
-        .table("auditoria_custodia")
-        .select(
-            "id,lote_id,estado,estado_archivo,en_drive,drive_file_id,drive_folder_id,"
-            "drive_parent_id,ubicacion_drive,solicitante_id"
+    usuario = (
+        obtener_usuario_supabase_desde_request(
+            request
         )
-        .eq("estado", "APROBADO")
     )
 
-    # El subordinado solo puede reconciliar su propio inventario.
-    # El jefe/admin puede reconciliar el inventario corporativo completo.
+
+    service = (
+        obtener_servicio_google_drive()
+    )
+
+
+    es_admin = (
+        str(
+            usuario.get("rol")
+            or ""
+        ).lower()
+        ==
+        "jefe"
+    )
+
+
+    query = (
+
+        supabase
+
+        .table(
+            "auditoria_custodia"
+        )
+
+        .select(
+            "id,lote_id,estado,estado_archivo,en_drive,"
+            "drive_file_id,drive_folder_id,drive_parent_id,"
+            "ubicacion_drive,solicitante_id"
+        )
+
+        .eq(
+            "estado",
+            "APROBADO"
+        )
+
+    )
+
+
     if not es_admin:
-        query = query.eq("solicitante_id", usuario["id"])
+
+        query = query.eq(
+            "solicitante_id",
+            usuario["id"]
+        )
+
 
     consulta = query.execute()
-    filas = consulta.data or []
+
+
+    filas = (
+        consulta.data
+        or []
+    )
+
 
     cambios = 0
     revisados = 0
 
-    # Agrupar carpetas para hacer una sola consulta a Drive por folder_id.
+
     carpetas = {}
     sueltos = []
 
+
     for fila in filas:
-        folder_id = str(fila.get("drive_folder_id") or "").strip()
-        file_id = str(fila.get("drive_file_id") or "").strip()
+
+        folder_id = str(
+            fila.get(
+                "drive_folder_id"
+            )
+            or ""
+        ).strip()
+
+
+        file_id = str(
+            fila.get(
+                "drive_file_id"
+            )
+            or ""
+        ).strip()
+
 
         if folder_id:
-            carpetas.setdefault(folder_id, []).append(fila)
-        elif file_id:
-            sueltos.append(fila)
 
-    def comprobar(file_id: str):
+            carpetas.setdefault(
+                folder_id,
+                []
+            ).append(
+                fila
+            )
+
+
+        elif file_id:
+
+            sueltos.append(
+                fila
+            )
+
+
+    def comprobar(
+        file_id: str
+    ):
+
         nonlocal revisados
+
         revisados += 1
 
+
         try:
-            return obtener_archivo_drive(service, file_id), None
+
+            return (
+                obtener_archivo_drive(
+                    service,
+                    file_id
+                ),
+                None
+            )
+
+
         except Exception as error:
+
             texto = str(error)
 
-            if "404" in texto or "File not found" in texto:
-                return None, "missing"
 
-            print("[DRIVE RECONCILE ERROR]", file_id, error)
-            return None, "error"
+            if (
+                "404" in texto
+                or
+                "File not found"
+                in texto
+            ):
 
-    def update_folder(folder_id: str, values: dict):
+                return (
+                    None,
+                    "missing"
+                )
+
+
+            print(
+                "[DRIVE RECONCILE ERROR]",
+                file_id,
+                error
+            )
+
+
+            return (
+                None,
+                "error"
+            )
+
+
+    def update_folder(
+        folder_id: str,
+        values: dict
+    ):
+
         q = (
+
             supabase
-            .table("auditoria_custodia")
-            .update(values)
-            .eq("drive_folder_id", folder_id)
+
+            .table(
+                "auditoria_custodia"
+            )
+
+            .update(
+                values
+            )
+
+            .eq(
+                "drive_folder_id",
+                folder_id
+            )
+
         )
 
+
         if not es_admin:
-            q = q.eq("solicitante_id", usuario["id"])
+
+            q = q.eq(
+                "solicitante_id",
+                usuario["id"]
+            )
+
 
         return q.execute()
 
-    def update_row(row_id: str, values: dict):
+
+    def update_row(
+        row_id: str,
+        values: dict
+    ):
+
         q = (
+
             supabase
-            .table("auditoria_custodia")
-            .update(values)
-            .eq("id", row_id)
+
+            .table(
+                "auditoria_custodia"
+            )
+
+            .update(
+                values
+            )
+
+            .eq(
+                "id",
+                row_id
+            )
+
         )
 
+
         if not es_admin:
-            q = q.eq("solicitante_id", usuario["id"])
+
+            q = q.eq(
+                "solicitante_id",
+                usuario["id"]
+            )
+
 
         return q.execute()
 
-    # ========================================================
-    # CARPETAS
-    # ========================================================
+
     for folder_id, grupo in carpetas.items():
-        meta, err = comprobar(folder_id)
+
+        meta, err = comprobar(
+            folder_id
+        )
+
 
         if err == "error":
+
             continue
 
-        # Eliminado manualmente desde Drive.
-        if err == "missing" or (meta and meta.get("trashed")):
+
+        if (
+            err == "missing"
+            or
+            (
+                meta
+                and
+                meta.get(
+                    "trashed"
+                )
+            )
+        ):
+
+            update_folder(
+
+                folder_id,
+
+                {
+                    "en_drive":
+                        False,
+
+                    "estado_archivo":
+                        "ELIMINADO_EXTERNAMENTE",
+
+                    "fecha_eliminacion":
+                        ahora_iso(),
+
+                    "fecha_ultima_operacion":
+                        ahora_iso(),
+                }
+
+            )
+
+            cambios += 1
+
+            continue
+
+
+        padres = (
+            meta.get(
+                "parents"
+            )
+            or []
+        )
+
+
+        parent_id = (
+
+            str(
+                padres[0]
+            )
+
+            if padres
+
+            else ""
+
+        )
+
+
+        anterior = str(
+            grupo[0].get(
+                "drive_parent_id"
+            )
+            or ""
+        )
+
+
+        values = {}
+
+
+        if (
+            grupo[0].get(
+                "en_drive"
+            )
+            is not True
+        ):
+
+            values[
+                "en_drive"
+            ] = True
+
+
+        if str(
+            grupo[0].get(
+                "estado_archivo"
+            )
+            or ""
+        ).upper() != "ACTIVO":
+
+            values[
+                "estado_archivo"
+            ] = "ACTIVO"
+
+
+        if (
+            parent_id
+            and
+            parent_id != anterior
+        ):
+
+            parent_name = (
+                "DRIVE PROYECTO"
+            )
+
+
+            if parent_id != GOOGLE_FOLDER_ID:
+
+                try:
+
+                    parent_name = (
+
+                        obtener_archivo_drive(
+                            service,
+                            parent_id
+                        ).get(
+                            "name"
+                        )
+
+                        or
+
+                        parent_name
+
+                    )
+
+                except Exception:
+
+                    pass
+
+
+            values.update({
+
+                "drive_parent_id":
+                    parent_id,
+
+                "ubicacion_drive":
+                    parent_name,
+
+            })
+
+
+        if values:
+
+            values[
+                "fecha_ultima_operacion"
+            ] = ahora_iso()
+
+
             update_folder(
                 folder_id,
-                {
-                    "en_drive": False,
-                    "estado_archivo": "ELIMINADO_EXTERNAMENTE",
-                    "fecha_eliminacion": ahora_iso(),
-                    "fecha_ultima_operacion": ahora_iso(),
-                }
+                values
             )
-            cambios += 1
-            continue
 
-        # Sigue existiendo: asegurar que el inventario refleje su estado activo.
-        padres = meta.get("parents") or []
-        parent_id = str(padres[0]) if padres else ""
-        anterior = str(grupo[0].get("drive_parent_id") or "")
 
-        values = {}
-
-        if grupo[0].get("en_drive") is not True:
-            values["en_drive"] = True
-
-        if str(grupo[0].get("estado_archivo") or "").upper() != "ACTIVO":
-            values["estado_archivo"] = "ACTIVO"
-
-        if parent_id and parent_id != anterior:
-            parent_name = "DRIVE PROYECTO"
-
-            if parent_id != GOOGLE_FOLDER_ID:
-                try:
-                    parent_name = (
-                        obtener_archivo_drive(service, parent_id).get("name")
-                        or parent_name
-                    )
-                except Exception:
-                    pass
-
-            values.update({
-                "drive_parent_id": parent_id,
-                "ubicacion_drive": parent_name,
-            })
-
-        if values:
-            values["fecha_ultima_operacion"] = ahora_iso()
-            update_folder(folder_id, values)
             cambios += 1
 
-    # ========================================================
-    # ARCHIVOS SUELTOS
-    # ========================================================
+
     for fila in sueltos:
-        file_id = str(fila.get("drive_file_id") or "").strip()
-        meta, err = comprobar(file_id)
+
+        file_id = str(
+            fila.get(
+                "drive_file_id"
+            )
+            or ""
+        ).strip()
+
+
+        meta, err = comprobar(
+            file_id
+        )
+
 
         if err == "error":
+
             continue
 
-        # Eliminado manualmente desde Drive.
-        if err == "missing" or (meta and meta.get("trashed")):
-            update_row(
-                fila["id"],
-                {
-                    "en_drive": False,
-                    "estado_archivo": "ELIMINADO_EXTERNAMENTE",
-                    "fecha_eliminacion": ahora_iso(),
-                    "fecha_ultima_operacion": ahora_iso(),
-                }
+
+        if (
+            err == "missing"
+            or
+            (
+                meta
+                and
+                meta.get(
+                    "trashed"
+                )
             )
+        ):
+
+            update_row(
+
+                fila["id"],
+
+                {
+                    "en_drive":
+                        False,
+
+                    "estado_archivo":
+                        "ELIMINADO_EXTERNAMENTE",
+
+                    "fecha_eliminacion":
+                        ahora_iso(),
+
+                    "fecha_ultima_operacion":
+                        ahora_iso(),
+                }
+
+            )
+
+
             cambios += 1
             continue
 
-        padres = meta.get("parents") or []
-        parent_id = str(padres[0]) if padres else ""
-        anterior = str(fila.get("drive_parent_id") or "")
+
+        padres = (
+            meta.get(
+                "parents"
+            )
+            or []
+        )
+
+
+        parent_id = (
+
+            str(
+                padres[0]
+            )
+
+            if padres
+
+            else ""
+
+        )
+
+
+        anterior = str(
+            fila.get(
+                "drive_parent_id"
+            )
+            or ""
+        )
+
 
         values = {}
 
-        if fila.get("en_drive") is not True:
-            values["en_drive"] = True
 
-        if str(fila.get("estado_archivo") or "").upper() != "ACTIVO":
-            values["estado_archivo"] = "ACTIVO"
+        if (
+            fila.get(
+                "en_drive"
+            )
+            is not True
+        ):
 
-        if parent_id and parent_id != anterior:
-            parent_name = "DRIVE PROYECTO"
+            values[
+                "en_drive"
+            ] = True
+
+
+        if str(
+            fila.get(
+                "estado_archivo"
+            )
+            or ""
+        ).upper() != "ACTIVO":
+
+            values[
+                "estado_archivo"
+            ] = "ACTIVO"
+
+
+        if (
+            parent_id
+            and
+            parent_id != anterior
+        ):
+
+            parent_name = (
+                "DRIVE PROYECTO"
+            )
+
 
             if parent_id != GOOGLE_FOLDER_ID:
+
                 try:
+
                     parent_name = (
-                        obtener_archivo_drive(service, parent_id).get("name")
-                        or parent_name
+
+                        obtener_archivo_drive(
+                            service,
+                            parent_id
+                        ).get(
+                            "name"
+                        )
+
+                        or
+                        parent_name
+
                     )
+
                 except Exception:
+
                     pass
 
+
             values.update({
-                "drive_parent_id": parent_id,
-                "ubicacion_drive": parent_name,
+
+                "drive_parent_id":
+                    parent_id,
+
+                "ubicacion_drive":
+                    parent_name,
+
             })
 
+
         if values:
-            values["fecha_ultima_operacion"] = ahora_iso()
-            update_row(fila["id"], values)
+
+            values[
+                "fecha_ultima_operacion"
+            ] = ahora_iso()
+
+
+            update_row(
+                fila["id"],
+                values
+            )
+
+
             cambios += 1
 
+
     return {
-        "status": "ok",
-        "scope": "GLOBAL" if es_admin else "USUARIO",
-        "revisados": revisados,
-        "cambios": cambios,
+
+        "status":
+            "ok",
+
+        "scope":
+            (
+                "GLOBAL"
+                if es_admin
+                else
+                "USUARIO"
+            ),
+
+        "revisados":
+            revisados,
+
+        "cambios":
+            cambios,
+
     }
 
 
@@ -3415,79 +7178,195 @@ def reconciliar_drive(request: Request):
 # ============================================================
 
 @app.post("/telegram-webhook")
-async def recibir_respuesta_telegram(request: Request):
+async def recibir_respuesta_telegram(
+    request: Request
+):
+
     data = await request.json()
 
-    print("[TELEGRAM UPDATE]", data)
+
+    print(
+        "[TELEGRAM UPDATE]",
+        data
+    )
+
 
     # ========================================================
     # MENSAJES NORMALES / COMANDOS
     # ========================================================
+
     if "message" in data:
-        message = data["message"]
-        chat_id = message["chat"]["id"]
-        user_id = message["from"]["id"]
-        texto = message.get("text", "").strip()
+
+        message = data[
+            "message"
+        ]
+
+
+        chat_id = message[
+            "chat"
+        ][
+            "id"
+        ]
+
+
+        user_id = message[
+            "from"
+        ][
+            "id"
+        ]
+
+
+        texto = (
+            message.get(
+                "text",
+                ""
+            )
+            .strip()
+        )
+
 
         if user_id not in AUTHORIZED_CHAT_IDS:
+
             telegram_request(
+
                 "sendMessage",
+
                 {
-                    "chat_id": chat_id,
-                    "text": (
-                        "⛔ Acceso no autorizado.\n\n"
-                        f"Tu Telegram ID es: {user_id}\n\n"
-                        "Agrega este ID en Railway en la variable "
-                        "AUTHORIZED_CHAT_IDS."
-                    ),
+
+                    "chat_id":
+                        chat_id,
+
+                    "text":
+                        (
+                            "⛔ Acceso no autorizado.\n\n"
+                            f"Tu Telegram ID es: {user_id}\n\n"
+                            "Agrega este ID en Railway "
+                            "en la variable AUTHORIZED_CHAT_IDS."
+                        ),
+
                 },
+
             )
+
+
             return {
-                "status": "unauthorized",
-                "user_id": user_id,
+
+                "status":
+                    "unauthorized",
+
+                "user_id":
+                    user_id,
+
             }
 
-        texto_lower = texto.lower()
 
-        # /start y /menu muestran el panel INLINE. También retiramos
-        # cualquier teclado inferior que haya quedado de versiones antiguas.
+        texto_lower = (
+            texto.lower()
+        )
+
+
         if (
-            texto_lower.startswith("/start")
-            or texto_lower.startswith("/menu")
+            texto_lower.startswith(
+                "/start"
+            )
+            or
+            texto_lower.startswith(
+                "/menu"
+            )
         ):
-            quitar_teclado_inferior(chat_id)
-            mostrar_panel_principal(chat_id)
-            return {"status": "panel_principal"}
 
-        # /pendientes abre directamente los usuarios pendientes.
-        if texto_lower.startswith("/pendientes"):
-            mostrar_menu_usuarios(chat_id)
-            return {"status": "menu_usuarios"}
+            quitar_teclado_inferior(
+                chat_id
+            )
 
-        # Compatibilidad temporal: si Telegram todavía muestra el teclado viejo,
-        # estos textos siguen funcionando hasta que /start lo retire.
-        if texto in ("👥 Usuarios", "🔄 Actualizar"):
-            mostrar_menu_usuarios(chat_id)
-            return {"status": "menu_usuarios"}
+
+            mostrar_panel_principal(
+                chat_id
+            )
+
+
+            return {
+                "status":
+                    "panel_principal"
+            }
+
+
+        if texto_lower.startswith(
+            "/pendientes"
+        ):
+
+            mostrar_menu_usuarios(
+                chat_id
+            )
+
+
+            return {
+                "status":
+                    "menu_usuarios"
+            }
+
+
+        if texto in (
+            "👥 Usuarios",
+            "🔄 Actualizar"
+        ):
+
+            mostrar_menu_usuarios(
+                chat_id
+            )
+
+
+            return {
+                "status":
+                    "menu_usuarios"
+            }
+
 
         if texto == "📊 Estado":
-            mostrar_panel_principal(chat_id)
-            return {"status": "panel_principal"}
 
-        if texto_lower.startswith("/id"):
+            mostrar_panel_principal(
+                chat_id
+            )
+
+
+            return {
+                "status":
+                    "panel_principal"
+            }
+
+
+        if texto_lower.startswith(
+            "/id"
+        ):
+
             respuesta = (
                 "🆔 Tu Telegram ID:\n\n"
                 f"{user_id}"
             )
-        elif texto_lower.startswith("/estado"):
-            resumen = obtener_resumen_panel()
+
+
+        elif texto_lower.startswith(
+            "/estado"
+        ):
+
+            resumen = (
+                obtener_resumen_panel()
+            )
+
+
             respuesta = (
                 "📊 ESTADO DATAVAULT\n\n"
-                f"🟡 Pendientes: {resumen['pendientes']}\n"
-                f"🟢 Aprobados: {resumen['aprobados']}\n"
-                f"🔴 Rechazados: {resumen['rechazados']}"
+                f"🟡 Pendientes: "
+                f"{resumen['pendientes']}\n"
+                f"🟢 Aprobados: "
+                f"{resumen['aprobados']}\n"
+                f"🔴 Rechazados: "
+                f"{resumen['rechazados']}"
             )
+
+
         else:
+
             respuesta = (
                 "🛡️ DataVault DLP activo.\n\n"
                 "Comandos:\n"
@@ -3497,744 +7376,1548 @@ async def recibir_respuesta_telegram(request: Request):
                 "/estado - Verificar conexión"
             )
 
+
         telegram_request(
+
             "sendMessage",
+
             {
-                "chat_id": chat_id,
-                "text": respuesta,
+                "chat_id":
+                    chat_id,
+
+                "text":
+                    respuesta,
             },
+
         )
-        return {"status": "message_processed"}
+
+
+        return {
+            "status":
+                "message_processed"
+        }
+
 
     # ========================================================
     # CALLBACKS DE BOTONES
     # ========================================================
+
     if "callback_query" in data:
-        callback = data["callback_query"]
-        callback_id = callback["id"]
-        user_id = callback["from"]["id"]
-        action_data = callback.get("data", "")
-        message = callback.get("message", {})
-        chat_id = message.get("chat", {}).get("id")
-        message_id = message.get("message_id")
+
+        callback = (
+            data[
+                "callback_query"
+            ]
+        )
+
+
+        callback_id = callback[
+            "id"
+        ]
+
+
+        user_id = callback[
+            "from"
+        ][
+            "id"
+        ]
+
+
+        action_data = callback.get(
+            "data",
+            ""
+        )
+
+
+        message = callback.get(
+            "message",
+            {}
+        )
+
+
+        chat_id = (
+            message.get(
+                "chat",
+                {}
+            )
+            .get(
+                "id"
+            )
+        )
+
+
+        message_id = (
+            message.get(
+                "message_id"
+            )
+        )
+
 
         if user_id not in AUTHORIZED_CHAT_IDS:
+
             telegram_request(
+
                 "answerCallbackQuery",
+
                 {
-                    "callback_query_id": callback_id,
-                    "text": "❌ Acceso denegado: usuario no autorizado.",
-                    "show_alert": True,
+                    "callback_query_id":
+                        callback_id,
+
+                    "text":
+                        (
+                            "❌ Acceso denegado: "
+                            "usuario no autorizado."
+                        ),
+
+                    "show_alert":
+                        True,
                 },
+
             )
-            return {"status": "unauthorized"}
+
+
+            return {
+                "status":
+                    "unauthorized"
+            }
+
 
         print(
-            f"[TELEGRAM CALLBACK] user={user_id} data={action_data}"
+            f"[TELEGRAM CALLBACK] "
+            f"user={user_id} "
+            f"data={action_data}"
         )
+
 
         # ----------------------------------------------------
         # PANEL PRINCIPAL INLINE
         # ----------------------------------------------------
-        if action_data in ("panel:inicio", "panel:actualizar"):
+
+        if action_data in (
+            "panel:inicio",
+            "panel:actualizar"
+        ):
+
             telegram_request(
+
                 "answerCallbackQuery",
-                {"callback_query_id": callback_id},
+
+                {
+                    "callback_query_id":
+                        callback_id
+                },
+
             )
-            mostrar_panel_principal(chat_id, message_id)
-            return {"status": "panel_principal"}
+
+
+            mostrar_panel_principal(
+                chat_id,
+                message_id
+            )
+
+
+            return {
+                "status":
+                    "panel_principal"
+            }
+
 
         if action_data == "panel:usuarios":
+
             telegram_request(
+
                 "answerCallbackQuery",
-                {"callback_query_id": callback_id},
+
+                {
+                    "callback_query_id":
+                        callback_id
+                },
+
             )
-            mostrar_menu_usuarios(chat_id, message_id)
-            return {"status": "menu_usuarios"}
+
+
+            mostrar_menu_usuarios(
+                chat_id,
+                message_id
+            )
+
+
+            return {
+                "status":
+                    "menu_usuarios"
+            }
+
 
         if action_data == "panel:estado":
+
             telegram_request(
+
                 "answerCallbackQuery",
-                {"callback_query_id": callback_id},
+
+                {
+                    "callback_query_id":
+                        callback_id
+                },
+
             )
-            mostrar_estado_panel(chat_id, message_id)
-            return {"status": "panel_estado"}
+
+
+            mostrar_estado_panel(
+                chat_id,
+                message_id
+            )
+
+
+            return {
+                "status":
+                    "panel_estado"
+            }
+
 
         # ----------------------------------------------------
         # NAVEGACIÓN: MENÚ DE USUARIOS
         # ----------------------------------------------------
+
         if action_data == "menu:usuarios":
+
             telegram_request(
+
                 "answerCallbackQuery",
-                {"callback_query_id": callback_id},
+
+                {
+                    "callback_query_id":
+                        callback_id
+                },
+
             )
-            mostrar_menu_usuarios(chat_id, message_id)
-            return {"status": "menu_usuarios"}
+
+
+            mostrar_menu_usuarios(
+                chat_id,
+                message_id
+            )
+
+
+            return {
+                "status":
+                    "menu_usuarios"
+            }
+
 
         # ----------------------------------------------------
         # NAVEGACIÓN: ARCHIVOS DE UN USUARIO
         # ----------------------------------------------------
-        if action_data.startswith("usr:"):
-            solicitante_id = action_data.split(":", 1)[1].strip()
+
+        if action_data.startswith(
+            "usr:"
+        ):
+
+            solicitante_id = (
+                action_data
+                .split(
+                    ":",
+                    1
+                )[1]
+                .strip()
+            )
+
 
             try:
-                solicitante_id = str(UUID(solicitante_id))
-            except (ValueError, TypeError, AttributeError):
-                telegram_request(
-                    "answerCallbackQuery",
-                    {
-                        "callback_query_id": callback_id,
-                        "text": "❌ UID de usuario inválido.",
-                        "show_alert": True,
-                    },
+
+                solicitante_id = str(
+                    UUID(
+                        solicitante_id
+                    )
                 )
-                return {"status": "callback_error"}
+
+
+            except (
+                ValueError,
+                TypeError,
+                AttributeError
+            ):
+
+                telegram_request(
+
+                    "answerCallbackQuery",
+
+                    {
+                        "callback_query_id":
+                            callback_id,
+
+                        "text":
+                            "❌ UID de usuario inválido.",
+
+                        "show_alert":
+                            True,
+                    },
+
+                )
+
+
+                return {
+                    "status":
+                        "callback_error"
+                }
+
 
             telegram_request(
+
                 "answerCallbackQuery",
-                {"callback_query_id": callback_id},
+
+                {
+                    "callback_query_id":
+                        callback_id
+                },
+
             )
+
+
             mostrar_archivos_usuario(
+
                 chat_id,
+
                 message_id,
+
                 solicitante_id,
+
             )
-            return {"status": "menu_archivos"}
+
+
+            return {
+                "status":
+                    "menu_archivos"
+            }
+
 
         # ----------------------------------------------------
         # NAVEGACIÓN: DETALLE DEL DOCUMENTO
         # ----------------------------------------------------
-        if action_data.startswith("doc:"):
-            auditoria_id_raw = action_data.split(":", 1)[1].strip()
+
+        if action_data.startswith(
+            "doc:"
+        ):
+
+            auditoria_id_raw = (
+                action_data
+                .split(
+                    ":",
+                    1
+                )[1]
+                .strip()
+            )
+
 
             try:
-                auditoria_id = str(UUID(auditoria_id_raw))
-            except (ValueError, TypeError, AttributeError):
-                telegram_request(
-                    "answerCallbackQuery",
-                    {
-                        "callback_query_id": callback_id,
-                        "text": "❌ ID de auditoría inválido.",
-                        "show_alert": True,
-                    },
+
+                auditoria_id = str(
+                    UUID(
+                        auditoria_id_raw
+                    )
                 )
-                return {"status": "callback_error"}
+
+
+            except (
+                ValueError,
+                TypeError,
+                AttributeError
+            ):
+
+                telegram_request(
+
+                    "answerCallbackQuery",
+
+                    {
+                        "callback_query_id":
+                            callback_id,
+
+                        "text":
+                            "❌ ID de auditoría inválido.",
+
+                        "show_alert":
+                            True,
+                    },
+
+                )
+
+
+                return {
+                    "status":
+                        "callback_error"
+                }
+
 
             telegram_request(
+
                 "answerCallbackQuery",
-                {"callback_query_id": callback_id},
+
+                {
+                    "callback_query_id":
+                        callback_id
+                },
+
             )
+
+
             mostrar_detalle_documento(
+
                 chat_id,
+
                 message_id,
+
                 auditoria_id,
+
             )
-            return {"status": "detalle_documento"}
+
+
+            return {
+                "status":
+                    "detalle_documento"
+            }
+
 
         # ----------------------------------------------------
         # DECISIÓN: MOVER / ELIMINAR SOLICITADO DESDE LA WEB
         # ----------------------------------------------------
-        if action_data.startswith("opap:") or action_data.startswith("opre:"):
-            prefijo, solicitud_raw = action_data.split(":", 1)
-            try:
-                solicitud_id = str(UUID(solicitud_raw.strip()))
-            except (ValueError, TypeError, AttributeError):
-                telegram_request(
-                    "answerCallbackQuery",
-                    {
-                        "callback_query_id": callback_id,
-                        "text": "❌ ID de solicitud inválido.",
-                        "show_alert": True,
-                    },
-                )
-                return {"status": "callback_error"}
 
-            aprobar_operacion = prefijo == "opap"
-            try:
-                solicitud, cambio = procesar_solicitud_operacion(
-                    solicitud_id,
-                    aprobar_operacion,
-                    str(user_id),
-                )
-            except Exception as error:
-                print("[OPERACION CALLBACK ERROR]", error)
-                telegram_request(
-                    "answerCallbackQuery",
-                    {
-                        "callback_query_id": callback_id,
-                        "text": f"❌ No se pudo procesar: {error}"[:200],
-                        "show_alert": True,
-                    },
-                )
-                return {"status": "operation_callback_error", "error": str(error)}
+        if (
+            action_data.startswith(
+                "opap:"
+            )
+            or
+            action_data.startswith(
+                "opre:"
+            )
+        ):
 
-            estado_final = str(solicitud.get("estado") or "").upper()
-            if not cambio:
-                telegram_request(
-                    "answerCallbackQuery",
-                    {
-                        "callback_query_id": callback_id,
-                        "text": f"⚠️ La solicitud ya fue procesada: {estado_final}",
-                        "show_alert": True,
-                    },
+            prefijo, solicitud_raw = (
+                action_data.split(
+                    ":",
+                    1
                 )
-                return {"status": "operation_already_processed"}
-
-            telegram_request(
-                "answerCallbackQuery",
-                {
-                    "callback_query_id": callback_id,
-                    "text": f"Operación actualizada a: {estado_final}",
-                },
             )
 
-            tipo = solicitud.get("tipo_operacion") or "OPERACIÓN"
-            icono = "✅" if estado_final == "APROBADO" else "❌"
+
+            try:
+
+                solicitud_id = str(
+                    UUID(
+                        solicitud_raw.strip()
+                    )
+                )
+
+
+            except (
+                ValueError,
+                TypeError,
+                AttributeError
+            ):
+
+                telegram_request(
+
+                    "answerCallbackQuery",
+
+                    {
+                        "callback_query_id":
+                            callback_id,
+
+                        "text":
+                            "❌ ID de solicitud inválido.",
+
+                        "show_alert":
+                            True,
+                    },
+
+                )
+
+
+                return {
+                    "status":
+                        "callback_error"
+                }
+
+
+            aprobar_operacion = (
+                prefijo
+                == "opap"
+            )
+
+
+            try:
+
+                solicitud, cambio = (
+                    procesar_solicitud_operacion(
+
+                        solicitud_id,
+
+                        aprobar_operacion,
+
+                        str(
+                            user_id
+                        ),
+
+                    )
+                )
+
+
+            except Exception as error:
+
+                print(
+                    "[OPERACION CALLBACK ERROR]",
+                    error
+                )
+
+
+                telegram_request(
+
+                    "answerCallbackQuery",
+
+                    {
+                        "callback_query_id":
+                            callback_id,
+
+                        "text":
+                            (
+                                "❌ No se pudo procesar: "
+                                f"{error}"
+                            )[:200],
+
+                        "show_alert":
+                            True,
+                    },
+
+                )
+
+
+                return {
+
+                    "status":
+                        "operation_callback_error",
+
+                    "error":
+                        str(error),
+
+                }
+
+
+            estado_final = str(
+                solicitud.get(
+                    "estado"
+                )
+                or ""
+            ).upper()
+
+
+            if not cambio:
+
+                telegram_request(
+
+                    "answerCallbackQuery",
+
+                    {
+                        "callback_query_id":
+                            callback_id,
+
+                        "text":
+                            (
+                                "⚠️ La solicitud ya fue procesada: "
+                                f"{estado_final}"
+                            ),
+
+                        "show_alert":
+                            True,
+                    },
+
+                )
+
+
+                return {
+                    "status":
+                        "operation_already_processed"
+                }
+
+
+            telegram_request(
+
+                "answerCallbackQuery",
+
+                {
+                    "callback_query_id":
+                        callback_id,
+
+                    "text":
+                        (
+                            "Operación actualizada a: "
+                            f"{estado_final}"
+                        ),
+                },
+
+            )
+
+
+            tipo = (
+                solicitud.get(
+                    "tipo_operacion"
+                )
+                or
+                "OPERACIÓN"
+            )
+
+
+            icono = (
+                "✅"
+                if estado_final
+                == "APROBADO"
+                else
+                "❌"
+            )
+
+
             texto = (
                 "🛡️ DataVault DLP - GM Ingenieros\n\n"
                 f"{icono} {tipo}: {estado_final}\n\n"
-                f"👤 Usuario: {solicitud.get('solicitante_nombre') or 'Usuario'}\n"
-                f"📄 Objeto: {solicitud.get('nombre_objeto') or 'Archivo/Carpeta'}\n"
-                f"📌 Tipo: {solicitud.get('objeto_tipo') or '—'}\n"
+                f"👤 Usuario: "
+                f"{solicitud.get('solicitante_nombre') or 'Usuario'}\n"
+                f"📄 Objeto: "
+                f"{solicitud.get('nombre_objeto') or 'Archivo/Carpeta'}\n"
+                f"📌 Tipo: "
+                f"{solicitud.get('objeto_tipo') or '—'}\n"
             )
-            if solicitud.get("carpeta_destino_nombre"):
-                texto += f"➡️ Destino: {solicitud.get('carpeta_destino_nombre')}\n"
-            if solicitud.get("resultado"):
-                texto += f"\n📝 {solicitud.get('resultado')}\n"
-            texto += f"\n👤 Procesado por Telegram ID: {user_id}"
 
-            if chat_id and message_id:
-                telegram_request(
-                    "editMessageText",
-                    {
-                        "chat_id": chat_id,
-                        "message_id": message_id,
-                        "text": texto,
-                    },
+
+            if solicitud.get(
+                "carpeta_destino_nombre"
+            ):
+
+                texto += (
+                    f"➡️ Destino: "
+                    f"{solicitud.get('carpeta_destino_nombre')}\n"
                 )
 
+
+            if solicitud.get(
+                "resultado"
+            ):
+
+                texto += (
+                    f"\n📝 "
+                    f"{solicitud.get('resultado')}\n"
+                )
+
+
+            texto += (
+                f"\n👤 Procesado por "
+                f"Telegram ID: {user_id}"
+            )
+
+
+            if chat_id and message_id:
+
+                telegram_request(
+
+                    "editMessageText",
+
+                    {
+                        "chat_id":
+                            chat_id,
+
+                        "message_id":
+                            message_id,
+
+                        "text":
+                            texto,
+                    },
+
+                )
+
+
             return {
-                "status": "operation_processed",
-                "estado": estado_final,
-                "solicitud_id": solicitud_id,
+
+                "status":
+                    "operation_processed",
+
+                "estado":
+                    estado_final,
+
+                "solicitud_id":
+                    solicitud_id,
+
             }
+
 
         # ----------------------------------------------------
         # NAVEGACIÓN: DETALLE DE UNA CARPETA / LOTE
         # ----------------------------------------------------
-        if action_data.startswith("lot:"):
-            lote_id_raw = action_data.split(":", 1)[1].strip()
+
+        if action_data.startswith(
+            "lot:"
+        ):
+
+            lote_id_raw = (
+                action_data
+                .split(
+                    ":",
+                    1
+                )[1]
+                .strip()
+            )
+
 
             try:
-                lote_id = str(UUID(lote_id_raw))
-            except (ValueError, TypeError, AttributeError):
-                telegram_request(
-                    "answerCallbackQuery",
-                    {
-                        "callback_query_id": callback_id,
-                        "text": "❌ ID de lote inválido.",
-                        "show_alert": True,
-                    },
+
+                lote_id = str(
+                    UUID(
+                        lote_id_raw
+                    )
                 )
-                return {"status": "callback_error"}
+
+
+            except (
+                ValueError,
+                TypeError,
+                AttributeError
+            ):
+
+                telegram_request(
+
+                    "answerCallbackQuery",
+
+                    {
+                        "callback_query_id":
+                            callback_id,
+
+                        "text":
+                            "❌ ID de lote inválido.",
+
+                        "show_alert":
+                            True,
+                    },
+
+                )
+
+
+                return {
+                    "status":
+                        "callback_error"
+                }
+
 
             telegram_request(
+
                 "answerCallbackQuery",
-                {"callback_query_id": callback_id},
+
+                {
+                    "callback_query_id":
+                        callback_id
+                },
+
             )
-            mostrar_detalle_lote(chat_id, message_id, lote_id)
-            return {"status": "detalle_lote"}
+
+
+            mostrar_detalle_lote(
+                chat_id,
+                message_id,
+                lote_id
+            )
+
+
+            return {
+                "status":
+                    "detalle_lote"
+            }
+
 
         # ----------------------------------------------------
         # DECISIÓN: APROBAR / RECHAZAR CARPETA COMPLETA
         # ----------------------------------------------------
-        if action_data.startswith("aplot:") or action_data.startswith("relot:"):
-            accion_lote, lote_id_raw = action_data.split(":", 1)
+
+        if (
+            action_data.startswith(
+                "aplot:"
+            )
+            or
+            action_data.startswith(
+                "relot:"
+            )
+        ):
+
+            accion_lote, lote_id_raw = (
+                action_data.split(
+                    ":",
+                    1
+                )
+            )
+
 
             try:
-                lote_id = str(UUID(lote_id_raw.strip()))
-            except (ValueError, TypeError, AttributeError):
-                telegram_request(
-                    "answerCallbackQuery",
-                    {
-                        "callback_query_id": callback_id,
-                        "text": "❌ ID de lote inválido.",
-                        "show_alert": True,
-                    },
-                )
-                return {"status": "callback_error"}
 
-            aprobar_lote = accion_lote == "aplot"
-            estado_lote = "APROBADO" if aprobar_lote else "RECHAZADO"
+                lote_id = str(
+                    UUID(
+                        lote_id_raw.strip()
+                    )
+                )
+
+
+            except (
+                ValueError,
+                TypeError,
+                AttributeError
+            ):
+
+                telegram_request(
+
+                    "answerCallbackQuery",
+
+                    {
+                        "callback_query_id":
+                            callback_id,
+
+                        "text":
+                            "❌ ID de lote inválido.",
+
+                        "show_alert":
+                            True,
+                    },
+
+                )
+
+
+                return {
+                    "status":
+                        "callback_error"
+                }
+
+
+            aprobar_lote = (
+                accion_lote
+                == "aplot"
+            )
+
+
+            estado_lote = (
+
+                "APROBADO"
+
+                if aprobar_lote
+
+                else
+
+                "RECHAZADO"
+
+            )
+
+
             drive_lote = None
             documentos_lote = []
 
+
             try:
-                with DECISION_LOCK:
-                    consulta_lote = (
-                        supabase
-                        .table("auditoria_custodia")
-                        .select(
-                            "id,nombre_archivo,hash_sha256,tamano_bytes,estado,"
-                            "solicitante_id,solicitante_nombre,solicitante_correo,"
-                            "lote_id,ruta_relativa"
-                        )
-                        .eq("lote_id", lote_id)
-                        .eq("estado", "PENDIENTE")
-                        .execute()
+
+                resultado_decision_lote = (
+                    resolver_custodia_carpeta(
+                        lote_id,
+                        aprobar_lote,
                     )
+                )
 
-                    documentos_lote = consulta_lote.data or []
 
-                    if not documentos_lote:
-                        telegram_request(
-                            "answerCallbackQuery",
-                            {
-                                "callback_query_id": callback_id,
-                                "text": "⚠️ Esta carpeta ya fue procesada o no tiene pendientes.",
-                                "show_alert": True,
-                            },
-                        )
-                        return {"status": "already_processed"}
+                if not resultado_decision_lote[
+                    "procesado"
+                ]:
 
-                    # Asegurarnos de que realmente es una carpeta seleccionada.
-                    nombre_carpeta = obtener_carpeta_desde_ruta(
-                        documentos_lote[0].get("ruta_relativa")
-                    )
-                    if not nombre_carpeta:
-                        raise RuntimeError(
-                            "El lote no corresponde a una carpeta completa."
-                        )
+                    telegram_request(
 
-                    if aprobar_lote:
-                        # Verificar ANTES de subir que todos siguen disponibles en RAM.
-                        faltantes_ram = [
-                            str(doc.get("id"))
-                            for doc in documentos_lote
-                            if not ARCHIVOS_EN_RAM.get(str(doc.get("id")))
-                        ]
+                        "answerCallbackQuery",
 
-                        if faltantes_ram:
-                            raise RuntimeError(
-                                f"{len(faltantes_ram)} archivo(s) ya no están disponibles en RAM. "
-                                "La carpeta no fue transferida."
-                            )
+                        {
+                            "callback_query_id":
+                                callback_id,
 
-                        drive_lote = subir_lote_carpeta_a_drive(documentos_lote)
-
-                        if not drive_lote:
-                            telegram_request(
-                                "answerCallbackQuery",
-                                {
-                                    "callback_query_id": callback_id,
-                                    "text": (
-                                        "⚠️ Google Drive no pudo completar toda la carpeta. "
-                                        "Los documentos siguen PENDIENTES."
-                                    ),
-                                    "show_alert": True,
-                                },
-                            )
-                            return {
-                                "status": "drive_batch_error",
-                                "estado_actual": "PENDIENTE",
-                            }
-
-                        resultado_lote = (
-                            supabase
-                            .table("auditoria_custodia")
-                            .update({
-                                "estado": "APROBADO",
-                                "drive_folder_id": drive_lote["folder_id"],
-                                "drive_parent_id": GOOGLE_FOLDER_ID,
-                                "ubicacion_drive": drive_lote["folder_name"],
-                                "en_drive": True,
-                                "estado_archivo": "ACTIVO",
-                                "fecha_transferencia": ahora_iso(),
-                                "fecha_ultima_operacion": ahora_iso(),
-                            })
-                            .eq("lote_id", lote_id)
-                            .eq("estado", "PENDIENTE")
-                            .execute()
-                        )
-
-                        if not resultado_lote.data:
-                            # Drive ya se creó, pero Supabase no confirmó. Intentamos rollback.
-                            try:
-                                service = obtener_servicio_google_drive()
+                            "text":
                                 (
-                                    service
-                                    .files()
-                                    .delete(
-                                        fileId=drive_lote["folder_id"],
-                                        supportsAllDrives=True,
-                                    )
-                                    .execute()
-                                )
-                            except Exception as rollback_error:
-                                print("[DRIVE/SUPABASE ROLLBACK ERROR]", rollback_error)
+                                    "⚠️ Esta carpeta ya fue procesada "
+                                    "o no tiene pendientes."
+                                ),
 
-                            raise RuntimeError(
-                                "La carpeta llegó a Drive, pero Supabase no pudo confirmar APROBADO."
-                            )
+                            "show_alert":
+                                True,
+                        },
 
-                    else:
-                        resultado_lote = (
-                            supabase
-                            .table("auditoria_custodia")
-                            .update({"estado": "RECHAZADO"})
-                            .eq("lote_id", lote_id)
-                            .eq("estado", "PENDIENTE")
-                            .execute()
-                        )
+                    )
 
-                        if not resultado_lote.data:
-                            raise RuntimeError(
-                                "No se pudo cambiar la carpeta a RECHAZADO."
-                            )
 
-                    # Solo después de una decisión confirmada liberamos la RAM.
-                    for doc in documentos_lote:
-                        ARCHIVOS_EN_RAM.pop(str(doc.get("id")), None)
+                    return {
+                        "status":
+                            "already_processed"
+                    }
+
+
+                documentos_lote = (
+                    resultado_decision_lote[
+                        "documentos"
+                    ]
+                )
+
+
+                drive_lote = (
+                    resultado_decision_lote[
+                        "drive_lote"
+                    ]
+                )
+
 
             except Exception as error:
-                print("[CALLBACK LOTE ERROR]", error)
-                telegram_request(
-                    "answerCallbackQuery",
-                    {
-                        "callback_query_id": callback_id,
-                        "text": f"❌ No se pudo procesar la carpeta: {error}"[:200],
-                        "show_alert": True,
-                    },
+
+                print(
+                    "[CALLBACK LOTE ERROR]",
+                    error
                 )
+
+
+                telegram_request(
+
+                    "answerCallbackQuery",
+
+                    {
+                        "callback_query_id":
+                            callback_id,
+
+                        "text":
+                            (
+                                "❌ No se pudo procesar "
+                                "la carpeta: "
+                                f"{error}"
+                            )[:200],
+
+                        "show_alert":
+                            True,
+                    },
+
+                )
+
+
                 return {
-                    "status": "callback_lote_error",
-                    "error": str(error),
+
+                    "status":
+                        "callback_lote_error",
+
+                    "error":
+                        str(error),
+
                 }
 
-            primer = documentos_lote[0]
-            solicitante_id_lote = str(primer.get("solicitante_id") or "").strip()
-            solicitante_nombre_lote = primer.get("solicitante_nombre") or "Usuario"
-            nombre_carpeta = obtener_carpeta_desde_ruta(primer.get("ruta_relativa")) or f"LOTE_{lote_id[:8]}"
 
-            telegram_request(
-                "answerCallbackQuery",
-                {
-                    "callback_query_id": callback_id,
-                    "text": f"Carpeta actualizada a: {estado_lote}",
-                },
+            primer = (
+                documentos_lote[0]
             )
 
-            icono = "✅" if estado_lote == "APROBADO" else "❌"
+
+            solicitante_id_lote = str(
+                primer.get(
+                    "solicitante_id"
+                )
+                or ""
+            ).strip()
+
+
+            solicitante_nombre_lote = (
+                primer.get(
+                    "solicitante_nombre"
+                )
+                or
+                "Usuario"
+            )
+
+
+            nombre_carpeta = (
+
+                obtener_carpeta_desde_ruta(
+                    primer.get(
+                        "ruta_relativa"
+                    )
+                )
+
+                or
+
+                f"LOTE_{lote_id[:8]}"
+
+            )
+
+
+            telegram_request(
+
+                "answerCallbackQuery",
+
+                {
+                    "callback_query_id":
+                        callback_id,
+
+                    "text":
+                        (
+                            "Carpeta actualizada a: "
+                            f"{estado_lote}"
+                        ),
+                },
+
+            )
+
+
+            icono = (
+
+                "✅"
+
+                if estado_lote
+                == "APROBADO"
+
+                else
+
+                "❌"
+
+            )
+
+
             nuevo_texto = (
                 "🛡️ DataVault DLP - GM Ingenieros\n\n"
                 f"📁 Carpeta: {nombre_carpeta}\n"
                 f"👤 Solicitante: {solicitante_nombre_lote}\n"
-                f"📄 Archivos procesados: {len(documentos_lote)}\n\n"
-                f"{icono} DECISIÓN: Carpeta {estado_lote}\n"
+                f"📄 Archivos procesados: "
+                f"{len(documentos_lote)}\n\n"
+                f"{icono} DECISIÓN: "
+                f"Carpeta {estado_lote}\n"
             )
+
 
             if drive_lote:
+
                 nuevo_texto += (
-                    f"☁️ Carpeta subida a Google Drive\n"
-                    f"🆔 Drive folder ID: {drive_lote['folder_id']}\n"
+                    "☁️ Carpeta subida a Google Drive\n"
+                    f"🆔 Drive folder ID: "
+                    f"{drive_lote['folder_id']}\n"
                 )
 
-            nuevo_texto += f"👤 Procesado por Telegram ID: {user_id}"
 
-            botones_finales_lote = []
-            if solicitante_id_lote:
-                botones_finales_lote.append([{
-                    "text": "🔙 Pendientes del usuario",
-                    "callback_data": f"usr:{solicitante_id_lote}",
-                }])
-
-            botones_finales_lote.append([{
-                "text": "👥 Usuarios pendientes",
-                "callback_data": "menu:usuarios",
-            }])
-
-            telegram_request(
-                "editMessageText",
-                {
-                    "chat_id": chat_id,
-                    "message_id": message_id,
-                    "text": nuevo_texto,
-                    "reply_markup": {"inline_keyboard": botones_finales_lote},
-                },
+            nuevo_texto += (
+                f"👤 Procesado por "
+                f"Telegram ID: {user_id}"
             )
 
+
+            botones_finales_lote = []
+
+
+            if solicitante_id_lote:
+
+                botones_finales_lote.append([
+                    {
+                        "text":
+                            "🔙 Pendientes del usuario",
+
+                        "callback_data":
+                            f"usr:{solicitante_id_lote}",
+                    }
+                ])
+
+
+            botones_finales_lote.append([
+                {
+                    "text":
+                        "👥 Usuarios pendientes",
+
+                    "callback_data":
+                        "menu:usuarios",
+                }
+            ])
+
+
+            telegram_request(
+
+                "editMessageText",
+
+                {
+                    "chat_id":
+                        chat_id,
+
+                    "message_id":
+                        message_id,
+
+                    "text":
+                        nuevo_texto,
+
+                    "reply_markup": {
+                        "inline_keyboard":
+                            botones_finales_lote
+                    },
+                },
+
+            )
+
+
             return {
-                "status": "ok",
-                "estado_actualizado": estado_lote,
-                "lote_id": lote_id,
-                "drive_folder_id": drive_lote["folder_id"] if drive_lote else None,
+
+                "status":
+                    "ok",
+
+                "estado_actualizado":
+                    estado_lote,
+
+                "lote_id":
+                    lote_id,
+
+                "drive_folder_id":
+                    (
+                        drive_lote[
+                            "folder_id"
+                        ]
+                        if drive_lote
+                        else None
+                    ),
+
             }
+
 
         # ----------------------------------------------------
         # DECISIÓN: APROBAR / RECHAZAR ARCHIVO SUELTO
         # ----------------------------------------------------
+
         if ":" not in action_data:
+
             telegram_request(
+
                 "answerCallbackQuery",
+
                 {
-                    "callback_query_id": callback_id,
-                    "text": "❌ Formato de decisión inválido.",
-                    "show_alert": True,
+                    "callback_query_id":
+                        callback_id,
+
+                    "text":
+                        "❌ Formato de decisión inválido.",
+
+                    "show_alert":
+                        True,
                 },
+
             )
+
+
             return {
-                "status": "callback_error",
-                "error": "Formato de callback inválido",
+
+                "status":
+                    "callback_error",
+
+                "error":
+                    "Formato de callback inválido",
+
             }
 
-        accion, auditoria_id_raw = action_data.split(":", 1)
 
-        if accion not in ("aprobar", "rechazar"):
-            telegram_request(
-                "answerCallbackQuery",
-                {
-                    "callback_query_id": callback_id,
-                    "text": "❌ Acción inválida.",
-                    "show_alert": True,
-                },
+        accion, auditoria_id_raw = (
+            action_data.split(
+                ":",
+                1
             )
+        )
+
+
+        if accion not in (
+            "aprobar",
+            "rechazar"
+        ):
+
+            telegram_request(
+
+                "answerCallbackQuery",
+
+                {
+                    "callback_query_id":
+                        callback_id,
+
+                    "text":
+                        "❌ Acción inválida.",
+
+                    "show_alert":
+                        True,
+                },
+
+            )
+
+
             return {
-                "status": "callback_error",
-                "error": "Acción inválida",
+
+                "status":
+                    "callback_error",
+
+                "error":
+                    "Acción inválida",
+
             }
+
 
         try:
-            auditoria_id = str(UUID(auditoria_id_raw.strip()))
-        except (ValueError, AttributeError, TypeError):
-            telegram_request(
-                "answerCallbackQuery",
-                {
-                    "callback_query_id": callback_id,
-                    "text": "❌ ID de auditoría inválido.",
-                    "show_alert": True,
-                },
+
+            auditoria_id = str(
+                UUID(
+                    auditoria_id_raw.strip()
+                )
             )
+
+
+        except (
+            ValueError,
+            AttributeError,
+            TypeError
+        ):
+
+            telegram_request(
+
+                "answerCallbackQuery",
+
+                {
+                    "callback_query_id":
+                        callback_id,
+
+                    "text":
+                        "❌ ID de auditoría inválido.",
+
+                    "show_alert":
+                        True,
+                },
+
+            )
+
+
             return {
-                "status": "callback_error",
-                "error": "ID de auditoría inválido",
+
+                "status":
+                    "callback_error",
+
+                "error":
+                    "ID de auditoría inválido",
+
             }
 
-        id_auditoria_str = auditoria_id
-        nuevo_estado = "APROBADO" if accion == "aprobar" else "RECHAZADO"
+
+        id_auditoria_str = (
+            auditoria_id
+        )
+
+
+        nuevo_estado = (
+
+            "APROBADO"
+
+            if accion
+            == "aprobar"
+
+            else
+
+            "RECHAZADO"
+
+        )
+
+
         drive_id = None
         resultado_update = None
         registro_actual = None
 
+
         try:
-            # Impide decisiones simultáneas dentro de esta instancia Railway.
-            with DECISION_LOCK:
-                consulta = (
-                    supabase
-                    .table("auditoria_custodia")
-                    .select(
-                        "id,estado,nombre_archivo,hash_sha256,"
-                        "solicitante_id,solicitante_nombre,solicitante_correo"
-                    )
-                    .eq("id", auditoria_id)
-                    .limit(1)
-                    .execute()
+
+            resultado_decision = (
+                resolver_custodia_archivo(
+
+                    auditoria_id,
+
+                    accion
+                    == "aprobar",
+
+                )
+            )
+
+
+            registro_actual = (
+                resultado_decision[
+                    "registro"
+                ]
+            )
+
+
+            drive_id = (
+                resultado_decision[
+                    "drive_id"
+                ]
+            )
+
+
+            resultado_update = (
+                resultado_decision[
+                    "resultado_update"
+                ]
+            )
+
+
+            if not resultado_decision[
+                "procesado"
+            ]:
+
+                telegram_request(
+
+                    "answerCallbackQuery",
+
+                    {
+                        "callback_query_id":
+                            callback_id,
+
+                        "text":
+                            (
+                                "⚠️ Este documento ya fue procesado. "
+                                f"Estado actual: "
+                                f"{resultado_decision['estado']}."
+                            ),
+
+                        "show_alert":
+                            True,
+                    },
+
                 )
 
-                if not consulta.data:
-                    raise ValueError(
-                        f"No existe la auditoría {auditoria_id}."
-                    )
 
-                registro_actual = consulta.data[0]
-                estado_actual = registro_actual.get("estado")
+                return {
 
-                if estado_actual != "PENDIENTE":
-                    telegram_request(
-                        "answerCallbackQuery",
-                        {
-                            "callback_query_id": callback_id,
-                            "text": (
-                                "⚠️ Este documento ya fue procesado. "
-                                f"Estado actual: {estado_actual}."
-                            ),
-                            "show_alert": True,
-                        },
-                    )
-                    return {
-                        "status": "already_processed",
-                        "estado_actual": estado_actual,
-                    }
+                    "status":
+                        "already_processed",
 
-                # APROBAR: Drive -> Supabase -> liberar RAM.
-                if accion == "aprobar":
-                    archivo_ram = ARCHIVOS_EN_RAM.get(id_auditoria_str)
+                    "estado_actual":
+                        resultado_decision[
+                            "estado"
+                        ],
 
-                    if not archivo_ram:
-                        raise RuntimeError(
-                            "El archivo ya no está disponible en RAM. "
-                            "No se modificó el estado en Supabase."
-                        )
+                }
 
-                    drive_id = subir_a_google_drive(
-                        archivo_ram["nombre"],
-                        archivo_ram["contenido"],
-                        auditoria_id=id_auditoria_str,
-                    )
-
-                    if not drive_id:
-                        telegram_request(
-                            "answerCallbackQuery",
-                            {
-                                "callback_query_id": callback_id,
-                                "text": (
-                                    "⚠️ Google Drive rechazó o no pudo "
-                                    "completar la transferencia. "
-                                    "El documento sigue PENDIENTE."
-                                ),
-                                "show_alert": True,
-                            },
-                        )
-                        return {
-                            "status": "drive_error",
-                            "estado_actual": "PENDIENTE",
-                        }
-
-                    resultado_update = (
-                        supabase
-                        .table("auditoria_custodia")
-                        .update({
-                            "estado": "APROBADO",
-                            "drive_file_id": drive_id,
-                            "drive_parent_id": GOOGLE_FOLDER_ID,
-                            "ubicacion_drive": "DRIVE PROYECTO",
-                            "en_drive": True,
-                            "estado_archivo": "ACTIVO",
-                            "fecha_transferencia": ahora_iso(),
-                            "fecha_ultima_operacion": ahora_iso(),
-                        })
-                        .eq("id", auditoria_id)
-                        .eq("estado", "PENDIENTE")
-                        .execute()
-                    )
-
-                    if not resultado_update.data:
-                        raise RuntimeError(
-                            "El archivo llegó a Drive, pero Supabase no pudo "
-                            "confirmar el estado APROBADO. "
-                            f"Drive ID: {drive_id}"
-                        )
-
-                    ARCHIVOS_EN_RAM.pop(id_auditoria_str, None)
-
-                # RECHAZAR: Supabase -> liberar RAM.
-                else:
-                    resultado_update = (
-                        supabase
-                        .table("auditoria_custodia")
-                        .update({"estado": "RECHAZADO"})
-                        .eq("id", auditoria_id)
-                        .eq("estado", "PENDIENTE")
-                        .execute()
-                    )
-
-                    if not resultado_update.data:
-                        raise RuntimeError(
-                            "No se pudo cambiar el documento a RECHAZADO."
-                        )
-
-                    ARCHIVOS_EN_RAM.pop(id_auditoria_str, None)
 
         except Exception as error:
-            print("[CALLBACK ERROR]", error)
-            telegram_request(
-                "answerCallbackQuery",
-                {
-                    "callback_query_id": callback_id,
-                    "text": (
-                        "❌ No se pudo procesar: "
-                        f"{error}"
-                    )[:200],
-                    "show_alert": True,
-                },
+
+            print(
+                "[CALLBACK ERROR]",
+                error
             )
+
+
+            telegram_request(
+
+                "answerCallbackQuery",
+
+                {
+                    "callback_query_id":
+                        callback_id,
+
+                    "text":
+                        (
+                            "❌ No se pudo procesar: "
+                            f"{error}"
+                        )[:200],
+
+                    "show_alert":
+                        True,
+                },
+
+            )
+
+
             return {
-                "status": "callback_error",
-                "error": str(error),
+
+                "status":
+                    "callback_error",
+
+                "error":
+                    str(error),
+
             }
 
+
         print(
+
             "[SUPABASE UPDATE]",
-            getattr(resultado_update, "data", None),
+
+            getattr(
+                resultado_update,
+                "data",
+                None
+            ),
+
         )
+
 
         telegram_request(
+
             "answerCallbackQuery",
+
             {
-                "callback_query_id": callback_id,
-                "text": f"Estado actualizado a: {nuevo_estado}",
+                "callback_query_id":
+                    callback_id,
+
+                "text":
+                    (
+                        "Estado actualizado a: "
+                        f"{nuevo_estado}"
+                    ),
             },
+
         )
+
 
         solicitante_id = str(
-            (registro_actual or {}).get("solicitante_id") or ""
+
+            (
+                registro_actual
+                or {}
+            ).get(
+                "solicitante_id"
+            )
+
+            or ""
+
         ).strip()
+
+
         nombre_archivo = (
-            (registro_actual or {}).get("nombre_archivo")
-            or "Archivo"
-        )
-        solicitante_nombre = (
-            (registro_actual or {}).get("solicitante_nombre")
-            or "Usuario"
+
+            (
+                registro_actual
+                or {}
+            ).get(
+                "nombre_archivo"
+            )
+
+            or
+
+            "Archivo"
+
         )
 
-        icono = "✅" if nuevo_estado == "APROBADO" else "❌"
+
+        solicitante_nombre = (
+
+            (
+                registro_actual
+                or {}
+            ).get(
+                "solicitante_nombre"
+            )
+
+            or
+
+            "Usuario"
+
+        )
+
+
+        icono = (
+
+            "✅"
+
+            if nuevo_estado
+            == "APROBADO"
+
+            else
+
+            "❌"
+
+        )
+
 
         nuevo_texto = (
             "🛡️ DataVault DLP - GM Ingenieros\n\n"
             f"📁 Archivo: {nombre_archivo}\n"
             f"👤 Solicitante: {solicitante_nombre}\n\n"
-            f"{icono} DECISIÓN: Documento {nuevo_estado}\n"
+            f"{icono} DECISIÓN: "
+            f"Documento {nuevo_estado}\n"
         )
 
-        if drive_id:
-            nuevo_texto += f"☁️ Subido a Google Drive (ID: {drive_id})\n"
 
-        nuevo_texto += f"👤 Procesado por Telegram ID: {user_id}"
+        if drive_id:
+
+            nuevo_texto += (
+                "☁️ Subido a Google Drive "
+                f"(ID: {drive_id})\n"
+            )
+
+
+        nuevo_texto += (
+            f"👤 Procesado por "
+            f"Telegram ID: {user_id}"
+        )
+
 
         botones_finales = []
+
+
         if solicitante_id:
+
             botones_finales.append([
                 {
-                    "text": "🔙 Archivos del usuario",
-                    "callback_data": f"usr:{solicitante_id}",
+                    "text":
+                        "🔙 Archivos del usuario",
+
+                    "callback_data":
+                        f"usr:{solicitante_id}",
                 }
             ])
 
+
         botones_finales.append([
             {
-                "text": "👥 Usuarios pendientes",
-                "callback_data": "menu:usuarios",
+                "text":
+                    "👥 Usuarios pendientes",
+
+                "callback_data":
+                    "menu:usuarios",
             }
         ])
 
+
         if chat_id and message_id:
+
             telegram_request(
+
                 "editMessageText",
+
                 {
-                    "chat_id": chat_id,
-                    "message_id": message_id,
-                    "text": nuevo_texto,
+                    "chat_id":
+                        chat_id,
+
+                    "message_id":
+                        message_id,
+
+                    "text":
+                        nuevo_texto,
+
                     "reply_markup": {
-                        "inline_keyboard": botones_finales
+                        "inline_keyboard":
+                            botones_finales
                     },
                 },
+
             )
 
+
         return {
-            "status": "ok",
-            "estado_actualizado": nuevo_estado,
-            "autorizado_por": user_id,
-            "drive_id": drive_id,
+
+            "status":
+                "ok",
+
+            "estado_actualizado":
+                nuevo_estado,
+
+            "autorizado_por":
+                user_id,
+
+            "drive_id":
+                drive_id,
+
         }
 
-    return {"status": "ignored"}
+
+    return {
+        "status":
+            "ignored"
+    }
