@@ -2301,7 +2301,7 @@ const SUPABASE_URL = "https://crujlbbhtkcithullgfs.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNydWpsYmJodGtjaXRodWxsZ2ZzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkzOTQ0ODAsImV4cCI6MjEwNDk3MDQ4MH0.IJTGJ02ldBKp1_yLejsN4643PCj70sxNOKCE0e-YLGw";
 const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// Carpetas disponibles en Drive. Ajusta esta lista a las carpetas reales configuradas en el backend.
+// Etiquetas heredadas para controles antiguos. El esquema actual de auditoria_custodia usa lote_id + ruta_relativa.
 const CARPETAS = ["PLANOS", "INFORMES", "CUSTODIA", "PROYECTOS", "CONTRATOS"];
 
 let currentUserEmail = "";
@@ -2328,6 +2328,15 @@ function formatBytes(bytes) {
   let i = 0, val = bytes;
   while (val >= 1024 && i < units.length - 1) { val /= 1024; i++; }
   return `${val.toFixed(1)} ${units[i]}`;
+}
+
+// Nombre visual de carpeta usando el esquema ACTUAL de auditoria_custodia.
+// La tabla no tiene una columna `carpeta`; las carpetas se representan con
+// lote_id + ruta_relativa (ej.: "PRACTICA EMPRESA SENATI/subcarpeta/archivo.pdf").
+function auditFolderName(row) {
+  const ruta = String(row?.ruta_relativa || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  if (row?.lote_id && ruta.includes('/')) return ruta.split('/')[0] || 'Carpeta';
+  return 'Archivo suelto';
 }
 
 function populateCarpetaSelects() {
@@ -2662,13 +2671,15 @@ async function cargarArchivosCarpeta(modo) {
   listEl.innerHTML = `<p class="p-4 text-center text-slate-400 text-sm"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Cargando archivos de ${escapeHtml(carpeta)}...</p>`;
   document.getElementById(btnId).disabled = true;
 
-  const { data, error } = await supabaseClient
+  const { data: rawData, error } = await supabaseClient
     .from('auditoria_custodia')
-    .select('id, nombre_archivo, hash_sha256, carpeta')
-    .eq('carpeta', carpeta)
+    .select('id,nombre_archivo,hash_sha256,lote_id,ruta_relativa,estado,fecha_solicitud')
     .eq('estado', 'APROBADO')
     .order('fecha_solicitud', { ascending: false })
-    .limit(200);
+    .limit(500);
+
+  const data = (Array.isArray(rawData) ? rawData : [])
+    .filter(row => auditFolderName(row) === carpeta);
 
   if (error) {
     console.error("Error cargando archivos de carpeta:", error);
@@ -2921,7 +2932,7 @@ async function loadAudit() {
   auditBody.innerHTML = data.map(row => {
     const nombre = escapeHtml(row.nombre_archivo || 'Sin nombre');
     const usuario = escapeHtml(row.usuario_solicitante || 'Usuario desconocido');
-    const carpeta = escapeHtml(row.carpeta || '—');
+    const carpeta = escapeHtml(auditFolderName(row));
     const estado = escapeHtml(row.estado || 'PENDIENTE');
     const hashCompleto = row.hash_sha256 || '';
     const hashCorto = hashCompleto ? escapeHtml(hashCompleto.substring(0, 16)) + '...' : 'N/A';
@@ -2940,7 +2951,7 @@ async function loadAudit() {
     <tr class="border-b border-slate-100 hover:bg-slate-50 transition">
       <td class="p-3 font-medium text-slate-800">${escapeHtml(row.nombre_archivo || 'Sin nombre')}</td>
       <td class="p-3 text-slate-500">${escapeHtml(row.usuario_solicitante || 'Usuario desconocido')}</td>
-      <td class="p-3 text-slate-500">${escapeHtml(row.carpeta || '—')}</td>
+      <td class="p-3 text-slate-500">${escapeHtml(auditFolderName(row))}</td>
       <td class="p-3"><span class="px-2.5 py-1 rounded-full text-xs border ${badgeFor(row.estado)}">${escapeHtml(row.estado || 'PENDIENTE')}</span></td>
     </tr>`).join('');
 }
@@ -3175,7 +3186,7 @@ function renderFilesTable(rows){
   const iconFor=name=>{const ext=String(name||'').split('.').pop().toLowerCase(); if(ext==='pdf')return 'fa-file-pdf'; if(['dwg','dxf'].includes(ext))return 'fa-file-code'; if(['xlsx','xls','csv'].includes(ext))return 'fa-file-excel'; if(['doc','docx'].includes(ext))return 'fa-file-word'; return 'fa-file-lines';};
   body.innerHTML=rows.map(r=>`<tr>
     <td><div class="flex items-center gap-2"><div class="h-7 w-7 rounded-md bg-[#edf3f5] text-[#6c8698] flex items-center justify-center"><i class="fa-solid ${iconFor(r.nombre_archivo)} text-[10px]"></i></div><div><p class="font-semibold text-[#1f2b31] text-[9px]">${escapeHtml(r.nombre_archivo||'Sin nombre')}</p><p class="text-[7px] text-slate-400">${escapeHtml(r.usuario_solicitante||'—')}</p></div></div></td>
-    <td class="text-[8px] text-slate-500">${escapeHtml(r.carpeta||'—')}</td>
+    <td class="text-[8px] text-slate-500">${escapeHtml(auditFolderName(r))}</td>
     <td><span class="integrity-ok"><i class="fa-solid fa-fingerprint"></i> Verificado</span></td>
     <td><span class="status-pill ${badgeFor2(r.estado)}">${escapeHtml(r.estado||'PENDIENTE')}</span></td>
     <td class="text-[8px] text-slate-400">${r.fecha_solicitud?new Date(r.fecha_solicitud).toLocaleString('es-PE',{dateStyle:'short',timeStyle:'short'}):'—'}</td>
@@ -3184,7 +3195,7 @@ function renderFilesTable(rows){
 function filterFiles(){
   const q=(document.getElementById('fileSearch')?.value||'').toLowerCase().trim();
   const carpeta=document.getElementById('fileFolderFilter')?.value||'';
-  renderFilesTable(auditCache.filter(r=>(!q || [r.nombre_archivo,r.usuario_solicitante,r.hash_sha256].some(v=>String(v||'').toLowerCase().includes(q))) && (!carpeta || r.carpeta===carpeta)));
+  renderFilesTable(auditCache.filter(r=>(!q || [r.nombre_archivo,r.usuario_solicitante,r.hash_sha256].some(v=>String(v||'').toLowerCase().includes(q))) && (!carpeta || auditFolderName(r)===carpeta)));
 }
 function isSharedFile(r){
   const flags=[r.compartido,r.compartida,r.is_shared,r.shared,r.es_compartido,r.compartido_con].some(v=>v===true || (typeof v==='string' && ['true','1','si','sí','shared','compartido','compartida'].includes(v.trim().toLowerCase())));
@@ -3213,12 +3224,12 @@ function filterFiles(specialFolder){
   let rows=auditCache.filter(r=>(!q || [r.nombre_archivo,r.usuario_solicitante,r.hash_sha256].some(v=>String(v||'').toLowerCase().includes(q))));
   if(selected==='__SHARED__') rows=rows.filter(isSharedFile);
   else if(selected==='__TRASH__') rows=rows.filter(isTrashFile);
-  else rows=rows.filter(r=>!selected || r.carpeta===selected);
+  else rows=rows.filter(r=>!selected || auditFolderName(r)===selected);
   renderFilesTable(rows);
 }
 function exportSimpleReport(){
   const rows = auditCache || [];
-  const csv=['Archivo,Usuario,Carpeta,Estado,Hash SHA-256,Fecha',...rows.map(r=>[r.nombre_archivo,r.usuario_solicitante,r.carpeta,r.estado,r.hash_sha256,r.fecha_solicitud].map(v=>'"'+String(v??'').replaceAll('"','""')+'"').join(','))].join('\n');
+  const csv=['Archivo,Usuario,Carpeta,Estado,Hash SHA-256,Fecha',...rows.map(r=>[r.nombre_archivo,r.usuario_solicitante,auditFolderName(r),r.estado,r.hash_sha256,r.fecha_solicitud].map(v=>'"'+String(v??'').replaceAll('"','""')+'"').join(','))].join('\n');
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='datavault_reporte_auditoria.csv'; a.click(); URL.revokeObjectURL(a.href);
 }
 
@@ -3241,7 +3252,7 @@ async function loadReports(){
   document.getElementById('repBars').innerHTML=Object.entries(types).map(([k,v])=>`<div><div class="flex justify-between text-xs mb-1"><span class="text-slate-600">${k==='SUBIDA_MASIVA'?'Subidas':k==='MOVIMIENTO_MASIVO'?'Movimientos':'Eliminaciones'}</span><b class="text-slate-800">${v}</b></div><div class="h-2.5 bg-slate-100 rounded-full overflow-hidden"><div class="h-full bg-[#0f2c42] rounded-full" style="width:${Math.round(v/max*100)}%"></div></div></div>`).join('');
   const states=[['Aprobadas',aprob,'bg-green-500'],['Pendientes',auditCache.filter(x=>x.estado==='PENDIENTE').length,'bg-amber-500'],['Rechazadas',rech,'bg-red-500']];
   document.getElementById('repStates').innerHTML=states.map(([n,v,c])=>`<div class="flex items-center gap-3"><span class="h-3 w-3 rounded-full ${c}"></span><span class="text-sm text-slate-600 flex-1">${n}</span><b>${v}</b></div>`).join('');
-  document.getElementById('repFolders').innerHTML=CARPETAS.map(c=>{const n=auditCache.filter(x=>x.carpeta===c).length;return `<div><div class="flex justify-between text-xs mb-1"><span class="text-slate-600">${c}</span><span class="font-semibold">${n}</span></div><div class="h-2 bg-slate-100 rounded-full"><div class="h-full bg-blue-500 rounded-full" style="width:${totalA?Math.round(n/totalA*100):0}%"></div></div></div>`}).join('');
+  document.getElementById('repFolders').innerHTML=CARPETAS.map(c=>{const n=auditCache.filter(x=>auditFolderName(x)===c).length;return `<div><div class="flex justify-between text-xs mb-1"><span class="text-slate-600">${c}</span><span class="font-semibold">${n}</span></div><div class="h-2 bg-slate-100 rounded-full"><div class="h-full bg-blue-500 rounded-full" style="width:${totalA?Math.round(n/totalA*100):0}%"></div></div></div>`}).join('');
 }
 
 function saveAllSettings(){
@@ -3364,7 +3375,7 @@ async function loadAudit(){
   auditCache=Array.isArray(data)?data:[];
   const badgeFor=(estado)=>estado==='APROBADO'?'status-approved':estado==='RECHAZADO'?'status-rejected':'status-pending';
   const auditBody=document.getElementById('auditTableBody');
-  if(auditBody) auditBody.innerHTML=auditCache.length?auditCache.map(row=>`<tr><td>${escapeHtml(row.nombre_archivo||'Sin nombre')}</td><td>${escapeHtml(row.usuario_solicitante||'—')}</td><td>${escapeHtml(row.carpeta||'—')}</td><td class="font-mono text-[9px]" title="${escapeHtml(row.hash_sha256||'')}">${row.hash_sha256?escapeHtml(row.hash_sha256.slice(0,18))+'…':'N/A'}</td><td>${statusPill(row.estado)}</td></tr>`).join(''):'<tr><td colspan="5" class="p-6 text-center text-slate-400">No existen registros.</td></tr>';
+  if(auditBody) auditBody.innerHTML=auditCache.length?auditCache.map(row=>`<tr><td>${escapeHtml(row.nombre_archivo||'Sin nombre')}</td><td>${escapeHtml(row.usuario_solicitante||'—')}</td><td>${escapeHtml(auditFolderName(row))}</td><td class="font-mono text-[9px]" title="${escapeHtml(row.hash_sha256||'')}">${row.hash_sha256?escapeHtml(row.hash_sha256.slice(0,18))+'…':'N/A'}</td><td>${statusPill(row.estado)}</td></tr>`).join(''):'<tr><td colspan="5" class="p-6 text-center text-slate-400">No existen registros.</td></tr>';
   const inicioBody=document.getElementById('inicioTableBody');
   if(inicioBody) inicioBody.innerHTML=auditCache.slice(0,5).map(row=>`<tr><td>${formatShortDate(row.fecha_solicitud)}</td><td>${escapeHtml(row.usuario_solicitante||'—')}</td><td>${escapeHtml(operationLabel(row.tipo_operacion||row.accion||'Archivo'))}</td><td>${statusPill(row.estado)}</td></tr>`).join('') || '<tr><td colspan="4" class="p-6 text-center text-slate-400">No existen registros.</td></tr>';
   updateKpis({archivos:auditCache.length,hash:auditCache.filter(r=>r.hash_sha256).length});
@@ -4437,7 +4448,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     const rows=isAdmin()?roleAllAudit:roleAllAudit.filter(belongsToMe);
     auditCache=rows;
     const body=document.getElementById('auditTableBody');
-    if(body)body.innerHTML=rows.length?rows.map(r=>`<tr><td>${escapeHtml(r.nombre_archivo||'Sin nombre')}</td><td>${escapeHtml(rowName(r))}</td><td>${escapeHtml((r.ruta_relativa||r.carpeta||'—').split('/')[0]||'—')}</td><td class="font-mono text-[9px]" title="${escapeHtml(r.hash_sha256||'')}">${r.hash_sha256?escapeHtml(r.hash_sha256.slice(0,18))+'…':'N/A'}</td><td>${statusPill(r.estado)}</td></tr>`).join(''):'<tr><td colspan="5" class="p-6 text-center text-slate-400">No existen registros.</td></tr>';
+    if(body)body.innerHTML=rows.length?rows.map(r=>`<tr><td>${escapeHtml(r.nombre_archivo||'Sin nombre')}</td><td>${escapeHtml(rowName(r))}</td><td>${escapeHtml(auditFolderName(r))}</td><td class="font-mono text-[9px]" title="${escapeHtml(r.hash_sha256||'')}">${r.hash_sha256?escapeHtml(r.hash_sha256.slice(0,18))+'…':'N/A'}</td><td>${statusPill(r.estado)}</td></tr>`).join(''):'<tr><td colspan="5" class="p-6 text-center text-slate-400">No existen registros.</td></tr>';
     renderRoleRecent(rows);
     loadRoleHome();
     if(document.getElementById('view-gestor')?.classList.contains('active')){populateAdminFileFilter();renderFilesTable(currentAuditRows());}
@@ -4597,7 +4608,7 @@ window.addEventListener('DOMContentLoaded',()=>{
       // La actividad se carga después de mostrar las cuentas.
       const {data,error}=await supabaseClient
         .from('auditoria_custodia')
-        .select('solicitante_id,solicitante_correo,solicitante_nombre,usuario_solicitante,nombre_archivo,ruta_relativa,carpeta,hash_sha256,estado,fecha_solicitud')
+        .select('solicitante_id,solicitante_correo,solicitante_nombre,usuario_solicitante,nombre_archivo,ruta_relativa,lote_id,hash_sha256,estado,fecha_solicitud')
         .order('fecha_solicitud',{ascending:false})
         .limit(2000);
 
@@ -4666,7 +4677,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     const box=document.getElementById('adminUserDetail');box.classList.remove('hidden');
     document.getElementById('adminUserDetailName').textContent=u.name;document.getElementById('adminUserDetailEmail').textContent=u.email||u.id||'—';
     document.getElementById('audUserTotal').textContent=u.rows.length;document.getElementById('audUserApproved').textContent=u.rows.filter(r=>r.estado==='APROBADO').length;document.getElementById('audUserPending').textContent=u.rows.filter(r=>r.estado==='PENDIENTE').length;document.getElementById('audUserRejected').textContent=u.rows.filter(r=>r.estado==='RECHAZADO').length;
-    const body=document.getElementById('adminUserFilesBody');body.innerHTML=u.rows.slice(0,100).map(r=>`<tr><td>${escapeHtml(r.nombre_archivo||'Archivo')}</td><td>${escapeHtml(r.ruta_relativa||r.carpeta||'—')}</td><td class="font-mono text-[9px]">${r.hash_sha256?escapeHtml(r.hash_sha256.slice(0,14))+'…':'N/A'}</td><td>${statusPill(r.estado)}</td><td>${formatShortDate(r.fecha_solicitud)}</td></tr>`).join('');
+    const body=document.getElementById('adminUserFilesBody');body.innerHTML=u.rows.slice(0,100).map(r=>`<tr><td>${escapeHtml(r.nombre_archivo||'Archivo')}</td><td>${escapeHtml(r.ruta_relativa||auditFolderName(r))}</td><td class="font-mono text-[9px]">${r.hash_sha256?escapeHtml(r.hash_sha256.slice(0,14))+'…':'N/A'}</td><td>${statusPill(r.estado)}</td><td>${formatShortDate(r.fecha_solicitud)}</td></tr>`).join('');
     adminUserFilter=key;
     box.scrollIntoView({behavior:'smooth',block:'start'});
   };
