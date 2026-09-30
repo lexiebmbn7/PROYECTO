@@ -110,6 +110,12 @@ GOOGLE_FOLDER_ID = os.getenv(
 ).strip()
 
 
+SUPABASE_TEMP_BUCKET = os.getenv(
+    "SUPABASE_TEMP_BUCKET",
+    "custodia-pendiente"
+).strip() or "custodia-pendiente"
+
+
 if not PUBLIC_BASE_URL and RAILWAY_PUBLIC_DOMAIN:
 
     PUBLIC_BASE_URL = (
@@ -117,7 +123,6 @@ if not PUBLIC_BASE_URL and RAILWAY_PUBLIC_DOMAIN:
     ).rstrip("/")
 
 
-ARCHIVOS_EN_RAM = {}
 DECISION_LOCK = threading.Lock()
 
 # Mantiene una sola bandeja unificada de Telegram por custodio durante
@@ -301,11 +306,11 @@ def subir_lote_carpeta_a_drive(
     documentos: list,
     parent_id: str | None = None,
 ):
-    """Sube un lote proveniente de una carpeta como UNA carpeta en Drive.
+    """Sube una carpeta pendiente desde Supabase Storage a Google Drive.
 
-    Mantiene las subcarpetas. Si cualquier archivo falla, intenta borrar la
-    carpeta raíz creada y devuelve None. Supabase/RAM se actualizan después,
-    únicamente si todos los archivos llegaron correctamente a Drive.
+    Los archivos ya no dependen de la RAM de Railway. Cada objeto se descarga
+    temporalmente de Supabase Storage justo antes de enviarlo a Drive y se
+    libera antes de continuar con el siguiente archivo.
     """
 
     if not documentos:
@@ -319,27 +324,29 @@ def subir_lote_carpeta_a_drive(
 
     for documento in documentos:
         auditoria_id = str(documento.get("id") or "").strip()
-        archivo_ram = ARCHIVOS_EN_RAM.get(auditoria_id)
+        temp_path = str(documento.get("temp_storage_path") or "").strip()
 
-        if not auditoria_id or not archivo_ram:
+        if not auditoria_id or not temp_path:
             print(
-                "[DRIVE LOTE ERROR] Archivo no disponible en RAM:",
+                "[DRIVE LOTE ERROR] Archivo temporal no disponible:",
                 auditoria_id,
             )
             return None
 
         ruta = str(
             documento.get("ruta_relativa")
-            or archivo_ram.get("ruta_relativa")
             or documento.get("nombre_archivo")
-            or archivo_ram.get("nombre")
             or "archivo"
         ).replace("\\", "/").strip("/")
 
         preparados.append({
             "documento": documento,
-            "ram": archivo_ram,
             "ruta": ruta,
+            "temp_path": temp_path,
+            "temp_bucket": (
+                documento.get("temp_storage_bucket")
+                or SUPABASE_TEMP_BUCKET
+            ),
         })
 
     nombre_carpeta = obtener_carpeta_desde_ruta(preparados[0]["ruta"])
@@ -368,7 +375,6 @@ def subir_lote_carpeta_a_drive(
             },
         )
 
-        # Cache de subcarpetas ya creadas dentro de esta carpeta nueva.
         carpetas_cache = {"": carpeta_raiz_id}
         archivos_drive = []
 
@@ -376,7 +382,6 @@ def subir_lote_carpeta_a_drive(
             ruta = item["ruta"]
             partes = [p for p in ruta.split("/") if p]
 
-            # Quitar el nombre de la carpeta raíz del webkitRelativePath.
             if partes and partes[0] == nombre_carpeta:
                 partes = partes[1:]
 
@@ -385,7 +390,7 @@ def subir_lote_carpeta_a_drive(
 
             nombre_drive = partes[-1]
             subdirectorios = partes[:-1]
-            parent_id = carpeta_raiz_id
+            parent_actual = carpeta_raiz_id
             ruta_cache = ""
 
             for directorio in subdirectorios:
@@ -395,22 +400,28 @@ def subir_lote_carpeta_a_drive(
                     carpetas_cache[ruta_cache] = crear_carpeta_google_drive(
                         service,
                         directorio,
-                        parent_id,
+                        parent_actual,
                     )
 
-                parent_id = carpetas_cache[ruta_cache]
+                parent_actual = carpetas_cache[ruta_cache]
+
+            contenido = leer_archivo_temporal(
+                item["temp_path"],
+                bucket=item["temp_bucket"],
+            )
 
             archivo_drive_id = subir_archivo_google_drive_en_carpeta(
                 service,
                 nombre_drive,
-                item["ram"]["contenido"],
-                parent_id,
+                contenido,
+                parent_actual,
                 app_properties={
                     "datavault_auditoria_id": str(item["documento"].get("id") or ""),
                     "datavault_lote_id": str(item["documento"].get("lote_id") or ""),
                 },
             )
             archivos_drive.append(archivo_drive_id)
+            del contenido
 
         print(
             f"[DRIVE LOTE SUCCESS] carpeta={nombre_carpeta} "
@@ -426,8 +437,6 @@ def subir_lote_carpeta_a_drive(
     except Exception as error:
         print(f"[DRIVE LOTE EXCEPTION] {error}")
 
-        # Todo el lote se creó debajo de una carpeta nueva. Si hubo un fallo,
-        # eliminamos esa carpeta para no dejar una transferencia parcial.
         if service and carpeta_raiz_id:
             try:
                 (
@@ -515,6 +524,152 @@ supabase_admin: Client = (
     if SUPABASE_SERVICE_ROLE_KEY
     else supabase
 )
+
+
+# ============================================================
+# ALMACENAMIENTO TEMPORAL PERSISTENTE (SUPABASE STORAGE)
+# ============================================================
+
+def _storage_temporal():
+    if not SUPABASE_SERVICE_ROLE_KEY:
+        raise RuntimeError(
+            "SUPABASE_SERVICE_ROLE_KEY es obligatorio para el almacenamiento temporal."
+        )
+    return supabase_admin.storage.from_(SUPABASE_TEMP_BUCKET)
+
+
+def construir_ruta_archivo_temporal(
+    auditoria_id: str,
+    solicitante_id: str,
+    nombre_archivo: str,
+    lote_id: str | None = None,
+) -> str:
+    extension = os.path.splitext(str(nombre_archivo or ""))[1].lower()
+    if not extension or len(extension) > 12 or not all(
+        c.isalnum() or c == "." for c in extension
+    ):
+        extension = ".bin"
+
+    grupo = str(lote_id or "individual").strip() or "individual"
+    return (
+        f"pendientes/{str(solicitante_id).strip()}/"
+        f"{grupo}/{str(auditoria_id).strip()}{extension}"
+    )
+
+
+def guardar_archivo_temporal(
+    auditoria_id: str,
+    solicitante_id: str,
+    nombre_archivo: str,
+    contenido: bytes,
+    lote_id: str | None = None,
+) -> str:
+    if not contenido:
+        raise RuntimeError("No se puede guardar un archivo temporal vacío.")
+
+    path = construir_ruta_archivo_temporal(
+        auditoria_id,
+        solicitante_id,
+        nombre_archivo,
+        lote_id=lote_id,
+    )
+
+    content_type = (
+        mimetypes.guess_type(nombre_archivo)[0]
+        or "application/octet-stream"
+    )
+
+    try:
+        _storage_temporal().upload(
+            path=path,
+            file=contenido,
+            file_options={
+                "content-type": content_type,
+                "upsert": "false",
+            },
+        )
+    except Exception as error:
+        raise RuntimeError(
+            f"No se pudo guardar el archivo temporal en Supabase Storage: {error}"
+        ) from error
+
+    return path
+
+
+def leer_archivo_temporal(
+    path: str,
+    bucket: str | None = None,
+) -> bytes:
+    path = str(path or "").strip()
+    if not path:
+        raise RuntimeError("El registro no tiene una ruta de almacenamiento temporal.")
+
+    try:
+        storage = supabase_admin.storage.from_(
+            str(bucket or SUPABASE_TEMP_BUCKET).strip()
+            or SUPABASE_TEMP_BUCKET
+        )
+        contenido = storage.download(path)
+    except Exception as error:
+        raise RuntimeError(
+            f"No se pudo recuperar el archivo temporal de Supabase Storage: {error}"
+        ) from error
+
+    if not contenido:
+        raise RuntimeError("Supabase Storage devolvió un archivo temporal vacío.")
+
+    return bytes(contenido)
+
+
+def eliminar_archivo_temporal(
+    path: str,
+    bucket: str | None = None,
+) -> bool:
+    path = str(path or "").strip()
+    if not path:
+        return True
+
+    try:
+        storage = supabase_admin.storage.from_(
+            str(bucket or SUPABASE_TEMP_BUCKET).strip()
+            or SUPABASE_TEMP_BUCKET
+        )
+        storage.remove([path])
+        return True
+    except Exception as error:
+        print("[TEMP STORAGE DELETE ERROR]", path, error)
+        return False
+
+
+def limpiar_temporal_de_registro(registro: dict) -> bool:
+    auditoria_id = str(registro.get("id") or "").strip()
+    path = str(registro.get("temp_storage_path") or "").strip()
+    bucket = str(
+        registro.get("temp_storage_bucket")
+        or SUPABASE_TEMP_BUCKET
+    ).strip()
+
+    if not path:
+        return True
+
+    eliminado = eliminar_archivo_temporal(path, bucket=bucket)
+
+    if eliminado and auditoria_id:
+        try:
+            (
+                supabase_admin
+                .table("auditoria_custodia")
+                .update({
+                    "temp_storage_deleted_at": ahora_iso(),
+                    "temp_storage_path": None,
+                })
+                .eq("id", auditoria_id)
+                .execute()
+            )
+        except Exception as error:
+            print("[TEMP STORAGE DB CLEANUP ERROR]", auditoria_id, error)
+
+    return eliminado
 
 
 # ============================================================
@@ -2224,7 +2379,8 @@ def mostrar_detalle_lote(
                 "tamano_bytes,estado,solicitante_id,"
                 "solicitante_nombre,solicitante_correo,"
                 "lote_id,ruta_relativa,drive_parent_id,"
-                "ubicacion_drive"
+                "ubicacion_drive,temp_storage_path,"
+                "temp_storage_bucket"
             )
             .eq(
                 "lote_id",
@@ -3342,26 +3498,56 @@ async def registrar_y_solicitar_custodia(
     )
 
 
-    ARCHIVOS_EN_RAM[
-        str(id_auditoria)
-    ] = {
+    temp_path = None
 
-        "nombre":
-            nombre_final,
-
-        "contenido":
-            contenido,
-
-        "solicitante_id":
+    try:
+        temp_path = guardar_archivo_temporal(
+            str(id_auditoria),
             solicitante_id,
+            nombre_final,
+            contenido,
+        )
 
-        "solicitante_nombre":
-            solicitante_nombre,
+        temp_update = (
+            supabase_admin
+            .table("auditoria_custodia")
+            .update({
+                "temp_storage_path": temp_path,
+                "temp_storage_bucket": SUPABASE_TEMP_BUCKET,
+                "temp_storage_saved_at": ahora_iso(),
+                "temp_storage_deleted_at": None,
+            })
+            .eq("id", id_auditoria)
+            .execute()
+        )
 
-        "solicitante_correo":
-            solicitante_correo
+        if not temp_update.data:
+            raise RuntimeError(
+                "El temporal se guardó, pero no se pudo vincular a la auditoría."
+            )
 
-    }
+    except Exception as error:
+        if temp_path:
+            eliminar_archivo_temporal(temp_path)
+
+        try:
+            (
+                supabase_admin
+                .table("auditoria_custodia")
+                .delete()
+                .eq("id", id_auditoria)
+                .execute()
+            )
+        except Exception as cleanup_error:
+            print("[TEMP STORAGE ROLLBACK DB ERROR]", cleanup_error)
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(error),
+        )
+
+    finally:
+        del contenido
 
 
     resultados_telegram = []
@@ -4021,41 +4207,53 @@ async def registrar_lote_custodia(
             )
 
 
-            ARCHIVOS_EN_RAM[
-                str(id_auditoria)
-            ] = {
+            temp_path = None
 
-                "nombre":
-                    nombre_final,
-
-                "contenido":
-                    contenido,
-
-                "solicitante_id":
+            try:
+                temp_path = guardar_archivo_temporal(
+                    str(id_auditoria),
                     solicitante_id,
+                    nombre_final,
+                    contenido,
+                    lote_id=lote_uuid,
+                )
 
-                "solicitante_nombre":
-                    solicitante_nombre,
+                temp_update = (
+                    supabase_admin
+                    .table("auditoria_custodia")
+                    .update({
+                        "temp_storage_path": temp_path,
+                        "temp_storage_bucket": SUPABASE_TEMP_BUCKET,
+                        "temp_storage_saved_at": ahora_iso(),
+                        "temp_storage_deleted_at": None,
+                    })
+                    .eq("id", id_auditoria)
+                    .execute()
+                )
 
-                "solicitante_correo":
-                    solicitante_correo,
+                if not temp_update.data:
+                    raise RuntimeError(
+                        "El temporal se guardó, pero no se pudo vincular a la auditoría."
+                    )
 
-                "lote_id":
-                    lote_uuid,
+            except Exception:
+                if temp_path:
+                    eliminar_archivo_temporal(temp_path)
 
-                "ruta_relativa":
-                    ruta_relativa,
+                try:
+                    (
+                        supabase_admin
+                        .table("auditoria_custodia")
+                        .delete()
+                        .eq("id", id_auditoria)
+                        .execute()
+                    )
+                except Exception as cleanup_error:
+                    print("[TEMP STORAGE BATCH ROLLBACK DB ERROR]", cleanup_error)
+                raise
 
-                "carpeta":
-                    carpeta,
-
-                "drive_parent_id":
-                    destino_upload_id,
-
-                "ubicacion_drive":
-                    destino_upload_path,
-
-            }
+            finally:
+                del contenido
 
 
             procesados.append({
@@ -4080,6 +4278,9 @@ async def registrar_lote_custodia(
 
                 "ubicacion_drive":
                     destino_upload_path,
+
+                "temp_storage_path":
+                    temp_path,
 
             })
 
@@ -4936,7 +5137,8 @@ def resolver_custodia_archivo(
                 "id,estado,nombre_archivo,hash_sha256,"
                 "solicitante_id,solicitante_nombre,"
                 "solicitante_correo,drive_parent_id,"
-                "ubicacion_drive"
+                "ubicacion_drive,temp_storage_path,"
+                "temp_storage_bucket"
             )
             .eq(
                 "id",
@@ -5000,31 +5202,31 @@ def resolver_custodia_archivo(
 
         if aprobar:
 
-            archivo_ram = (
-                ARCHIVOS_EN_RAM.get(
-                    auditoria_id
-                )
-            )
+            temp_path = str(
+                registro.get("temp_storage_path")
+                or ""
+            ).strip()
 
-
-            if not archivo_ram:
-
+            if not temp_path:
                 raise RuntimeError(
-                    "El archivo ya no está disponible "
-                    "en RAM. No se modificó el estado "
-                    "en Supabase."
+                    "El archivo pendiente no tiene almacenamiento temporal persistente. "
+                    "No se modificó el estado en Supabase."
                 )
 
+            contenido_temporal = leer_archivo_temporal(
+                temp_path,
+                bucket=(
+                    registro.get("temp_storage_bucket")
+                    or SUPABASE_TEMP_BUCKET
+                ),
+            )
 
             drive_id = subir_a_google_drive(
 
-                archivo_ram[
-                    "nombre"
-                ],
+                registro.get("nombre_archivo")
+                or "archivo",
 
-                archivo_ram[
-                    "contenido"
-                ],
+                contenido_temporal,
 
                 auditoria_id=
                     auditoria_id,
@@ -5035,6 +5237,8 @@ def resolver_custodia_archivo(
                 ),
 
             )
+
+            del contenido_temporal
 
 
             if not drive_id:
@@ -5188,10 +5392,10 @@ def resolver_custodia_archivo(
             )
 
 
-        ARCHIVOS_EN_RAM.pop(
-            auditoria_id,
-            None
-        )
+        # El temporal solo se elimina cuando la decisión quedó confirmada.
+        # Si Drive falla, la solicitud continúa PENDIENTE y el archivo permanece
+        # disponible para volver a intentar.
+        limpiar_temporal_de_registro(registro)
 
 
         return {
@@ -5312,29 +5516,16 @@ def resolver_custodia_carpeta(
 
         if aprobar:
 
-            faltantes_ram = [
-
-                str(
-                    doc.get("id")
-                )
-
+            faltantes_temporales = [
+                str(doc.get("id"))
                 for doc in documentos
-
-                if not ARCHIVOS_EN_RAM.get(
-                    str(
-                        doc.get("id")
-                    )
-                )
-
+                if not str(doc.get("temp_storage_path") or "").strip()
             ]
 
-
-            if faltantes_ram:
-
+            if faltantes_temporales:
                 raise RuntimeError(
-                    f"{len(faltantes_ram)} "
-                    "archivo(s) ya no están "
-                    "disponibles en RAM. "
+                    f"{len(faltantes_temporales)} archivo(s) no tienen "
+                    "almacenamiento temporal persistente. "
                     "La carpeta no fue transferida."
                 )
 
@@ -5506,13 +5697,7 @@ def resolver_custodia_carpeta(
 
 
         for doc in documentos:
-
-            ARCHIVOS_EN_RAM.pop(
-                str(
-                    doc.get("id")
-                ),
-                None
-            )
+            limpiar_temporal_de_registro(doc)
 
 
         return {
