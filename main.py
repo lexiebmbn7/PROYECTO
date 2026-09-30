@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 import json
 import io
 import mimetypes
@@ -31,12 +32,23 @@ app = FastAPI(
 # Exponer la carpeta física "images" para archivos estáticos
 app.mount("/images", StaticFiles(directory="images"), name="images")
 
+_cors_public_base = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
+CORS_ALLOWED_ORIGINS = [
+    origin
+    for origin in (
+        _cors_public_base,
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    )
+    if origin
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Telegram-Bot-Api-Secret-Token"],
 )
 
 
@@ -46,6 +58,12 @@ app.add_middleware(
 
 TELEGRAM_TOKEN = os.getenv(
     "TELEGRAM_TOKEN",
+    ""
+).strip()
+
+
+TELEGRAM_WEBHOOK_SECRET = os.getenv(
+    "TELEGRAM_WEBHOOK_SECRET",
     ""
 ).strip()
 
@@ -124,12 +142,6 @@ if not PUBLIC_BASE_URL and RAILWAY_PUBLIC_DOMAIN:
 
 
 DECISION_LOCK = threading.Lock()
-
-# Mantiene una sola bandeja unificada de Telegram por custodio durante
-# la vida de la instancia. Después de un redeploy la primera notificación
-# crea una nueva bandeja y las siguientes reutilizan ese mismo mensaje.
-TELEGRAM_BANDEJA_MESSAGE_IDS = {}
-TELEGRAM_BANDEJA_LOCK = threading.Lock()
 
 # Límites de prueba para carga por lotes. Se pueden cambiar en Railway.
 MAX_BATCH_FILES = int(os.getenv("MAX_BATCH_FILES", "100"))
@@ -516,13 +528,15 @@ supabase: Client = create_client(
 # Cliente exclusivo del backend para operaciones administrativas.
 # Si la service role está disponible, permite gestionar solicitudes_operacion
 # aunque la tabla tenga RLS activado. Nunca se expone esta clave al navegador.
-supabase_admin: Client = (
-    create_client(
-        SUPABASE_URL,
-        SUPABASE_SERVICE_ROLE_KEY
+if not SUPABASE_SERVICE_ROLE_KEY:
+    raise RuntimeError(
+        "SUPABASE_SERVICE_ROLE_KEY no está configurado en Railway. "
+        "Es obligatorio para las operaciones internas del backend."
     )
-    if SUPABASE_SERVICE_ROLE_KEY
-    else supabase
+
+supabase_admin: Client = create_client(
+    SUPABASE_URL,
+    SUPABASE_SERVICE_ROLE_KEY
 )
 
 
@@ -758,6 +772,16 @@ def obtener_usuario_supabase_desde_request(request: Request) -> dict:
         "correo": solicitante_correo,
         "rol": rol,
     }
+
+
+def obtener_admin_desde_request(request: Request) -> dict:
+    usuario = obtener_usuario_supabase_desde_request(request)
+    if usuario.get("rol") != "jefe":
+        raise HTTPException(
+            status_code=403,
+            detail="Solo el administrador puede realizar esta operación.",
+        )
+    return usuario
 
 
 # ============================================================
@@ -1015,7 +1039,7 @@ def obtener_objeto_operable(
             )
 
         respuesta = (
-            supabase
+            supabase_admin
             .table("auditoria_custodia")
             .select("*")
             .eq("lote_id", str(lote_id))
@@ -1095,7 +1119,7 @@ def obtener_objeto_operable(
             )
 
         respuesta = (
-            supabase
+            supabase_admin
             .table("auditoria_custodia")
             .select("*")
             .eq("id", str(auditoria_id))
@@ -1173,7 +1197,7 @@ def actualizar_auditoria_operacion(
 ):
 
     query = (
-        supabase
+        supabase_admin
         .table("auditoria_custodia")
         .update(cambios)
     )
@@ -1306,6 +1330,11 @@ def sincronizar_mensajes_telegram_operacion(
     mensaje se actualiza. Luego se publica una bandeja agrupada actualizada para
     cada custodio, de forma que Web y Telegram reflejen los mismos pendientes.
     """
+    actualizar_alertas_operacion_telegram(
+        solicitud,
+        error_texto=error_texto,
+    )
+
     referencias = normalizar_referencias_telegram_operacion(solicitud)
 
     if fallback_chat_id is not None and fallback_message_id is not None:
@@ -1371,14 +1400,14 @@ def sincronizar_mensajes_telegram_operacion(
                 print("[TELEGRAM SYNC MENU ERROR]", error)
 
 def notificar_solicitud_operacion_telegram(solicitud: dict):
-    """Muestra MOVER/ELIMINAR dentro de la misma bandeja agrupada de subidas.
-
-    Ya no envía una alerta individual por operación. Cada nueva solicitud
-    genera una vista actualizada de usuarios con sus contadores de Subir,
-    Mover y Eliminar.
-    """
+    """Envía una alerta real y actualiza la bandeja persistente."""
     if not TELEGRAM_TOKEN or not AUTHORIZED_CHAT_IDS:
         return
+
+    try:
+        enviar_alerta_operacion_telegram(solicitud)
+    except Exception as error:
+        print("[TELEGRAM OPERACION ALERT ERROR]", error)
 
     for chat_id in AUTHORIZED_CHAT_IDS:
         try:
@@ -1566,15 +1595,33 @@ def notificar_resultado_custodia_web_telegram(
     resultado: dict,
     usuario_admin: dict,
 ):
-    """Refresca la bandeja agrupada después de resolver una SUBIDA en web."""
+    """Actualiza la alerta individual y la bandeja después de decidir en web."""
     if not TELEGRAM_TOKEN or not AUTHORIZED_CHAT_IDS:
         return
+
+    objeto_tipo = str(payload.get("objeto_tipo") or "").upper()
+    estado = str(resultado.get("estado") or "").upper()
+
+    try:
+        if objeto_tipo == "CARPETA":
+            actualizar_alertas_subida_telegram(
+                lote_id=payload.get("lote_id") or resultado.get("lote_id"),
+                estado=estado,
+            )
+        else:
+            actualizar_alertas_subida_telegram(
+                auditoria_id=payload.get("auditoria_id") or resultado.get("auditoria_id"),
+                estado=estado,
+            )
+    except Exception as error:
+        print("[TELEGRAM CUSTODY WEB ALERT ERROR]", error)
 
     for chat_id in AUTHORIZED_CHAT_IDS:
         try:
             mostrar_menu_usuarios(chat_id)
         except Exception as error:
             print("[TELEGRAM CUSTODY WEB MENU ERROR]", error)
+
 
 # ============================================================
 # TELEGRAM
@@ -1669,6 +1716,405 @@ def telegram_request(
         }
 
 
+def formatear_bytes_telegram(valor) -> str:
+    try:
+        numero = float(valor or 0)
+    except (TypeError, ValueError):
+        numero = 0.0
+
+    unidades = ["B", "KB", "MB", "GB", "TB"]
+    indice = 0
+    while numero >= 1024 and indice < len(unidades) - 1:
+        numero /= 1024.0
+        indice += 1
+
+    if indice == 0:
+        return f"{int(numero)} {unidades[indice]}"
+    return f"{numero:.1f} {unidades[indice]}"
+
+
+def registrar_notificacion_telegram(
+    chat_id,
+    message_id,
+    tipo_solicitud: str,
+    solicitud_id=None,
+    auditoria_id=None,
+    lote_id=None,
+    estado: str = "PENDIENTE",
+):
+    """Persiste cada alerta individual enviada a Telegram."""
+    if not message_id:
+        return None
+
+    payload = {
+        "chat_id": str(chat_id),
+        "message_id": int(message_id),
+        "tipo_solicitud": str(tipo_solicitud or "SOLICITUD").upper(),
+        "solicitud_id": str(solicitud_id) if solicitud_id else None,
+        "auditoria_id": str(auditoria_id) if auditoria_id else None,
+        "lote_id": str(lote_id) if lote_id else None,
+        "estado": str(estado or "PENDIENTE").upper(),
+        "created_at": ahora_iso(),
+        "updated_at": ahora_iso(),
+    }
+
+    try:
+        respuesta = (
+            supabase_admin
+            .table("telegram_notificaciones")
+            .insert(payload)
+            .execute()
+        )
+        return (respuesta.data or [None])[0]
+    except Exception as error:
+        print("[TELEGRAM NOTIFICACION SAVE ERROR]", error)
+        return None
+
+
+def buscar_notificaciones_telegram(
+    solicitud_id=None,
+    auditoria_id=None,
+    lote_id=None,
+    chat_id=None,
+    estado=None,
+):
+    try:
+        query = (
+            supabase_admin
+            .table("telegram_notificaciones")
+            .select("*")
+            .order("created_at", desc=True)
+        )
+
+        if solicitud_id:
+            query = query.eq("solicitud_id", str(solicitud_id))
+        elif lote_id:
+            query = query.eq("lote_id", str(lote_id))
+        elif auditoria_id:
+            query = query.eq("auditoria_id", str(auditoria_id))
+        else:
+            return []
+
+        if chat_id is not None:
+            query = query.eq("chat_id", str(chat_id))
+        if estado:
+            query = query.eq("estado", str(estado).upper())
+
+        respuesta = query.execute()
+        return respuesta.data or []
+    except Exception as error:
+        print("[TELEGRAM NOTIFICACION LOAD ERROR]", error)
+        return []
+
+
+def actualizar_estado_notificacion_db(notificacion_id, estado: str):
+    try:
+        (
+            supabase_admin
+            .table("telegram_notificaciones")
+            .update({
+                "estado": str(estado).upper(),
+                "updated_at": ahora_iso(),
+            })
+            .eq("id", str(notificacion_id))
+            .execute()
+        )
+    except Exception as error:
+        print("[TELEGRAM NOTIFICACION STATE ERROR]", error)
+
+
+def construir_texto_alerta_subida(documentos: list, estado: str = "PENDIENTE") -> str:
+    documentos = list(documentos or [])
+    if not documentos:
+        return "🔔 SOLICITUD DLP\n\nNo se encontró información de la subida."
+
+    primero = documentos[0]
+    estado = str(estado or primero.get("estado") or "PENDIENTE").upper()
+    usuario = primero.get("solicitante_nombre") or primero.get("solicitante_correo") or "Usuario"
+    destino = primero.get("ubicacion_drive") or "DRIVE PROYECTO"
+    total = sum(int(doc.get("tamano_bytes") or 0) for doc in documentos)
+
+    nombre_carpeta = obtener_carpeta_desde_ruta(primero.get("ruta_relativa"))
+    if nombre_carpeta:
+        accion = "📁 SUBIR CARPETA"
+        objeto = nombre_carpeta
+        detalle = f"📄 Archivos: {len(documentos)}\n📦 Tamaño total: {formatear_bytes_telegram(total)}"
+    elif len(documentos) > 1:
+        accion = "📤 SUBIR ARCHIVOS"
+        objeto = f"{len(documentos)} archivos"
+        detalle = f"📦 Tamaño total: {formatear_bytes_telegram(total)}"
+    else:
+        accion = "📤 SUBIR ARCHIVO"
+        objeto = primero.get("nombre_archivo") or "Archivo"
+        detalle = f"📦 {formatear_bytes_telegram(total)}"
+
+    iconos = {
+        "PENDIENTE": "⏳",
+        "APROBADO": "✅",
+        "RECHAZADO": "❌",
+        "ERROR": "⚠️",
+    }
+    icono = iconos.get(estado, "ℹ️")
+
+    return (
+        "🔔 SOLICITUD DLP\n\n"
+        f"👤 {usuario}\n"
+        f"{accion}\n"
+        f"📄 {objeto}\n"
+        f"📁 Destino: {destino}\n"
+        f"{detalle}\n\n"
+        f"{icono} {estado}"
+    )
+
+
+def construir_texto_alerta_operacion(solicitud: dict, estado: str | None = None) -> str:
+    solicitud = solicitud or {}
+    tipo = str(solicitud.get("tipo_operacion") or "OPERACION").upper()
+    objeto_tipo = str(solicitud.get("objeto_tipo") or "ARCHIVO").upper()
+    estado = str(estado or solicitud.get("estado") or "PENDIENTE").upper()
+
+    icono_tipo = "↔️" if tipo == "MOVER" else "🗑️" if tipo == "ELIMINAR" else "📌"
+    icono_estado = {
+        "PENDIENTE": "⏳",
+        "APROBADO": "✅",
+        "RECHAZADO": "❌",
+        "ERROR": "⚠️",
+    }.get(estado, "ℹ️")
+
+    lineas = [
+        "🔔 SOLICITUD DLP",
+        "",
+        f"👤 {solicitud.get('solicitante_nombre') or solicitud.get('solicitante_correo') or 'Usuario'}",
+        f"{icono_tipo} {tipo} {objeto_tipo}",
+        f"📄 {solicitud.get('nombre_objeto') or 'Archivo/Carpeta'}",
+        f"📂 Origen: {solicitud.get('carpeta_origen') or 'DRIVE PROYECTO'}",
+    ]
+
+    if tipo == "MOVER":
+        lineas.append(
+            f"➡️ Destino: {solicitud.get('carpeta_destino_nombre') or 'Destino seleccionado'}"
+        )
+
+    lineas.extend(["", f"{icono_estado} {estado}"])
+
+    if solicitud.get("resultado") and estado != "PENDIENTE":
+        lineas.extend(["", f"📝 {solicitud.get('resultado')}"])
+
+    return "\n".join(lineas)
+
+
+def _boton_bandeja_para_usuario(solicitante_id: str):
+    # No reutilizamos el mensaje de alerta como bandeja. Este callback solo
+    # refresca el mensaje principal persistido en telegram_bandejas.
+    return {
+        "inline_keyboard": [[
+            {"text": "📥 Ver en bandeja", "callback_data": "tray:refresh"}
+        ]]
+    }
+
+
+def enviar_alerta_subida_telegram(documentos: list):
+    documentos = list(documentos or [])
+    if not documentos or not TELEGRAM_TOKEN or not AUTHORIZED_CHAT_IDS:
+        return []
+
+    primero = documentos[0]
+    auditoria_id = primero.get("id") if len(documentos) == 1 else None
+    lote_id = primero.get("lote_id") if len(documentos) > 1 or primero.get("lote_id") else None
+    solicitante_id = primero.get("solicitante_id")
+    texto = construir_texto_alerta_subida(documentos, "PENDIENTE")
+    resultados = []
+
+    for chat_id in AUTHORIZED_CHAT_IDS:
+        existentes = buscar_notificaciones_telegram(
+            auditoria_id=auditoria_id,
+            lote_id=lote_id,
+            chat_id=chat_id,
+            estado="PENDIENTE",
+        )
+        if existentes:
+            resultados.append({"chat_id": chat_id, "ok": True, "deduplicated": True})
+            continue
+
+        resultado = telegram_request(
+            "sendMessage",
+            {
+                "chat_id": chat_id,
+                "text": texto,
+                "reply_markup": _boton_bandeja_para_usuario(solicitante_id),
+            },
+        )
+        message_id = extraer_message_id_telegram(resultado)
+        if (resultado or {}).get("ok") and message_id:
+            registrar_notificacion_telegram(
+                chat_id,
+                message_id,
+                "SUBIDA",
+                auditoria_id=auditoria_id,
+                lote_id=lote_id,
+            )
+        resultados.append({
+            "chat_id": chat_id,
+            "ok": bool((resultado or {}).get("ok")),
+            "description": (resultado or {}).get("description", "OK"),
+        })
+
+    return resultados
+
+
+def enviar_alerta_operacion_telegram(solicitud: dict):
+    if not solicitud or not TELEGRAM_TOKEN or not AUTHORIZED_CHAT_IDS:
+        return []
+
+    solicitud_id = solicitud.get("id")
+    texto = construir_texto_alerta_operacion(solicitud, "PENDIENTE")
+    resultados = []
+
+    for chat_id in AUTHORIZED_CHAT_IDS:
+        existentes = buscar_notificaciones_telegram(
+            solicitud_id=solicitud_id,
+            chat_id=chat_id,
+            estado="PENDIENTE",
+        )
+        if existentes:
+            resultados.append({"chat_id": chat_id, "ok": True, "deduplicated": True})
+            continue
+
+        resultado = telegram_request(
+            "sendMessage",
+            {
+                "chat_id": chat_id,
+                "text": texto,
+                "reply_markup": _boton_bandeja_para_usuario(solicitud.get("solicitante_id")),
+            },
+        )
+        message_id = extraer_message_id_telegram(resultado)
+        if (resultado or {}).get("ok") and message_id:
+            registrar_notificacion_telegram(
+                chat_id,
+                message_id,
+                str(solicitud.get("tipo_operacion") or "OPERACION").upper(),
+                solicitud_id=solicitud_id,
+            )
+        resultados.append({
+            "chat_id": chat_id,
+            "ok": bool((resultado or {}).get("ok")),
+            "description": (resultado or {}).get("description", "OK"),
+        })
+
+    return resultados
+
+
+def obtener_documentos_notificacion_subida(auditoria_id=None, lote_id=None):
+    try:
+        query = supabase_admin.table("auditoria_custodia").select("*")
+        if lote_id:
+            query = query.eq("lote_id", str(lote_id)).order("ruta_relativa")
+        elif auditoria_id:
+            query = query.eq("id", str(auditoria_id)).limit(1)
+        else:
+            return []
+        return query.execute().data or []
+    except Exception as error:
+        print("[TELEGRAM SUBIDA LOAD ERROR]", error)
+        return []
+
+
+def actualizar_alertas_subida_telegram(auditoria_id=None, lote_id=None, estado=None):
+    documentos = obtener_documentos_notificacion_subida(
+        auditoria_id=auditoria_id,
+        lote_id=lote_id,
+    )
+    if not documentos:
+        return
+
+    estado_final = str(
+        estado
+        or documentos[0].get("estado")
+        or "PENDIENTE"
+    ).upper()
+    texto = construir_texto_alerta_subida(documentos, estado_final)
+    notificaciones = buscar_notificaciones_telegram(
+        auditoria_id=auditoria_id,
+        lote_id=lote_id,
+    )
+
+    for notificacion in notificaciones:
+        resultado = telegram_request(
+            "editMessageText",
+            {
+                "chat_id": notificacion.get("chat_id"),
+                "message_id": notificacion.get("message_id"),
+                "text": texto,
+                "reply_markup": _boton_bandeja_para_usuario(
+                    documentos[0].get("solicitante_id")
+                ),
+            },
+        )
+        if not (resultado or {}).get("ok"):
+            print("[TELEGRAM SUBIDA UPDATE ERROR]", resultado)
+        actualizar_estado_notificacion_db(notificacion.get("id"), estado_final)
+
+
+def actualizar_alertas_operacion_telegram(solicitud: dict, error_texto: str | None = None):
+    if not solicitud:
+        return
+
+    estado = "PENDIENTE" if error_texto else str(solicitud.get("estado") or "PENDIENTE").upper()
+    solicitud_texto = dict(solicitud)
+    if error_texto:
+        solicitud_texto["resultado"] = f"No se pudo completar: {str(error_texto)[:500]}"
+    texto = construir_texto_alerta_operacion(solicitud_texto, estado)
+
+    for notificacion in buscar_notificaciones_telegram(
+        solicitud_id=solicitud.get("id")
+    ):
+        resultado = telegram_request(
+            "editMessageText",
+            {
+                "chat_id": notificacion.get("chat_id"),
+                "message_id": notificacion.get("message_id"),
+                "text": texto,
+                "reply_markup": _boton_bandeja_para_usuario(
+                    solicitud.get("solicitante_id")
+                ),
+            },
+        )
+        if not (resultado or {}).get("ok"):
+            print("[TELEGRAM OPERACION ALERT UPDATE ERROR]", resultado)
+        actualizar_estado_notificacion_db(notificacion.get("id"), estado)
+
+
+def refrescar_bandejas_telegram(excluir_chat_id=None):
+    for destino_chat_id in AUTHORIZED_CHAT_IDS:
+        if (
+            excluir_chat_id is not None
+            and str(destino_chat_id) == str(excluir_chat_id)
+        ):
+            continue
+        try:
+            mostrar_menu_usuarios(destino_chat_id)
+        except Exception as error:
+            print("[TELEGRAM BANDEJA REFRESH ERROR]", destino_chat_id, error)
+
+
+def notificar_nueva_subida_background(auditoria_id=None, lote_id=None):
+    """Genera una alerta real y refresca la bandeja usando Supabase como fuente."""
+    documentos = obtener_documentos_notificacion_subida(
+        auditoria_id=auditoria_id,
+        lote_id=lote_id,
+    )
+    if documentos:
+        enviar_alerta_subida_telegram(documentos)
+
+    for chat_id in AUTHORIZED_CHAT_IDS:
+        try:
+            mostrar_menu_usuarios(chat_id)
+        except Exception as error:
+            print("[TELEGRAM SUBIDA MENU ERROR]", error)
+
+
+
 # ============================================================
 # PANEL PRINCIPAL INLINE DE TELEGRAM
 # ============================================================
@@ -1723,7 +2169,7 @@ def obtener_resumen_panel():
     """Resumen unificado de SUBIDAS, MOVIMIENTOS y ELIMINACIONES pendientes."""
     try:
         respuesta = (
-            supabase
+            supabase_admin
             .table("auditoria_custodia")
             .select("estado,solicitante_id,lote_id,ruta_relativa")
             .execute()
@@ -1874,7 +2320,7 @@ def obtener_documentos_pendientes():
     try:
 
         respuesta = (
-            supabase
+            supabase_admin
             .table("auditoria_custodia")
             .select(
                 "id,nombre_archivo,hash_sha256,"
@@ -1959,19 +2405,73 @@ def obtener_operaciones_pendientes(solicitante_id: str | None = None):
 
 
 def obtener_message_id_bandeja_telegram(chat_id):
-    """Devuelve el message_id de la bandeja activa de un custodio."""
-    clave = str(chat_id)
-    with TELEGRAM_BANDEJA_LOCK:
-        return TELEGRAM_BANDEJA_MESSAGE_IDS.get(clave)
+    """Obtiene desde Supabase el mensaje que actúa como bandeja principal."""
+    try:
+        respuesta = (
+            supabase_admin
+            .table("telegram_bandejas")
+            .select("message_id,estado")
+            .eq("chat_id", str(chat_id))
+            .eq("estado", "ACTIVA")
+            .limit(1)
+            .execute()
+        )
+        if not respuesta.data:
+            return None
+        return int(respuesta.data[0].get("message_id"))
+    except Exception as error:
+        print("[TELEGRAM BANDEJA LOAD ERROR]", chat_id, error)
+        return None
 
 
 def guardar_message_id_bandeja_telegram(chat_id, message_id):
-    """Recuerda qué mensaje debe reutilizarse como bandeja principal."""
+    """Persiste la bandeja en Supabase para sobrevivir a reinicios de Railway."""
     if not message_id:
         return
-    clave = str(chat_id)
-    with TELEGRAM_BANDEJA_LOCK:
-        TELEGRAM_BANDEJA_MESSAGE_IDS[clave] = int(message_id)
+
+    chat_id_texto = str(chat_id)
+    ahora = ahora_iso()
+
+    try:
+        existente = (
+            supabase_admin
+            .table("telegram_bandejas")
+            .select("id")
+            .eq("chat_id", chat_id_texto)
+            .limit(1)
+            .execute()
+        )
+
+        valores = {
+            "message_id": int(message_id),
+            "administrador_id": None,
+            "administrador_nombre": None,
+            "estado": "ACTIVA",
+            "updated_at": ahora,
+        }
+
+        if existente.data:
+            (
+                supabase_admin
+                .table("telegram_bandejas")
+                .update(valores)
+                .eq("id", existente.data[0]["id"])
+                .execute()
+            )
+        else:
+            valores.update({
+                "chat_id": chat_id_texto,
+                "created_at": ahora,
+            })
+            (
+                supabase_admin
+                .table("telegram_bandejas")
+                .insert(valores)
+                .execute()
+            )
+
+    except Exception as error:
+        print("[TELEGRAM BANDEJA SAVE ERROR]", chat_id, error)
 
 
 def extraer_message_id_telegram(resultado):
@@ -2142,7 +2642,7 @@ def mostrar_archivos_usuario(chat_id, message_id, solicitante_id):
     """Muestra en una sola bandeja las 3 clases de solicitud del usuario."""
     try:
         respuesta = (
-            supabase
+            supabase_admin
             .table("auditoria_custodia")
             .select(
                 "id,nombre_archivo,tamano_bytes,fecha_solicitud,"
@@ -2372,7 +2872,7 @@ def mostrar_detalle_lote(
     try:
 
         respuesta = (
-            supabase
+            supabase_admin
             .table("auditoria_custodia")
             .select(
                 "id,nombre_archivo,hash_sha256,"
@@ -2693,7 +3193,7 @@ def mostrar_detalle_documento(
     try:
 
         respuesta = (
-            supabase
+            supabase_admin
             .table(
                 "auditoria_custodia"
             )
@@ -2958,107 +3458,50 @@ def obtener_base_url_request(
 def configurar_webhook_url(
     base_url: str
 ):
-
     if not TELEGRAM_TOKEN:
-
         return {
             "ok": False,
-            "description":
-                "TELEGRAM_TOKEN no configurado"
+            "description": "TELEGRAM_TOKEN no configurado",
         }
 
+    if not TELEGRAM_WEBHOOK_SECRET:
+        return {
+            "ok": False,
+            "description": "TELEGRAM_WEBHOOK_SECRET no configurado",
+        }
 
-    base_url = (
-        base_url
-        or ""
-    ).strip().rstrip("/")
-
-
+    base_url = str(base_url or "").strip().rstrip("/")
     if not base_url:
-
         return {
             "ok": False,
-            "description":
-                "No se pudo determinar "
-                "la URL pública"
+            "description": "No se pudo determinar la URL pública",
         }
 
+    webhook_url = f"{base_url}/telegram-webhook"
+    info = telegram_request("getWebhookInfo", {})
+    url_actual = ""
+    if (info or {}).get("ok"):
+        url_actual = str(((info or {}).get("result") or {}).get("url") or "")
 
-    webhook_url = (
-        f"{base_url}/telegram-webhook"
-    )
-
-
-    info = telegram_request(
-        "getWebhookInfo",
-        {}
-    )
-
-
-    if info.get("ok"):
-
-        url_actual = (
-            info
-            .get(
-                "result",
-                {}
-            )
-            .get(
-                "url",
-                ""
-            )
-        )
-
-    else:
-
-        url_actual = ""
-
-
-    if url_actual == webhook_url:
-
-        return {
-            "ok": True,
-            "webhook": webhook_url,
-            "changed": False
-        }
-
-
+    # Telegram no expone el secret_token actual en getWebhookInfo. Por eso
+    # reconfiguramos el webhook de forma idempotente para garantizar que el
+    # secreto guardado en Railway quede aplicado.
     resultado = telegram_request(
-
         "setWebhook",
-
         {
-            "url":
-                webhook_url,
-
-            "allowed_updates":
-                [
-                    "message",
-                    "callback_query"
-                ],
-
-            "drop_pending_updates":
-                False
-        }
-
+            "url": webhook_url,
+            "secret_token": TELEGRAM_WEBHOOK_SECRET,
+            "allowed_updates": ["message", "callback_query"],
+            "drop_pending_updates": False,
+        },
     )
-
 
     return {
-        "ok":
-            resultado.get(
-                "ok",
-                False
-            ),
-
-        "webhook":
-            webhook_url,
-
-        "changed":
-            True,
-
-        "telegram":
-            resultado
+        "ok": bool((resultado or {}).get("ok")),
+        "webhook": webhook_url,
+        "changed": url_actual != webhook_url,
+        "secret_configured": True,
+        "telegram": resultado,
     }
 
 
@@ -3194,7 +3637,9 @@ def health_check():
 # ============================================================
 
 @app.get("/telegram-info")
-def telegram_info():
+def telegram_info(request: Request):
+
+    obtener_admin_desde_request(request)
 
     if not TELEGRAM_TOKEN:
 
@@ -3220,6 +3665,8 @@ def set_webhook_manual(
     request: Request
 ):
 
+    obtener_admin_desde_request(request)
+
     base_url = obtener_base_url_request(
         request
     )
@@ -3238,6 +3685,8 @@ def set_webhook_manual(
 async def registrar_y_solicitar_custodia(
 
     request: Request,
+
+    background_tasks: BackgroundTasks,
 
     file: UploadFile = File(...),
 
@@ -3268,51 +3717,12 @@ async def registrar_y_solicitar_custodia(
 
 
     usuario = solicitante_nombre
-
-
-    if not TELEGRAM_TOKEN:
-
-        raise HTTPException(
-
-            status_code=500,
-
-            detail=(
-                "TELEGRAM_TOKEN "
-                "no está configurado."
-            )
-
-        )
-
-
-    if not AUTHORIZED_CHAT_IDS:
-
-        raise HTTPException(
-
-            status_code=500,
-
-            detail=(
-                "No hay Telegram IDs "
-                "autorizados."
-            )
-
-        )
-
-
-    base_url_actual = obtener_base_url_request(
-        request
-    )
-
-
-    estado_webhook = configurar_webhook_url(
-        base_url_actual
-    )
-
-
-    print(
-        "[WEBHOOK UPLOAD]",
-        estado_webhook
-    )
-
+    base_url_actual = obtener_base_url_request(request)
+    estado_webhook = {
+        "ok": True,
+        "source": "startup",
+        "base_url": PUBLIC_BASE_URL or base_url_actual,
+    }
 
     contenido = await file.read()
 
@@ -3328,6 +3738,14 @@ async def registrar_y_solicitar_custodia(
 
         )
 
+
+    if len(contenido) > MAX_FILE_SIZE_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"El archivo supera el límite de {MAX_FILE_SIZE_MB} MB."
+            ),
+        )
 
     hash_sha256 = hashlib.sha256(
         contenido
@@ -3350,7 +3768,7 @@ async def registrar_y_solicitar_custodia(
 
         res_existentes = (
 
-            supabase
+            supabase_admin
 
             .table(
                 "auditoria_custodia"
@@ -3441,7 +3859,7 @@ async def registrar_y_solicitar_custodia(
 
         respuesta_db = (
 
-            supabase
+            supabase_admin
 
             .table(
                 "auditoria_custodia"
@@ -3550,94 +3968,25 @@ async def registrar_y_solicitar_custodia(
         del contenido
 
 
-    resultados_telegram = []
-    enviados_correctamente = 0
-
-
-    for chat_id in AUTHORIZED_CHAT_IDS:
-
-        resultado = mostrar_menu_usuarios(
-            chat_id
-        )
-
-        ok = bool(
-            resultado.get("ok")
-        )
-
-
-        if ok:
-
-            enviados_correctamente += 1
-
-
-        resultados_telegram.append({
-
-            "chat_id":
-                chat_id,
-
-            "ok":
-                ok,
-
-            "description":
-                resultado.get(
-                    "description",
-                    "OK"
-                ),
-
-        })
-
-
-    if enviados_correctamente == 0:
-
-        raise HTTPException(
-
-            status_code=502,
-
-            detail={
-
-                "mensaje":
-                    (
-                        "El archivo quedó registrado "
-                        "en Supabase, pero Telegram "
-                        "no pudo notificar a ningún "
-                        "custodio."
-                    ),
-
-                "telegram":
-                    resultados_telegram
-
-            }
-
-        )
-
+    # La solicitud ya está persistida. Telegram se procesa en segundo plano:
+    # una caída del bot no invalida ni elimina la solicitud.
+    background_tasks.add_task(
+        notificar_menu_pendientes_background,
+        base_url_actual,
+        id_auditoria,
+        None,
+    )
 
     return {
-
-        "status":
-            "ok",
-
-        "mensaje":
-            (
-                "Documento registrado "
-                "y menú de pendientes "
-                "notificado a Telegram."
-            ),
-
-        "id_auditoria":
-            id_auditoria,
-
-        "sha256":
-            hash_sha256,
-
-        "telegram_enviados":
-            enviados_correctamente,
-
-        "telegram":
-            resultados_telegram,
-
-        "webhook":
-            estado_webhook
-
+        "status": "ok",
+        "mensaje": (
+            "Documento registrado correctamente. "
+            "La notificación de Telegram se procesará en segundo plano."
+        ),
+        "id_auditoria": id_auditoria,
+        "sha256": hash_sha256,
+        "telegram_notificacion": "en_cola",
+        "webhook": estado_webhook,
     }
 
 
@@ -3717,7 +4066,7 @@ def obtener_nombre_correlativo(
 
         res_existentes = (
 
-            supabase
+            supabase_admin
 
             .table(
                 "auditoria_custodia"
@@ -3777,50 +4126,26 @@ def obtener_nombre_correlativo(
 # ============================================================
 
 def notificar_menu_pendientes_background(
-    base_url: str = ""
+    base_url: str = "",
+    auditoria_id=None,
+    lote_id=None,
 ):
-
-    if base_url:
-
+    """Notifica una subida persistida y refresca la bandeja principal."""
+    if base_url and not PUBLIC_BASE_URL:
         try:
-
-            estado_webhook = configurar_webhook_url(
-                base_url
-            )
-
-            print(
-                f"[WEBHOOK BATCH BG] "
-                f"{estado_webhook}"
-            )
-
+            estado_webhook = configurar_webhook_url(base_url)
+            print(f"[WEBHOOK BG] {estado_webhook}")
         except Exception as error:
+            print(f"[WEBHOOK BG ERROR] {error}")
 
-            print(
-                f"[WEBHOOK BATCH BG ERROR] "
-                f"{error}"
-            )
-
-
-    for chat_id in AUTHORIZED_CHAT_IDS:
-
-        try:
-
-            resultado = mostrar_menu_usuarios(
-                chat_id
-            )
-
-            print(
-                f"[TELEGRAM BATCH BG] "
-                f"chat={chat_id} "
-                f"resultado={resultado}"
-            )
-
-        except Exception as error:
-
-            print(
-                f"[TELEGRAM BATCH BG ERROR] "
-                f"chat={chat_id}: {error}"
-            )
+    try:
+        notificar_nueva_subida_background(
+            auditoria_id=auditoria_id,
+            lote_id=lote_id,
+        )
+    except Exception as error:
+        # La solicitud ya está persistida: Telegram no puede invalidarla.
+        print("[TELEGRAM SUBIDA BACKGROUND ERROR]", error)
 
 
 # ============================================================
@@ -3919,26 +4244,6 @@ async def registrar_lote_custodia(
             )
 
         )
-
-
-    if not TELEGRAM_TOKEN:
-
-        raise HTTPException(
-            status_code=500,
-            detail=
-                "TELEGRAM_TOKEN no está configurado."
-        )
-
-
-    if not AUTHORIZED_CHAT_IDS:
-
-        raise HTTPException(
-            status_code=500,
-            detail=
-                "No hay Telegram IDs autorizados."
-        )
-
-
     carpeta_destino_id = str(
         carpeta_destino_id
         or ""
@@ -4083,6 +4388,7 @@ async def registrar_lote_custodia(
         try:
 
             contenido = await archivo.read()
+            tamano_archivo = len(contenido) if contenido else 0
 
 
             if not contenido:
@@ -4103,7 +4409,7 @@ async def registrar_lote_custodia(
                 continue
 
 
-            if len(contenido) > MAX_FILE_SIZE_BYTES:
+            if tamano_archivo > MAX_FILE_SIZE_BYTES:
 
                 errores.append({
 
@@ -4143,7 +4449,7 @@ async def registrar_lote_custodia(
                     hash_sha256,
 
                 "tamano_bytes":
-                    len(contenido),
+                    tamano_archivo,
 
                 "estado":
                     "PENDIENTE",
@@ -4177,7 +4483,7 @@ async def registrar_lote_custodia(
 
             respuesta_db = (
 
-                supabase
+                supabase_admin
 
                 .table(
                     "auditoria_custodia"
@@ -4271,7 +4577,7 @@ async def registrar_lote_custodia(
                     hash_sha256,
 
                 "tamano_bytes":
-                    len(contenido),
+                    tamano_archivo,
 
                 "drive_parent_id":
                     destino_upload_id,
@@ -4307,15 +4613,12 @@ async def registrar_lote_custodia(
             })
 
 
-    resultados_telegram = []
-    enviados_correctamente = 0
-
-
     if procesados:
-
         background_tasks.add_task(
             notificar_menu_pendientes_background,
-            base_url_actual
+            base_url_actual,
+            None,
+            lote_uuid,
         )
 
 
@@ -4410,12 +4713,6 @@ async def registrar_lote_custodia(
 
         "errores":
             errores,
-
-        "telegram_enviados":
-            enviados_correctamente,
-
-        "telegram":
-            resultados_telegram,
 
         "telegram_notificacion":
             (
@@ -5129,7 +5426,7 @@ def resolver_custodia_archivo(
     with DECISION_LOCK:
 
         consulta = (
-            supabase
+            supabase_admin
             .table(
                 "auditoria_custodia"
             )
@@ -5252,7 +5549,7 @@ def resolver_custodia_archivo(
 
             resultado_update = (
 
-                supabase
+                supabase_admin
 
                 .table(
                     "auditoria_custodia"
@@ -5353,7 +5650,7 @@ def resolver_custodia_archivo(
 
             resultado_update = (
 
-                supabase
+                supabase_admin
 
                 .table(
                     "auditoria_custodia"
@@ -5436,7 +5733,7 @@ def resolver_custodia_carpeta(
 
         consulta_lote = (
 
-            supabase
+            supabase_admin
 
             .table(
                 "auditoria_custodia"
@@ -5447,7 +5744,7 @@ def resolver_custodia_carpeta(
                 "tamano_bytes,estado,solicitante_id,"
                 "solicitante_nombre,solicitante_correo,"
                 "lote_id,ruta_relativa,drive_parent_id,"
-                "ubicacion_drive"
+                "ubicacion_drive,temp_storage_path,temp_storage_bucket"
             )
 
             .eq(
@@ -5552,7 +5849,7 @@ def resolver_custodia_carpeta(
 
             resultado_update = (
 
-                supabase
+                supabase_admin
 
                 .table(
                     "auditoria_custodia"
@@ -5657,7 +5954,7 @@ def resolver_custodia_carpeta(
 
             resultado_update = (
 
-                supabase
+                supabase_admin
 
                 .table(
                     "auditoria_custodia"
@@ -5999,7 +6296,8 @@ async def decidir_custodia_desde_web(
 
 @app.post("/custody/cancel")
 async def cancelar_custodia_desde_web(
-    request: Request
+    request: Request,
+    background_tasks: BackgroundTasks
 ):
 
     usuario = (
@@ -6028,12 +6326,19 @@ async def cancelar_custodia_desde_web(
     )
 
 
-    return (
-        resolver_payload_custodia_web(
-            payload,
-            aprobar=False
-        )
+    resultado = resolver_payload_custodia_web(
+        payload,
+        aprobar=False
     )
+
+    background_tasks.add_task(
+        notificar_resultado_custodia_web_telegram,
+        payload,
+        resultado,
+        usuario,
+    )
+
+    return resultado
 
 
 @app.get("/drive-folders")
@@ -6613,7 +6918,7 @@ def vincular_drive_legacy(
 
     consulta = (
 
-        supabase
+        supabase_admin
 
         .table(
             "auditoria_custodia"
@@ -6806,7 +7111,7 @@ def vincular_drive_legacy(
 
 
         (
-            supabase
+            supabase_admin
             .table(
                 "auditoria_custodia"
             )
@@ -6951,7 +7256,7 @@ def vincular_drive_legacy(
 
 
         (
-            supabase
+            supabase_admin
             .table(
                 "auditoria_custodia"
             )
@@ -7016,7 +7321,7 @@ def reconciliar_drive(
 
     query = (
 
-        supabase
+        supabase_admin
 
         .table(
             "auditoria_custodia"
@@ -7154,7 +7459,7 @@ def reconciliar_drive(
 
         q = (
 
-            supabase
+            supabase_admin
 
             .table(
                 "auditoria_custodia"
@@ -7190,7 +7495,7 @@ def reconciliar_drive(
 
         q = (
 
-            supabase
+            supabase_admin
 
             .table(
                 "auditoria_custodia"
@@ -7592,6 +7897,24 @@ async def recibir_respuesta_telegram(
     background_tasks: BackgroundTasks
 ):
 
+    recibido = request.headers.get(
+        "x-telegram-bot-api-secret-token",
+        ""
+    )
+
+    if (
+        not TELEGRAM_WEBHOOK_SECRET
+        or not recibido
+        or not hmac.compare_digest(
+            str(recibido),
+            str(TELEGRAM_WEBHOOK_SECRET),
+        )
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Webhook de Telegram no autorizado.",
+        )
+
     data = await request.json()
 
 
@@ -7897,6 +8220,22 @@ async def recibir_respuesta_telegram(
             f"user={user_id} "
             f"data={action_data}"
         )
+
+
+        # ----------------------------------------------------
+        # ALERTA INDIVIDUAL -> REFRESCAR BANDEJA PERSISTENTE
+        # ----------------------------------------------------
+
+        if action_data == "tray:refresh":
+            telegram_request(
+                "answerCallbackQuery",
+                {
+                    "callback_query_id": callback_id,
+                    "text": "Bandeja principal actualizada.",
+                },
+            )
+            mostrar_menu_usuarios(chat_id)
+            return {"status": "tray_refreshed"}
 
 
         # ----------------------------------------------------
@@ -8660,6 +8999,16 @@ async def recibir_respuesta_telegram(
 
             )
 
+            background_tasks.add_task(
+                actualizar_alertas_subida_telegram,
+                None,
+                lote_id,
+                estado_lote,
+            )
+            background_tasks.add_task(
+                refrescar_bandejas_telegram,
+                chat_id,
+            )
 
             return {
 
@@ -9108,6 +9457,16 @@ async def recibir_respuesta_telegram(
 
             )
 
+        background_tasks.add_task(
+            actualizar_alertas_subida_telegram,
+            auditoria_id,
+            None,
+            nuevo_estado,
+        )
+        background_tasks.add_task(
+            refrescar_bandejas_telegram,
+            chat_id,
+        )
 
         return {
 
