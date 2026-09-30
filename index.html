@@ -930,8 +930,8 @@ body{font-family:Inter,"Segoe UI",system-ui,-apple-system,sans-serif!important}
 
   /* Branding grande, como el panel maestro de la referencia */
   #sidebar .sidebar-brand-panel{
-    min-height:185px!important;
-    padding:24px 22px 20px!important;
+    min-height:0!important;
+    padding:18px 22px 16px!important;
     background:#fff!important;
     color:#123b58!important;
     border-bottom:1px solid #dce6ed!important;
@@ -940,20 +940,6 @@ body{font-family:Inter,"Segoe UI",system-ui,-apple-system,sans-serif!important}
     align-items:center!important;
     justify-content:center!important;
     text-align:center!important;
-  }
-  #sidebar .sidebar-brand-logo{
-    width:72px!important;
-    height:72px!important;
-    display:flex!important;
-    align-items:center!important;
-    justify-content:center!important;
-    overflow:hidden!important;
-    margin-bottom:14px!important;
-  }
-  #sidebar .sidebar-brand-logo img{
-    width:72px!important;
-    height:72px!important;
-    object-fit:contain!important;
   }
   #sidebar .sidebar-brand-title{
     font-size:21px!important;
@@ -1181,8 +1167,7 @@ body{font-family:Inter,"Segoe UI",system-ui,-apple-system,sans-serif!important}
   @media(max-width:1100px){
     #sidebar{width:225px!important}
     #mainArea>main{padding:26px 24px 34px!important}
-    #sidebar .sidebar-brand-panel{min-height:190px!important}
-    #sidebar .sidebar-brand-logo,#sidebar .sidebar-brand-logo img{width:64px!important;height:64px!important}
+    #sidebar .sidebar-brand-panel{min-height:0!important;padding:17px 18px 15px!important}
     #sidebar .sidebar-brand-title{font-size:18px!important}
   }
   @media(max-width:900px){
@@ -2070,13 +2055,10 @@ body {
 #loginSection .login-submit{height:50px!important;border-radius:10px!important;background:#1f2b31!important;font-size:13px!important;letter-spacing:.01em!important;box-shadow:0 8px 20px rgba(31,43,49,.14)!important}
 #loginSection .login-submit:hover{background:#2b3d46!important}
 #loginSection .login-error{padding:11px 13px!important;border:1px solid #fecaca!important;border-radius:9px!important;background:#fff5f5!important;color:#b42318!important;font-size:12px!important;font-weight:700!important;text-align:left!important}
-#sidebar .sidebar-brand-logo{width:136px!important;height:94px!important;margin-bottom:8px!important;overflow:hidden!important}
-#sidebar .sidebar-brand-logo img{width:130px!important;height:130px!important;max-width:none!important;object-fit:contain!important}
 #navUsuarios.hidden{display:none!important}
 #navUsuarios:not(.hidden){display:flex!important;align-items:center!important;justify-content:flex-start!important;text-align:left!important}
 #view-gestor .file-manager-shell.subordinate-layout{grid-template-columns:220px minmax(0,1fr)!important}
 #view-gestor .file-manager-shell.subordinate-layout .file-content-panel{min-width:0!important}
-@media(max-width:1100px){#sidebar .sidebar-brand-logo{width:128px!important;height:90px!important}#sidebar .sidebar-brand-logo img{width:122px!important;height:122px!important}}
 @media(max-width:760px){#loginSection .login-form-panel{padding:30px 24px!important}#loginSection .login-options{align-items:flex-start!important;flex-direction:column!important}#view-gestor .file-manager-shell.subordinate-layout{grid-template-columns:1fr!important}}
 </style>
 
@@ -2164,7 +2146,6 @@ body {
 <div id="appBody" class="w-full flex flex-1 min-h-0"><div class="sidebar-overlay" id="sidebarOverlay" onclick="closeMobileSidebar()"></div>
 <aside id="sidebar" class="w-60 bg-[#062743] text-white border-r border-[#174766] flex flex-col transition-all duration-200">
   <div class="sidebar-brand-panel">
-  <div class="sidebar-brand-logo"><img src="images/gm_logo.jpg" alt="GM Ingenieros y Consultores"></div>
   <div class="sidebar-brand-title sidebar-full">DataVault DLP</div>
   <div class="sidebar-brand-subtitle sidebar-full">PREVENCIÓN DE FUGA DE INFORMACIÓN</div>
   <div class="sidebar-brand-divider"></div>
