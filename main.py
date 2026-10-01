@@ -13,12 +13,8 @@ from typing import List
 from fastapi import FastAPI, File, UploadFile, Request, Form, HTTPException, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse
 from supabase import create_client, Client
-
-from openpyxl import Workbook
-from openpyxl.styles import Font, Alignment
-from openpyxl.worksheet.table import Table, TableStyleInfo
 
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -542,6 +538,557 @@ supabase_admin: Client = create_client(
     SUPABASE_URL,
     SUPABASE_SERVICE_ROLE_KEY
 )
+
+
+# ============================================================
+# MOTOR DLP DEL BACKEND (PUNTOS 13-17)
+# ============================================================
+
+# Estas reglas son la base segura del backend. Las configuraciones guardadas
+# en Supabase pueden modificar valores configurables, pero las reglas marcadas
+# como obligatorias nunca se desactivan aunque la fila de la BD se altere.
+DLP_POLITICAS_DEFAULT = {
+    "APROBACION_SUBIDA": {
+        "nombre": "Aprobación obligatoria de subidas",
+        "descripcion": "Toda subida debe pasar por custodia antes de llegar a Google Drive.",
+        "tipo": "BOOLEAN",
+        "valor": True,
+        "activa": True,
+        "obligatoria": True,
+    },
+    "APROBACION_MOVIMIENTO": {
+        "nombre": "Aprobación obligatoria de movimientos",
+        "descripcion": "Mover archivos o carpetas requiere autorización del custodio.",
+        "tipo": "BOOLEAN",
+        "valor": True,
+        "activa": True,
+        "obligatoria": True,
+    },
+    "APROBACION_ELIMINACION": {
+        "nombre": "Aprobación obligatoria de eliminaciones",
+        "descripcion": "Eliminar archivos o carpetas requiere autorización del custodio.",
+        "tipo": "BOOLEAN",
+        "valor": True,
+        "activa": True,
+        "obligatoria": True,
+    },
+    "VALIDAR_SHA256": {
+        "nombre": "Integridad SHA-256",
+        "descripcion": "Calcula y registra SHA-256 para cada archivo que ingresa al sistema.",
+        "tipo": "BOOLEAN",
+        "valor": True,
+        "activa": True,
+        "obligatoria": True,
+    },
+    "MAX_FILE_SIZE_MB": {
+        "nombre": "Tamaño máximo por archivo",
+        "descripcion": "Límite máximo permitido para cada archivo recibido por el backend.",
+        "tipo": "NUMBER",
+        "valor": MAX_FILE_SIZE_MB,
+        "activa": True,
+        "obligatoria": False,
+    },
+    "EXTENSIONES_BLOQUEADAS": {
+        "nombre": "Extensiones bloqueadas",
+        "descripcion": "Bloquea extensiones consideradas de riesgo antes de guardarlas.",
+        "tipo": "LIST",
+        "valor": [
+            "exe", "bat", "cmd", "com", "scr", "msi",
+            "ps1", "vbs", "vbe", "wsf", "wsh"
+        ],
+        "activa": True,
+        "obligatoria": False,
+    },
+    "ALERTA_TELEGRAM": {
+        "nombre": "Alertas por Telegram",
+        "descripcion": "Envía avisos de solicitudes críticas a los custodios autorizados.",
+        "tipo": "BOOLEAN",
+        "valor": True,
+        "activa": True,
+        "obligatoria": False,
+    },
+    "ALERTA_LOGIN_SUBORDINADO": {
+        "nombre": "Alerta de inicio de sesión",
+        "descripcion": "Permite alertar por Telegram cuando inicia sesión un subordinado.",
+        "tipo": "BOOLEAN",
+        "valor": True,
+        "activa": True,
+        "obligatoria": False,
+    },
+}
+
+DLP_CODIGOS_OBLIGATORIOS = {
+    codigo
+    for codigo, config in DLP_POLITICAS_DEFAULT.items()
+    if config.get("obligatoria")
+}
+
+
+def _dlp_codigo(valor) -> str:
+    return str(valor or "").strip().upper()
+
+
+def _dlp_extension(nombre_archivo: str) -> str:
+    extension = os.path.splitext(str(nombre_archivo or ""))[1].lower().strip()
+    return extension.lstrip(".")
+
+
+def _dlp_lista_extensiones(valor) -> list:
+    if valor is None:
+        return []
+
+    if isinstance(valor, str):
+        # Acepta JSON, CSV o texto separado por saltos de línea.
+        texto = valor.strip()
+        if not texto:
+            return []
+        try:
+            parsed = json.loads(texto)
+            if isinstance(parsed, list):
+                valor = parsed
+            else:
+                valor = texto.replace("\n", ",").split(",")
+        except Exception:
+            valor = texto.replace("\n", ",").split(",")
+
+    if not isinstance(valor, (list, tuple, set)):
+        valor = [valor]
+
+    salida = []
+    vistos = set()
+    for item in valor:
+        ext = str(item or "").strip().lower().lstrip(".")
+        if not ext or ext in vistos:
+            continue
+        vistos.add(ext)
+        salida.append(ext)
+
+    return salida
+
+
+def _dlp_valor_desde_fila(fila: dict, fallback):
+    """Lee el valor nuevo (valor_json) y tolera columnas antiguas si existen."""
+    if not isinstance(fila, dict):
+        return fallback
+
+    if fila.get("valor_json") is not None:
+        return fila.get("valor_json")
+
+    for columna in (
+        "valor",
+        "valor_booleano",
+        "valor_numero",
+        "valor_texto",
+    ):
+        if fila.get(columna) is not None:
+            valor = fila.get(columna)
+
+            if columna == "valor_texto":
+                texto = str(valor).strip()
+                try:
+                    return json.loads(texto)
+                except Exception:
+                    return texto
+
+            return valor
+
+    return fallback
+
+
+def obtener_politicas_dlp() -> dict:
+    """Devuelve políticas efectivas; nunca deja caer las reglas obligatorias."""
+    politicas = {
+        codigo: {
+            "codigo": codigo,
+            **config,
+        }
+        for codigo, config in DLP_POLITICAS_DEFAULT.items()
+    }
+
+    try:
+        respuesta = (
+            supabase_admin
+            .table("dlp_politicas")
+            .select("*")
+            .execute()
+        )
+        filas = respuesta.data or []
+    except Exception as error:
+        # Si Supabase tiene una incidencia, la seguridad esencial sigue activa
+        # mediante los valores por defecto del backend.
+        print("[DLP POLICIES LOAD ERROR]", error)
+        return politicas
+
+    for fila in filas:
+        codigo = _dlp_codigo(fila.get("codigo"))
+        if not codigo:
+            continue
+
+        base = politicas.get(codigo, {
+            "codigo": codigo,
+            "nombre": fila.get("nombre") or codigo,
+            "descripcion": fila.get("descripcion") or "",
+            "tipo": fila.get("tipo") or "TEXT",
+            "valor": None,
+            "activa": True,
+            "obligatoria": False,
+        })
+
+        obligatoria = bool(
+            base.get("obligatoria")
+            or fila.get("obligatoria")
+            or codigo in DLP_CODIGOS_OBLIGATORIOS
+        )
+
+        activa_db = fila.get("activa")
+        activa = True if obligatoria else (
+            bool(activa_db)
+            if activa_db is not None
+            else bool(base.get("activa", True))
+        )
+
+        base.update({
+            "codigo": codigo,
+            "nombre": fila.get("nombre") or base.get("nombre") or codigo,
+            "descripcion": (
+                fila.get("descripcion")
+                if fila.get("descripcion") is not None
+                else base.get("descripcion", "")
+            ),
+            "tipo": fila.get("tipo") or base.get("tipo") or "TEXT",
+            "valor": _dlp_valor_desde_fila(
+                fila,
+                base.get("valor"),
+            ),
+            "activa": activa,
+            "obligatoria": obligatoria,
+            "updated_at": fila.get("updated_at"),
+            "updated_by": fila.get("updated_by"),
+        })
+
+        politicas[codigo] = base
+
+    # Defensa adicional: incluso si una fila obligatoria fue manipulada,
+    # el backend la considera activa.
+    for codigo in DLP_CODIGOS_OBLIGATORIOS:
+        if codigo in politicas:
+            politicas[codigo]["activa"] = True
+            politicas[codigo]["obligatoria"] = True
+
+    return politicas
+
+
+def obtener_politica_dlp(codigo: str) -> dict:
+    codigo = _dlp_codigo(codigo)
+    politicas = obtener_politicas_dlp()
+
+    if codigo not in politicas:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Política DLP no encontrada: {codigo}",
+        )
+
+    return politicas[codigo]
+
+
+def politica_dlp_activa(codigo: str) -> bool:
+    codigo = _dlp_codigo(codigo)
+
+    # Las esenciales no dependen de la BD.
+    if codigo in DLP_CODIGOS_OBLIGATORIOS:
+        return True
+
+    try:
+        politica = obtener_politica_dlp(codigo)
+        return bool(politica.get("activa"))
+    except HTTPException:
+        return False
+
+
+def obtener_max_file_size_dlp_mb() -> int:
+    try:
+        politica = obtener_politica_dlp("MAX_FILE_SIZE_MB")
+        if not politica.get("activa"):
+            return MAX_FILE_SIZE_MB
+
+        valor = politica.get("valor")
+        numero = int(float(valor))
+        if numero < 1:
+            raise ValueError("El límite debe ser mayor que cero.")
+        # Tope defensivo para evitar configuraciones accidentales extremas.
+        return min(numero, 2048)
+    except Exception as error:
+        print("[DLP MAX FILE SIZE FALLBACK]", error)
+        return MAX_FILE_SIZE_MB
+
+
+def obtener_extensiones_bloqueadas_dlp() -> set:
+    try:
+        politica = obtener_politica_dlp("EXTENSIONES_BLOQUEADAS")
+        if not politica.get("activa"):
+            return set()
+
+        return set(
+            _dlp_lista_extensiones(
+                politica.get("valor")
+            )
+        )
+    except Exception as error:
+        print("[DLP EXTENSIONS FALLBACK]", error)
+        return set(
+            _dlp_lista_extensiones(
+                DLP_POLITICAS_DEFAULT["EXTENSIONES_BLOQUEADAS"]["valor"]
+            )
+        )
+
+
+def validar_archivo_dlp(
+    nombre_archivo: str,
+    tamano_bytes: int,
+):
+    """Aplica DLP real antes de persistir el archivo."""
+    nombre_archivo = str(nombre_archivo or "archivo_sin_nombre").strip()
+    tamano_bytes = int(tamano_bytes or 0)
+
+    if tamano_bytes <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="El archivo está vacío.",
+        )
+
+    limite_mb = obtener_max_file_size_dlp_mb()
+    limite_bytes = limite_mb * 1024 * 1024
+
+    if tamano_bytes > limite_bytes:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Política DLP: el archivo supera el límite de "
+                f"{limite_mb} MB."
+            ),
+        )
+
+    extension = _dlp_extension(nombre_archivo)
+    bloqueadas = obtener_extensiones_bloqueadas_dlp()
+
+    if extension and extension in bloqueadas:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Política DLP: la extensión .{extension} "
+                "no está permitida."
+            ),
+        )
+
+    return {
+        "permitido": True,
+        "limite_mb": limite_mb,
+        "extension": extension or None,
+    }
+
+
+def normalizar_valor_politica_dlp(codigo: str, valor):
+    codigo = _dlp_codigo(codigo)
+    config = DLP_POLITICAS_DEFAULT.get(codigo)
+
+    if not config:
+        return valor
+
+    tipo = str(config.get("tipo") or "TEXT").upper()
+
+    if codigo == "MAX_FILE_SIZE_MB":
+        try:
+            numero = int(float(valor))
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=400,
+                detail="MAX_FILE_SIZE_MB debe ser un número.",
+            )
+
+        if numero < 1 or numero > 2048:
+            raise HTTPException(
+                status_code=400,
+                detail="MAX_FILE_SIZE_MB debe estar entre 1 y 2048.",
+            )
+
+        return numero
+
+    if codigo == "EXTENSIONES_BLOQUEADAS":
+        return _dlp_lista_extensiones(valor)
+
+    if tipo == "BOOLEAN":
+        if isinstance(valor, bool):
+            return valor
+
+        texto = str(valor or "").strip().lower()
+        if texto in ("true", "1", "si", "sí", "on"):
+            return True
+        if texto in ("false", "0", "no", "off"):
+            return False
+
+        raise HTTPException(
+            status_code=400,
+            detail=f"{codigo} requiere un valor booleano.",
+        )
+
+    return valor
+
+
+def registrar_auditoria_cambio_dlp(
+    admin: dict,
+    codigo: str,
+    accion: str,
+    anterior,
+    nuevo,
+):
+    payload = {
+        "politica_codigo": _dlp_codigo(codigo),
+        "accion": str(accion or "ACTUALIZAR").upper(),
+        "valor_anterior": anterior,
+        "valor_nuevo": nuevo,
+        "actor_id": str(admin.get("id") or "") or None,
+        "actor_nombre": admin.get("nombre"),
+        "actor_correo": admin.get("correo"),
+        "fecha": ahora_iso(),
+    }
+
+    try:
+        (
+            supabase_admin
+            .table("dlp_auditoria")
+            .insert(payload)
+            .execute()
+        )
+    except Exception as error:
+        print("[DLP AUDIT ERROR]", error)
+        # El fallo queda visible y no se oculta al administrador.
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "La política fue procesada, pero no se pudo registrar "
+                "la auditoría DLP. Revisa la tabla dlp_auditoria."
+            ),
+        )
+
+
+def guardar_politica_dlp(
+    admin: dict,
+    codigo: str,
+    activa=None,
+    valor_marker=False,
+    valor=None,
+    accion: str = "ACTUALIZAR",
+):
+    codigo = _dlp_codigo(codigo)
+
+    if codigo not in DLP_POLITICAS_DEFAULT:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Política DLP no reconocida: {codigo}",
+        )
+
+    actual = obtener_politica_dlp(codigo)
+    obligatoria = bool(
+        actual.get("obligatoria")
+        or codigo in DLP_CODIGOS_OBLIGATORIOS
+    )
+
+    if activa is None:
+        nueva_activa = bool(actual.get("activa", True))
+    else:
+        nueva_activa = bool(activa)
+
+    if obligatoria and not nueva_activa:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"La política {codigo} es obligatoria "
+                "y no puede desactivarse."
+            ),
+        )
+
+    nuevo_valor = (
+        normalizar_valor_politica_dlp(codigo, valor)
+        if valor_marker
+        else actual.get("valor")
+    )
+
+    config = DLP_POLITICAS_DEFAULT[codigo]
+    ahora = ahora_iso()
+
+    fila = {
+        "codigo": codigo,
+        "nombre": config.get("nombre"),
+        "descripcion": config.get("descripcion"),
+        "tipo": config.get("tipo"),
+        "valor_json": nuevo_valor,
+        "activa": True if obligatoria else nueva_activa,
+        "obligatoria": obligatoria,
+        "updated_by": str(admin.get("id") or "") or None,
+        "updated_at": ahora,
+    }
+
+    try:
+        existente = (
+            supabase_admin
+            .table("dlp_politicas")
+            .select("id")
+            .eq("codigo", codigo)
+            .limit(1)
+            .execute()
+        )
+
+        if existente.data:
+            respuesta = (
+                supabase_admin
+                .table("dlp_politicas")
+                .update(fila)
+                .eq("codigo", codigo)
+                .execute()
+            )
+        else:
+            fila["created_at"] = ahora
+            respuesta = (
+                supabase_admin
+                .table("dlp_politicas")
+                .insert(fila)
+                .execute()
+            )
+    except Exception as error:
+        print("[DLP POLICY SAVE ERROR]", error)
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "No se pudo guardar la política DLP en Supabase. "
+                "Ejecuta primero la migración de la Entrega B."
+            ),
+        )
+
+    nuevo = {
+        **actual,
+        "codigo": codigo,
+        "valor": nuevo_valor,
+        "activa": True if obligatoria else nueva_activa,
+        "obligatoria": obligatoria,
+        "updated_at": ahora,
+        "updated_by": str(admin.get("id") or "") or None,
+    }
+
+    registrar_auditoria_cambio_dlp(
+        admin,
+        codigo,
+        accion,
+        {
+            "activa": actual.get("activa"),
+            "valor": actual.get("valor"),
+        },
+        {
+            "activa": nuevo.get("activa"),
+            "valor": nuevo.get("valor"),
+        },
+    )
+
+    return nuevo
 
 
 # ============================================================
@@ -1406,6 +1953,10 @@ def sincronizar_mensajes_telegram_operacion(
 def notificar_solicitud_operacion_telegram(solicitud: dict):
     """Envía una alerta real y actualiza la bandeja persistente."""
     if not TELEGRAM_TOKEN or not AUTHORIZED_CHAT_IDS:
+        return
+
+    if not politica_dlp_activa("ALERTA_TELEGRAM"):
+        print("[DLP] ALERTA_TELEGRAM desactivada; no se envía aviso.")
         return
 
     try:
@@ -3643,132 +4194,6 @@ def health_check():
     }
 
 
-
-# ============================================================
-# REPORTE EXCEL DE AUDITORÍA
-# ============================================================
-
-@app.get("/reports/excel")
-def generar_reporte_excel(request: Request):
-    # El mismo reporte que antes se exportaba como CSV, ahora se genera
-    # en el backend como un archivo Excel real. Solo el administrador
-    # puede descargarlo.
-    obtener_admin_desde_request(request)
-
-    try:
-        respuesta = (
-            supabase_admin
-            .table("auditoria_custodia")
-            .select("*")
-            .order("fecha_solicitud", desc=True)
-            .limit(500)
-            .execute()
-        )
-        registros = respuesta.data or []
-    except Exception as error:
-        print("[REPORT EXCEL ERROR]", error)
-        raise HTTPException(
-            status_code=500,
-            detail="No se pudieron consultar los datos del reporte.",
-        )
-
-    workbook = Workbook()
-    sheet = workbook.active
-    sheet.title = "Auditoría"
-
-    encabezados = [
-        "Archivo",
-        "Usuario",
-        "Carpeta",
-        "Estado",
-        "Hash SHA-256",
-        "Fecha",
-    ]
-    sheet.append(encabezados)
-
-    for registro in registros:
-        ruta = str(registro.get("ruta_relativa") or "").replace("\\", "/").strip("/")
-        if registro.get("lote_id") and "/" in ruta:
-            carpeta = ruta.split("/", 1)[0] or "Carpeta"
-        else:
-            carpeta = "Archivo suelto"
-
-        fecha = registro.get("fecha_solicitud") or ""
-        if fecha:
-            try:
-                fecha_excel = datetime.fromisoformat(str(fecha).replace("Z", "+00:00"))
-                # Excel no admite datetimes con zona horaria.
-                if fecha_excel.tzinfo is not None:
-                    fecha_excel = fecha_excel.astimezone(timezone.utc).replace(tzinfo=None)
-            except Exception:
-                fecha_excel = str(fecha)
-        else:
-            fecha_excel = ""
-
-        sheet.append([
-            registro.get("nombre_archivo") or "",
-            registro.get("usuario_solicitante")
-            or registro.get("solicitante_nombre")
-            or "",
-            carpeta,
-            registro.get("estado") or "",
-            registro.get("hash_sha256") or "",
-            fecha_excel,
-        ])
-
-    # Formato básico y tabla nativa de Excel.
-    for cell in sheet[1]:
-        cell.font = Font(bold=True)
-        cell.alignment = Alignment(vertical="center")
-
-    if sheet.max_row > 1:
-        tabla = Table(
-            displayName="TablaAuditoriaDataVault",
-            ref=f"A1:F{sheet.max_row}",
-        )
-        tabla.tableStyleInfo = TableStyleInfo(
-            name="TableStyleMedium2",
-            showFirstColumn=False,
-            showLastColumn=False,
-            showRowStripes=True,
-            showColumnStripes=False,
-        )
-        sheet.add_table(tabla)
-
-    sheet.freeze_panes = "A2"
-    sheet.auto_filter.ref = f"A1:F{sheet.max_row}"
-
-    anchos = {
-        "A": 38,
-        "B": 28,
-        "C": 28,
-        "D": 16,
-        "E": 68,
-        "F": 22,
-    }
-    for columna, ancho in anchos.items():
-        sheet.column_dimensions[columna].width = ancho
-
-    for cell in sheet["F"][1:]:
-        if isinstance(cell.value, datetime):
-            cell.number_format = "dd/mm/yyyy hh:mm"
-
-    salida = io.BytesIO()
-    workbook.save(salida)
-    salida.seek(0)
-
-    nombre = datetime.now().strftime("datavault_reporte_auditoria_%Y%m%d_%H%M%S.xlsx")
-
-    return StreamingResponse(
-        salida,
-        media_type=(
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        ),
-        headers={
-            "Content-Disposition": f'attachment; filename="{nombre}"'
-        },
-    )
-
 # ============================================================
 # INFORMACIÓN DEL WEBHOOK
 # ============================================================
@@ -3812,6 +4237,87 @@ def set_webhook_manual(
     return configurar_webhook_url(
         base_url
     )
+
+
+# ============================================================
+# API DE POLÍTICAS DLP (PUNTOS 13, 15, 16 Y 17)
+# ============================================================
+
+@app.get("/dlp/policies")
+def listar_politicas_dlp_api(request: Request):
+    admin = obtener_admin_desde_request(request)
+    politicas = obtener_politicas_dlp()
+
+    return {
+        "status": "ok",
+        "usuario": {
+            "id": admin.get("id"),
+            "nombre": admin.get("nombre"),
+            "correo": admin.get("correo"),
+        },
+        "politicas": list(politicas.values()),
+    }
+
+
+@app.post("/dlp/policies/update")
+async def actualizar_politica_dlp_api(request: Request):
+    admin = obtener_admin_desde_request(request)
+
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail="JSON inválido.",
+        )
+
+    codigo = _dlp_codigo(payload.get("codigo"))
+    if not codigo:
+        raise HTTPException(
+            status_code=400,
+            detail="Falta codigo.",
+        )
+
+    tiene_valor = "valor" in payload
+    activa = payload.get("activa") if "activa" in payload else None
+
+    politica = guardar_politica_dlp(
+        admin=admin,
+        codigo=codigo,
+        activa=activa,
+        valor_marker=tiene_valor,
+        valor=payload.get("valor"),
+        accion="ACTUALIZAR",
+    )
+
+    return {
+        "status": "ok",
+        "politica": politica,
+    }
+
+
+@app.post("/dlp/policies/reset")
+async def restaurar_politicas_dlp_api(request: Request):
+    admin = obtener_admin_desde_request(request)
+
+    restauradas = []
+
+    for codigo, config in DLP_POLITICAS_DEFAULT.items():
+        politica = guardar_politica_dlp(
+            admin=admin,
+            codigo=codigo,
+            activa=True,
+            valor_marker=True,
+            valor=config.get("valor"),
+            accion="RESTAURAR",
+        )
+        restauradas.append(politica)
+
+    return {
+        "status": "ok",
+        "total": len(restauradas),
+        "politicas": restauradas,
+    }
 
 
 # ============================================================
@@ -3864,36 +4370,26 @@ async def registrar_y_solicitar_custodia(
     contenido = await file.read()
 
 
-    if not contenido:
-
-        raise HTTPException(
-
-            status_code=400,
-
-            detail=
-                "El archivo está vacío."
-
-        )
-
-
-    if len(contenido) > MAX_FILE_SIZE_BYTES:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"El archivo supera el límite de {MAX_FILE_SIZE_MB} MB."
-            ),
-        )
-
-    hash_sha256 = hashlib.sha256(
-        contenido
-    ).hexdigest()
-
-
     nombre_original = (
         file.filename
         or
         "archivo_sin_nombre"
     )
+
+
+    # DLP REAL DEL BACKEND:
+    # el navegador ya no decide si el archivo puede ingresar.
+    validar_archivo_dlp(
+        nombre_original,
+        len(contenido) if contenido else 0,
+    )
+
+
+    # SHA-256 es una política obligatoria: aunque una fila de Supabase se
+    # manipule, el backend siempre mantiene esta validación activa.
+    hash_sha256 = hashlib.sha256(
+        contenido
+    ).hexdigest()
 
 
     nombre_base, extension = os.path.splitext(
@@ -4268,6 +4764,9 @@ def notificar_menu_pendientes_background(
     lote_id=None,
 ):
     """Notifica una subida persistida y refresca la bandeja principal."""
+    if not politica_dlp_activa("ALERTA_TELEGRAM"):
+        print("[DLP] ALERTA_TELEGRAM desactivada; solicitud guardada sin aviso.")
+        return
     if base_url and not PUBLIC_BASE_URL:
         try:
             estado_webhook = configurar_webhook_url(base_url)
@@ -4528,42 +5027,18 @@ async def registrar_lote_custodia(
             tamano_archivo = len(contenido) if contenido else 0
 
 
-            if not contenido:
-
+            try:
+                validar_archivo_dlp(
+                    nombre_original,
+                    tamano_archivo,
+                )
+            except HTTPException as dlp_error:
                 errores.append({
-
-                    "archivo":
-                        nombre_original,
-
-                    "ruta_relativa":
-                        ruta_relativa,
-
-                    "error":
-                        "Archivo vacío"
-
+                    "archivo": nombre_original,
+                    "ruta_relativa": ruta_relativa,
+                    "error": str(dlp_error.detail),
                 })
-
-                continue
-
-
-            if tamano_archivo > MAX_FILE_SIZE_BYTES:
-
-                errores.append({
-
-                    "archivo":
-                        nombre_original,
-
-                    "ruta_relativa":
-                        ruta_relativa,
-
-                    "error":
-                        (
-                            f"Supera el límite de "
-                            f"{MAX_FILE_SIZE_MB} MB"
-                        )
-
-                })
-
+                del contenido
                 continue
 
 
@@ -6616,6 +7091,25 @@ async def solicitar_operacion(
             detail=(
                 "tipo_operacion inválido."
             )
+        )
+
+
+    # Las operaciones sensibles mantienen aprobación obligatoria desde backend.
+    politica_aprobacion = (
+        "APROBACION_MOVIMIENTO"
+        if tipo == "MOVER"
+        else "APROBACION_ELIMINACION"
+    )
+
+    if not politica_dlp_activa(politica_aprobacion):
+        # Defensa en profundidad: estas políticas son obligatorias y no deben
+        # quedar desactivadas ni por una modificación directa en la BD.
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"La política obligatoria {politica_aprobacion} "
+                "no está disponible."
+            ),
         )
 
 
