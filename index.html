@@ -6157,14 +6157,31 @@ window.addEventListener('DOMContentLoaded',()=>{
   let refreshTimer=null;
   async function refreshAll(){
     clearTimeout(refreshTimer);
+
     refreshTimer=setTimeout(async()=>{
       try{
+        // loadAudit() actualiza auditCache y repinta el explorador abierto
+        // mediante dvRenderDynamicFolders()/filterFiles(), sin poner spinner.
         await loadAudit();
+
+        // Actualiza solicitudes/aprobaciones.
         await loadCola();
-        if(document.getElementById('view-gestor')?.classList.contains('active'))await loadFilesView();
-        if(isAdmin() && typeof loadAdminUsers==='function' && document.getElementById('view-usuarios')?.classList.contains('active'))await loadAdminUsers();
-      }catch(err){console.error('[DATAVAULT REALTIME REFRESH]',err);}
-    },180);
+
+        // IMPORTANTE: no llamar loadFilesView() aquí.
+        // loadFilesView() muestra "Cargando archivos..." y provocaba el
+        // parpadeo visual en cada evento Realtime.
+
+        if(
+          isAdmin() &&
+          typeof loadAdminUsers==='function' &&
+          document.getElementById('view-usuarios')?.classList.contains('active')
+        ){
+          await loadAdminUsers();
+        }
+      }catch(err){
+        console.error('[DATAVAULT REALTIME REFRESH]',err);
+      }
+    },250);
   }
 
   listenRealtime=function(){
@@ -6202,9 +6219,20 @@ window.addEventListener('DOMContentLoaded',()=>{
   }
 
   function startDriveSync(){
+    // Sin polling cada 10 segundos.
+    // Solo hacemos una reconciliación inicial; después los cambios normales
+    // llegan por Realtime y el usuario puede usar el botón Actualizar.
     clearInterval(dvOpsSyncTimer);
-    setTimeout(async()=>{await backfillLegacyDriveIds();await reconcileDrive();},1200);
-    dvOpsSyncTimer=setInterval(reconcileDrive,10000);
+    dvOpsSyncTimer = null;
+
+    setTimeout(async()=>{
+      try{
+        await backfillLegacyDriveIds();
+        await reconcileDrive();
+      }catch(err){
+        console.warn('[DRIVE SYNC INICIAL]', err?.message || err);
+      }
+    },1200);
   }
 
   const finalEnter=enterApp;
@@ -6361,11 +6389,9 @@ window.addEventListener('DOMContentLoaded',()=>{
 
       // Actualiza también las vistas existentes sin depender de que el usuario navegue.
       try{ if(typeof loadCola === 'function') await loadCola(); }catch(e){ console.warn('[HYDRATION loadCola]', e); }
-      try{
-        if(document.getElementById('view-gestor')?.classList.contains('active') && typeof loadFilesView === 'function'){
-          await loadFilesView();
-        }
-      }catch(e){ console.warn('[HYDRATION loadFilesView]', e); }
+      // El explorador no se recarga desde la hidratación del dashboard.
+      // Realtime general actualiza auditCache de forma silenciosa y el botón
+      // Actualizar conserva la recarga manual completa.
 
       console.log('[DATAVAULT HYDRATION V2] OK', reason, rows.length);
     }catch(err){
@@ -6381,16 +6407,13 @@ window.addEventListener('DOMContentLoaded',()=>{
   }
 
   function connectHydrationRealtime(){
+    // Este bloque antes abría una segunda suscripción Realtime para las mismas
+    // tablas. La actualización general ya la gestiona listenRealtime(), por lo
+    // que mantener ambos canales duplicaba consultas y refrescos visuales.
     if(dvHydrationChannel){
       try{supabaseClient.removeChannel(dvHydrationChannel);}catch(_){}
       dvHydrationChannel = null;
     }
-
-    dvHydrationChannel = supabaseClient
-      .channel('datavault_hydration_v2')
-      .on('postgres_changes', {event:'*', schema:'public', table:'auditoria_custodia'}, () => hydrateNow('realtime-auditoria'))
-      .on('postgres_changes', {event:'*', schema:'public', table:'solicitudes_operacion'}, () => hydrateNow('realtime-operacion'))
-      .subscribe(status => console.log('[DATAVAULT HYDRATION REALTIME]', status));
   }
 
   async function boot(){
