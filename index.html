@@ -2673,6 +2673,161 @@ body.dv-modal-open{overflow:hidden!important}
   .dv-decision-title{font-size:18px}
 }
 </style>
+
+<style id="datavault-drive-similar-ui">
+/* =========================================================
+   EXPLORADOR TIPO GOOGLE DRIVE
+   Solo presentación y acceso a funciones ya existentes.
+   No cambia endpoints ni lógica de backend.
+   ========================================================= */
+#view-gestor .file-manager-shell{
+  grid-template-columns:250px minmax(0,1fr) 270px!important;
+  min-height:640px!important;
+  border:0!important;
+  border-radius:20px!important;
+  background:#f8fafd!important;
+  box-shadow:none!important;
+  gap:12px!important;
+  overflow:visible!important;
+}
+#view-gestor .file-manager-shell.subordinate-layout{
+  grid-template-columns:250px minmax(0,1fr)!important;
+}
+#view-gestor .file-explorer-panel{
+  background:#f8fafd!important;
+  border-right:0!important;
+  border-radius:18px!important;
+  padding:10px 8px 12px!important;
+}
+#view-gestor .explorer-head{
+  padding:6px 6px 12px!important;
+  border-bottom:0!important;
+}
+#view-gestor .explorer-head h3{display:none!important}
+#view-gestor .dv-drive-new{position:relative;margin-bottom:14px}
+#view-gestor .dv-drive-new summary{
+  list-style:none;display:inline-flex;align-items:center;gap:13px;min-width:118px;height:56px;
+  padding:0 20px;border:1px solid #e2e6e9;border-radius:16px;background:#fff;color:#1f1f1f;
+  font-size:14px;font-weight:600;cursor:pointer;box-shadow:0 1px 2px rgba(60,64,67,.18),0 1px 3px 1px rgba(60,64,67,.10);
+  user-select:none;
+}
+#view-gestor .dv-drive-new summary::-webkit-details-marker{display:none}
+#view-gestor .dv-drive-new summary:hover{background:#f8fafd;box-shadow:0 1px 3px rgba(60,64,67,.24),0 2px 6px rgba(60,64,67,.14)}
+#view-gestor .dv-drive-new summary i{font-size:22px;color:#3c4043}
+#view-gestor .dv-drive-new-menu{
+  position:absolute;z-index:80;top:62px;left:0;width:225px;padding:8px 0;background:#fff;border-radius:12px;
+  box-shadow:0 4px 10px rgba(60,64,67,.18),0 8px 24px rgba(60,64,67,.12);border:1px solid #eef0f1;
+}
+#view-gestor .dv-drive-new-menu button{
+  width:100%;height:42px;border:0;background:transparent;display:flex;align-items:center;gap:14px;padding:0 18px;
+  color:#3c4043;font-size:13px;text-align:left;cursor:pointer;
+}
+#view-gestor .dv-drive-new-menu button:hover{background:#f1f3f4}
+#view-gestor .dv-drive-new-menu button i{width:18px;text-align:center;font-size:14px;color:#5f6368}
+#view-gestor .dv-drive-new-menu .dv-menu-separator{height:1px;background:#e8eaed;margin:6px 0}
+#view-gestor .explorer-search{
+  height:42px!important;border:0!important;border-radius:22px!important;background:#e9eef6!important;padding:0 4px!important;
+}
+#view-gestor .explorer-search i{font-size:13px!important;color:#5f6368!important;margin:0 10px!important}
+#view-gestor .explorer-search input{font-size:12px!important;color:#202124!important;background:transparent!important}
+#view-gestor .explorer-tree{padding:5px 2px!important}
+#view-gestor .tree-item,#view-gestor .tree-folder,#view-gestor .tree-subitem{
+  min-height:36px!important;border-radius:18px!important;padding:7px 14px!important;font-size:12px!important;color:#3c4043!important;gap:11px!important;
+}
+#view-gestor .tree-item i,#view-gestor .tree-subitem i{font-size:14px!important;color:#5f6368!important}
+#view-gestor .tree-item.active,#view-gestor .tree-subitem.active{
+  background:#c2e7ff!important;color:#001d35!important;font-weight:700!important;
+}
+#view-gestor .tree-item.active i,#view-gestor .tree-subitem.active i{color:#001d35!important}
+#view-gestor .tree-item:hover,#view-gestor .tree-subitem:hover{background:#e9eef6!important}
+#view-gestor .tree-item.active:hover,#view-gestor .tree-subitem.active:hover{background:#c2e7ff!important}
+#view-gestor .tree-folder{
+  padding-top:15px!important;padding-bottom:5px!important;font-size:11px!important;font-weight:700!important;color:#5f6368!important;
+}
+#view-gestor #dynamicFolderTree{padding-left:0!important}
+#view-gestor .explorer-foot{border-top:0!important;padding:14px!important;color:#5f6368!important;font-size:10px!important}
+
+#view-gestor .file-content-panel{
+  background:#fff!important;border-radius:18px!important;border:1px solid #e7eaed!important;overflow:hidden!important;min-height:640px!important;
+}
+#view-gestor .file-content-head{
+  min-height:74px!important;padding:14px 18px!important;border-bottom:1px solid #edf0f2!important;align-items:center!important;
+}
+#view-gestor .dv-drive-title-block{min-width:0;flex:1}
+#view-gestor .breadcrumb{display:flex!important;align-items:center!important;gap:6px!important;font-size:11px!important;color:#5f6368!important}
+#view-gestor .breadcrumb .dv-drive-home{
+  border:0;background:transparent;color:#3c4043;font-size:11px;font-weight:600;padding:3px 4px;border-radius:6px;cursor:pointer;
+}
+#view-gestor .breadcrumb .dv-drive-home:hover{background:#f1f3f4}
+#view-gestor .breadcrumb i{font-size:8px!important;margin:0!important;color:#9aa0a6!important}
+#view-gestor .breadcrumb b{font-size:11px!important;color:#5f6368!important;font-weight:500!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#view-gestor .file-content-head h3{font-size:20px!important;font-weight:500!important;color:#202124!important;margin-top:4px!important}
+#view-gestor .dv-file-operation-bar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+#view-gestor .dv-drive-toolbar-btn{
+  height:38px;border:1px solid #dadce0;border-radius:19px;background:#fff;color:#3c4043;padding:0 14px;
+  display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:600;cursor:pointer;transition:.15s ease;
+}
+#view-gestor .dv-drive-toolbar-btn:hover{background:#f8fafd;border-color:#c7cacf;box-shadow:0 1px 2px rgba(60,64,67,.12)}
+#view-gestor .dv-drive-toolbar-btn i{font-size:12px;color:#5f6368}
+#view-gestor .dv-drive-toolbar-btn.danger{color:#b3261e}
+#view-gestor .dv-drive-toolbar-btn.danger i{color:#b3261e}
+
+#view-gestor .compact-upload{
+  margin:12px 18px!important;min-height:76px!important;padding:14px 18px!important;border:1px dashed #b8c3cc!important;border-radius:14px!important;
+  background:#f8fafd!important;color:#3c4043!important;
+}
+#view-gestor .compact-upload:hover{background:#f1f6fb!important;border-color:#8aa6ba!important}
+#view-gestor .compact-upload>i{font-size:22px!important;color:#5f6368!important}
+#view-gestor .compact-upload b{font-size:12px!important;color:#3c4043!important}
+#view-gestor .compact-upload span{font-size:10px!important;color:#6f767d!important}
+#view-gestor .compact-upload .secondary-btn{border-radius:18px!important;background:#fff!important;border-color:#dadce0!important;color:#3c4043!important}
+
+#view-gestor .file-table-wrap{overflow:auto!important;flex:1;background:#fff}
+#view-gestor .file-table-wrap .data-table{border-collapse:separate!important;border-spacing:0!important;width:100%!important}
+#view-gestor .file-table-wrap .data-table thead{background:#fff!important;position:sticky;top:0;z-index:4}
+#view-gestor .file-table-wrap .data-table th{
+  height:42px!important;padding:0 16px!important;border-bottom:1px solid #dadce0!important;color:#5f6368!important;font-size:10px!important;font-weight:600!important;
+}
+#view-gestor .file-table-wrap .data-table td{
+  min-height:48px!important;padding:10px 16px!important;border-bottom:1px solid #edf0f2!important;color:#3c4043!important;
+}
+#view-gestor .file-table-wrap .data-table tbody tr:hover>td{background:#f8fafd!important}
+#view-gestor .file-table-wrap .data-table tbody tr.dv-folder-summary:hover>td{background:#f1f6fb!important}
+#view-gestor .file-table-wrap .data-table td:first-child p.font-semibold{font-size:12px!important;color:#202124!important}
+#view-gestor .dv-unit-sub{font-size:9px!important;color:#777f87!important;margin-top:2px}
+#view-gestor .dv-folder-toggle{font-size:12px!important;color:#202124!important;gap:9px!important}
+#view-gestor .dv-folder-chip{background:#f1f3f4!important;color:#5f6368!important;border-radius:10px!important;padding:2px 7px!important;font-size:9px!important}
+#view-gestor .integrity-ok{background:transparent!important;border:0!important;color:#5f6368!important;padding:0!important;font-size:10px!important}
+#view-gestor .status-pill{font-size:9px!important}
+#view-gestor .dv-op-actions{display:flex!important;align-items:center!important;gap:4px!important;justify-content:flex-start!important}
+#view-gestor .dv-op-btn{
+  width:34px!important;height:34px!important;padding:0!important;border:0!important;border-radius:50%!important;background:transparent!important;
+  color:#5f6368!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;font-size:0!important;
+}
+#view-gestor .dv-op-btn i{font-size:13px!important;margin:0!important}
+#view-gestor .dv-op-btn:hover{background:#f1f3f4!important;color:#202124!important}
+#view-gestor .dv-op-btn.delete:hover{background:#fce8e6!important;color:#b3261e!important}
+#view-gestor .file-content-footer{min-height:44px!important;padding:10px 18px!important;background:#fff!important;border-top:0!important;color:#5f6368!important}
+#view-gestor .file-security-panel{border-left:0!important;border-radius:18px!important;background:#f8fafd!important;padding:0!important}
+
+@media(max-width:1100px){
+  #view-gestor .file-manager-shell{grid-template-columns:220px minmax(0,1fr)!important}
+  #view-gestor .file-security-panel{grid-column:1/-1!important}
+  #view-gestor .file-manager-shell.subordinate-layout{grid-template-columns:220px minmax(0,1fr)!important}
+}
+@media(max-width:800px){
+  #view-gestor .file-manager-shell,#view-gestor .file-manager-shell.subordinate-layout{grid-template-columns:1fr!important;gap:10px!important}
+  #view-gestor .file-explorer-panel{border:1px solid #e7eaed!important}
+  #view-gestor .explorer-tree{max-height:260px;overflow:auto}
+  #view-gestor .file-content-head{align-items:flex-start!important;flex-direction:column!important}
+  #view-gestor .dv-file-operation-bar{width:100%;justify-content:flex-start}
+}
+@media(max-width:560px){
+  #view-gestor .dv-drive-toolbar-btn{padding:0 11px;font-size:11px}
+  #view-gestor .file-table-wrap .data-table th,#view-gestor .file-table-wrap .data-table td{padding-left:10px!important;padding-right:10px!important}
+}
+</style>
+
 </head>
 <body class="bg-slate-50 text-slate-800">
 
@@ -2875,18 +3030,38 @@ body.dv-modal-open{overflow:hidden!important}
   <div class="page-title"><div><span class="module-kicker">Custodia documental</span><h2>Explorador de archivos</h2><p>Gestiona los archivos corporativos bajo custodia y controla sus operaciones.</p></div><div class="flex gap-2"><span class="live-badge"><i class="fa-solid fa-circle text-[5px] mr-1"></i>Sincronizado</span><button onclick="loadFilesView()" class="secondary-btn"><i class="fa-solid fa-rotate"></i>Actualizar</button></div></div>
   <div class="file-manager-shell">
     <div class="file-explorer-panel">
-      <div class="explorer-head"><h3>Explorador</h3><div class="explorer-search"><i class="fa-solid fa-magnifying-glass"></i><input id="fileSearch" oninput="filterFiles()" placeholder="Buscar en carpetas..."></div></div>
+      <div class="explorer-head">
+        <details id="dvDriveNewWrap" class="dv-drive-new">
+          <summary><i class="fa-solid fa-plus"></i><span>Nuevo</span></summary>
+          <div class="dv-drive-new-menu">
+            <button type="button" onclick="this.closest('details').removeAttribute('open');document.getElementById('fileInput').click()"><i class="fa-solid fa-file-arrow-up"></i><span>Subir archivo</span></button>
+            <button type="button" onclick="this.closest('details').removeAttribute('open');document.getElementById('folderInput').click()"><i class="fa-solid fa-folder-arrow-up"></i><span>Subir carpeta</span></button>
+            <div class="dv-menu-separator"></div>
+            <button type="button" onclick="this.closest('details').removeAttribute('open');dvActivateFileOperation('MOVER')"><i class="fa-solid fa-folder-tree"></i><span>Mover</span></button>
+            <button type="button" onclick="this.closest('details').removeAttribute('open');dvActivateFileOperation('ELIMINAR')"><i class="fa-solid fa-trash-can"></i><span>Eliminar</span></button>
+          </div>
+        </details>
+        <div class="explorer-search"><i class="fa-solid fa-magnifying-glass"></i><input id="fileSearch" oninput="filterFiles()" placeholder="Buscar en Drive..."></div>
+      </div>
       <div class="explorer-tree">
-        <button onclick="selectFileFolder('')" class="tree-item active" data-folder=""><i class="fa-solid fa-house"></i>Mis archivos</button>
-        <div class="tree-folder"><i class="fa-solid fa-chevron-down"></i><i class="fa-solid fa-folder"></i><span>Carpetas cargadas</span></div>
+        <button onclick="selectFileFolder('')" class="tree-item active" data-folder=""><i class="fa-solid fa-hard-drive"></i>Mi unidad</button>
+        <div class="tree-folder"><i class="fa-solid fa-chevron-down"></i><i class="fa-solid fa-folder"></i><span>Carpetas</span></div>
         <div id="dynamicFolderTree" class="pl-5 space-y-1"><p class="tree-subitem text-slate-400">Cargando carpetas...</p></div>
-        <button onclick="selectFileFolder('__SHARED__')" class="tree-item" data-folder="__SHARED__"><i class="fa-solid fa-users"></i>Compartidos</button>
+        <button onclick="selectFileFolder('__SHARED__')" class="tree-item" data-folder="__SHARED__"><i class="fa-solid fa-user-group"></i>Compartidos conmigo</button>
         <button onclick="selectFileFolder('__TRASH__')" class="tree-item" data-folder="__TRASH__"><i class="fa-solid fa-trash-can"></i>Papelera</button>
       </div>
       <div class="explorer-foot"><span><i class="fa-solid fa-shield-halved"></i> Custodia DLP activa</span></div>
     </div>
     <div class="file-content-panel">
-      <div class="file-content-head"><div><span class="breadcrumb">Corporativo <i class="fa-solid fa-chevron-right"></i> <b id="currentFolderLabel">Todos los archivos</b></span><h3 id="filePanelTitle">Mis archivos</h3></div><select id="fileFolderFilter" class="hidden"><option value="">Todas las carpetas</option></select><div id="dvFileOperationBar" class="dv-file-operation-bar"><button type="button" class="primary-btn" onclick="dvActivateFileOperation('SUBIR')"><i class="fa-solid fa-file-arrow-up"></i>Subir</button><button type="button" class="secondary-btn" onclick="dvActivateFileOperation('MOVER')"><i class="fa-solid fa-arrows-turn-right"></i>Mover</button><button type="button" class="secondary-btn dv-delete-operation" onclick="dvActivateFileOperation('ELIMINAR')"><i class="fa-solid fa-trash"></i>Eliminar</button></div></div>
+      <div class="file-content-head">
+        <div class="dv-drive-title-block"><span class="breadcrumb"><button type="button" class="dv-drive-home" onclick="selectFileFolder('')">Mi unidad</button><i class="fa-solid fa-chevron-right"></i><b id="currentFolderLabel">Todos los archivos</b></span><h3 id="filePanelTitle">Mi unidad</h3></div>
+        <select id="fileFolderFilter" class="hidden"><option value="">Todas las carpetas</option></select>
+        <div id="dvFileOperationBar" class="dv-file-operation-bar">
+          <button type="button" class="dv-drive-toolbar-btn" onclick="document.getElementById('fileInput').click()"><i class="fa-solid fa-file-arrow-up"></i>Subir archivo</button>
+          <button type="button" class="dv-drive-toolbar-btn" onclick="dvActivateFileOperation('MOVER')"><i class="fa-solid fa-folder-tree"></i>Mover</button>
+          <button type="button" class="dv-drive-toolbar-btn danger" onclick="dvActivateFileOperation('ELIMINAR')"><i class="fa-solid fa-trash-can"></i>Eliminar</button>
+        </div>
+      </div>
       <div id="dropZone" class="upload-zone compact-upload"><i class="fa-solid fa-arrow-up-from-bracket"></i><div><b>Arrastra archivos aquí</b><span>o selecciona archivos / una carpeta completa para enviarlos a custodia</span></div><div class="flex flex-wrap gap-2 justify-center"><button type="button" class="secondary-btn" onclick="event.stopPropagation();document.getElementById('fileInput').click()"><i class="fa-solid fa-file"></i>Seleccionar archivos</button><button type="button" class="secondary-btn" onclick="event.stopPropagation();document.getElementById('folderInput').click()"><i class="fa-solid fa-folder-open"></i>Seleccionar carpeta</button></div><input type="file" id="fileInput" class="hidden" multiple onclick="event.stopPropagation()" onchange="handleFilesSelected(this.files,false)"><input type="file" id="folderInput" class="hidden" webkitdirectory directory multiple onclick="event.stopPropagation()" onchange="handleFilesSelected(this.files,true)"></div>
       <div id="selectedFilesList" class="mt-3 hidden rounded-lg border border-slate-200 bg-slate-50 p-3"></div>
       <div id="dvUploadDestinationPanel" class="mt-3 hidden dv-upload-destination-panel">
@@ -4824,7 +4999,7 @@ selectFileFolder = function(folder){
   document.querySelectorAll('.tree-item,.tree-subitem').forEach(b=>b.classList.remove('active'));
   const btn=[...document.querySelectorAll('[data-folder]')].find(b=>b.dataset.folder===folder);if(btn)btn.classList.add('active');
   const label=document.getElementById('currentFolderLabel'),title=document.getElementById('filePanelTitle');
-  const name=folder==='__SHARED__'?'Compartidos':folder==='__TRASH__'?'Papelera':folder||'Todos los archivos';if(label)label.textContent=name;if(title)title.textContent=folder?name:'Mis archivos';
+  const name=folder==='__SHARED__'?'Compartidos conmigo':folder==='__TRASH__'?'Papelera':folder||'Todos los archivos';if(label)label.textContent=name;if(title)title.textContent=folder?name:'Mi unidad';
   filterFiles();
 };
 
@@ -4975,7 +5150,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     // El admin supervisa: no necesita controles de carga en su explorador.
     const drop=document.getElementById('dropZone');
     if(drop) drop.classList.toggle('role-hidden',admin);
-    ['batchActionBar','selectedFilesList','dvUploadDestinationPanel','dvFileOperationBar'].forEach(id=>{const e=document.getElementById(id);if(e && admin)e.classList.add('role-hidden');else if(e)e.classList.remove('role-hidden');});
+    ['batchActionBar','selectedFilesList','dvUploadDestinationPanel','dvFileOperationBar','dvDriveNewWrap'].forEach(id=>{const e=document.getElementById(id);if(e && admin)e.classList.add('role-hidden');else if(e)e.classList.remove('role-hidden');});
     document.querySelectorAll('#view-gestor .file-content-head button').forEach(btn=>{
       const click=btn.getAttribute('onclick')||'';
       if(/fileInput|folderInput|seleccionarCarpeta/i.test(click)) btn.classList.toggle('role-hidden',admin);
@@ -5942,7 +6117,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     if(!approved) return '<span class="dv-op-legacy">Disponible al aprobar</span>';
     if(!linked) return '<span class="dv-op-legacy" title="Registro histórico sin ID de Drive">Sin vínculo Drive</span>';
     const safe=escapeHtml(String(id));
-    return `<div class="dv-op-actions"><button class="dv-op-btn" onclick="event.stopPropagation();dvRequestMove('${kind}','${safe}')"><i class="fa-solid fa-arrows-turn-right mr-1"></i>Mover</button><button class="dv-op-btn delete" onclick="event.stopPropagation();dvRequestDelete('${kind}','${safe}')"><i class="fa-solid fa-trash mr-1"></i>Eliminar</button></div>`;
+    return `<div class="dv-op-actions"><button type="button" class="dv-op-btn" title="Mover" aria-label="Mover" onclick="event.stopPropagation();dvRequestMove('${kind}','${safe}')"><i class="fa-solid fa-folder-tree"></i></button><button type="button" class="dv-op-btn delete" title="Eliminar" aria-label="Eliminar" onclick="event.stopPropagation();dvRequestDelete('${kind}','${safe}')"><i class="fa-solid fa-trash-can"></i></button></div>`;
   }
 
   function opsLooseRow(r){
