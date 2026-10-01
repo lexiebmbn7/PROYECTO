@@ -13,8 +13,12 @@ from typing import List
 from fastapi import FastAPI, File, UploadFile, Request, Form, HTTPException, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from supabase import create_client, Client
+
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment
+from openpyxl.worksheet.table import Table, TableStyleInfo
 
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -3638,6 +3642,132 @@ def health_check():
             or None
     }
 
+
+
+# ============================================================
+# REPORTE EXCEL DE AUDITORÍA
+# ============================================================
+
+@app.get("/reports/excel")
+def generar_reporte_excel(request: Request):
+    # El mismo reporte que antes se exportaba como CSV, ahora se genera
+    # en el backend como un archivo Excel real. Solo el administrador
+    # puede descargarlo.
+    obtener_admin_desde_request(request)
+
+    try:
+        respuesta = (
+            supabase_admin
+            .table("auditoria_custodia")
+            .select("*")
+            .order("fecha_solicitud", desc=True)
+            .limit(500)
+            .execute()
+        )
+        registros = respuesta.data or []
+    except Exception as error:
+        print("[REPORT EXCEL ERROR]", error)
+        raise HTTPException(
+            status_code=500,
+            detail="No se pudieron consultar los datos del reporte.",
+        )
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Auditoría"
+
+    encabezados = [
+        "Archivo",
+        "Usuario",
+        "Carpeta",
+        "Estado",
+        "Hash SHA-256",
+        "Fecha",
+    ]
+    sheet.append(encabezados)
+
+    for registro in registros:
+        ruta = str(registro.get("ruta_relativa") or "").replace("\\", "/").strip("/")
+        if registro.get("lote_id") and "/" in ruta:
+            carpeta = ruta.split("/", 1)[0] or "Carpeta"
+        else:
+            carpeta = "Archivo suelto"
+
+        fecha = registro.get("fecha_solicitud") or ""
+        if fecha:
+            try:
+                fecha_excel = datetime.fromisoformat(str(fecha).replace("Z", "+00:00"))
+                # Excel no admite datetimes con zona horaria.
+                if fecha_excel.tzinfo is not None:
+                    fecha_excel = fecha_excel.astimezone(timezone.utc).replace(tzinfo=None)
+            except Exception:
+                fecha_excel = str(fecha)
+        else:
+            fecha_excel = ""
+
+        sheet.append([
+            registro.get("nombre_archivo") or "",
+            registro.get("usuario_solicitante")
+            or registro.get("solicitante_nombre")
+            or "",
+            carpeta,
+            registro.get("estado") or "",
+            registro.get("hash_sha256") or "",
+            fecha_excel,
+        ])
+
+    # Formato básico y tabla nativa de Excel.
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(vertical="center")
+
+    if sheet.max_row > 1:
+        tabla = Table(
+            displayName="TablaAuditoriaDataVault",
+            ref=f"A1:F{sheet.max_row}",
+        )
+        tabla.tableStyleInfo = TableStyleInfo(
+            name="TableStyleMedium2",
+            showFirstColumn=False,
+            showLastColumn=False,
+            showRowStripes=True,
+            showColumnStripes=False,
+        )
+        sheet.add_table(tabla)
+
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = f"A1:F{sheet.max_row}"
+
+    anchos = {
+        "A": 38,
+        "B": 28,
+        "C": 28,
+        "D": 16,
+        "E": 68,
+        "F": 22,
+    }
+    for columna, ancho in anchos.items():
+        sheet.column_dimensions[columna].width = ancho
+
+    for cell in sheet["F"][1:]:
+        if isinstance(cell.value, datetime):
+            cell.number_format = "dd/mm/yyyy hh:mm"
+
+    salida = io.BytesIO()
+    workbook.save(salida)
+    salida.seek(0)
+
+    nombre = datetime.now().strftime("datavault_reporte_auditoria_%Y%m%d_%H%M%S.xlsx")
+
+    return StreamingResponse(
+        salida,
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+        headers={
+            "Content-Disposition": f'attachment; filename="{nombre}"'
+        },
+    )
 
 # ============================================================
 # INFORMACIÓN DEL WEBHOOK
