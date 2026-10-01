@@ -2002,9 +2002,40 @@ def registrar_historial_eliminacion(
         if fila.get("id")
     ]
 
+    objeto_tipo = str((objeto or {}).get("tipo") or "").upper() or "ARCHIVO"
+    nombre_objeto = (
+        (solicitud or {}).get("nombre_objeto")
+        or (objeto or {}).get("nombre")
+        or "Archivo/Carpeta"
+    )
+    ubicacion_anterior = (
+        (solicitud or {}).get("carpeta_origen")
+        or (objeto or {}).get("ubicacion")
+        or "DRIVE PROYECTO"
+    )
+    detalle = {
+        "cantidad_registros": len(filas),
+        "auditoria_ids": auditoria_ids,
+        "resultado_drive": "TRASHED",
+    }
+
+    # La tabla elementos_eliminados ya existía con nombres de columnas de una
+    # versión anterior. Guardamos ambos juegos de campos para mantener
+    # compatibilidad y no perder el historial previo.
     payload = {
+        # Columnas nuevas
         "solicitud_operacion_id": solicitud_id,
-        "objeto_tipo": str((objeto or {}).get("tipo") or "").upper() or None,
+        "objeto_tipo": objeto_tipo,
+        "solicitante_id": solicitante_id,
+        "solicitante_nombre": (solicitud or {}).get("solicitante_nombre"),
+        "solicitante_correo": (solicitud or {}).get("solicitante_correo"),
+        "nombre_objeto": nombre_objeto,
+        "drive_parent_id": str((objeto or {}).get("drive_parent_id") or "") or None,
+        "ubicacion_anterior": ubicacion_anterior,
+        "detalle": detalle,
+        "resuelto_por_ref": str(resuelto_por or "") or None,
+
+        # Columnas comunes
         "auditoria_id": (
             str((objeto or {}).get("auditoria_id"))
             if (objeto or {}).get("auditoria_id")
@@ -2015,30 +2046,20 @@ def registrar_historial_eliminacion(
             if (objeto or {}).get("lote_id")
             else None
         ),
-        "solicitante_id": solicitante_id,
-        "solicitante_nombre": (solicitud or {}).get("solicitante_nombre"),
-        "solicitante_correo": (solicitud or {}).get("solicitante_correo"),
-        "nombre_objeto": (
-            (solicitud or {}).get("nombre_objeto")
-            or (objeto or {}).get("nombre")
-            or "Archivo/Carpeta"
-        ),
         "drive_id": str((objeto or {}).get("drive_id") or "") or None,
-        "drive_parent_id": str((objeto or {}).get("drive_parent_id") or "") or None,
-        "ubicacion_anterior": (
-            (solicitud or {}).get("carpeta_origen")
-            or (objeto or {}).get("ubicacion")
-            or "DRIVE PROYECTO"
-        ),
-        "eliminado_por": str(resuelto_por or "") or None,
         "fecha_eliminacion": ahora_iso(),
-        "estado": "EN_PAPELERA",
-        "detalle": {
-            "cantidad_registros": len(filas),
-            "auditoria_ids": auditoria_ids,
-            "resultado_drive": "TRASHED",
-        },
+        "estado": "ELIMINADO",
         "updated_at": ahora_iso(),
+
+        # Compatibilidad con la estructura antigua ya existente en Supabase
+        "usuario_id": solicitante_id,
+        "usuario_nombre": (solicitud or {}).get("solicitante_nombre"),
+        "usuario_correo": (solicitud or {}).get("solicitante_correo"),
+        "solicitud_id": solicitud_id,
+        "elemento_tipo": objeto_tipo,
+        "nombre": nombre_objeto,
+        "ruta_anterior": ubicacion_anterior,
+        "metadata": detalle,
     }
 
     try:
