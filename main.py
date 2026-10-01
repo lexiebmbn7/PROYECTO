@@ -75,7 +75,7 @@ TELEGRAM_WEBHOOK_SECRET = os.getenv(
 
 AUTHORIZED_CHAT_IDS_RAW = os.getenv(
     "AUTHORIZED_CHAT_IDS",
-    "8893414961,6718944855"
+    ""
 ).strip()
 
 
