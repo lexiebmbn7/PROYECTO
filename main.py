@@ -2278,7 +2278,7 @@ def mostrar_panel_principal(chat_id, message_id=None):
 
     return telegram_request("sendMessage", payload)
 
-def mostrar_estado_panel(chat_id, message_id):
+def mostrar_estado_panel(chat_id, message_id=None):
     resumen = obtener_resumen_panel()
 
     texto = (
@@ -2292,23 +2292,25 @@ def mostrar_estado_panel(chat_id, message_id):
         f"🔴 Documentos rechazados: {resumen['rechazados']}"
     )
 
-    return telegram_request(
-        "editMessageText",
-        {
-            "chat_id": chat_id,
-            "message_id": message_id,
-            "text": texto,
-            "reply_markup": {
-                "inline_keyboard": [
-                    [
-                        {"text": "👥 Usuarios", "callback_data": "panel:usuarios"},
-                        {"text": "🔄 Actualizar", "callback_data": "panel:estado"},
-                    ],
-                    [{"text": "🏠 Panel", "callback_data": "panel:inicio"}],
-                ]
-            },
+    payload = {
+        "chat_id": chat_id,
+        "text": texto,
+        "reply_markup": {
+            "inline_keyboard": [
+                [
+                    {"text": "👥 Usuarios", "callback_data": "panel:usuarios"},
+                    {"text": "🔄 Actualizar", "callback_data": "panel:estado"},
+                ],
+                [{"text": "🏠 Panel", "callback_data": "panel:inicio"}],
+            ]
         },
-    )
+    }
+
+    if message_id:
+        payload["message_id"] = message_id
+        return telegram_request("editMessageText", payload)
+
+    return telegram_request("sendMessage", payload)
 
 # ============================================================
 # MENÚ TELEGRAM - USUARIOS -> ARCHIVOS -> DECISIÓN
@@ -2484,7 +2486,7 @@ def extraer_message_id_telegram(resultado):
         return None
 
 
-def mostrar_menu_usuarios(chat_id, message_id=None):
+def mostrar_menu_usuarios(chat_id, message_id=None, forzar_nuevo=False):
     """Bandeja Telegram unificada y agrupada por usuario."""
     documentos = obtener_documentos_pendientes()
     operaciones = obtener_operaciones_pendientes()
@@ -2589,12 +2591,17 @@ def mostrar_menu_usuarios(chat_id, message_id=None):
         "reply_markup": {"inline_keyboard": botones},
     }
 
-    # Si el callback trae un message_id, ese mismo mensaje pasa a ser la
-    # bandeja activa. Si no lo trae, reutilizamos la última bandeja conocida.
-    objetivo_message_id = (
-        message_id
-        or obtener_message_id_bandeja_telegram(chat_id)
-    )
+    # Si la acción viene de un botón inline, editamos ese mismo mensaje.
+    # Para comandos o el teclado antiguo podemos forzar un mensaje nuevo para
+    # que el usuario vea inmediatamente la respuesta, en vez de editar una
+    # bandeja vieja que puede estar más arriba en el chat.
+    objetivo_message_id = None
+
+    if not forzar_nuevo:
+        objetivo_message_id = (
+            message_id
+            or obtener_message_id_bandeja_telegram(chat_id)
+        )
 
     if objetivo_message_id:
         payload_edicion = dict(payload)
@@ -8029,7 +8036,8 @@ async def recibir_respuesta_telegram(
         ):
 
             mostrar_menu_usuarios(
-                chat_id
+                chat_id,
+                forzar_nuevo=True
             )
 
 
@@ -8039,23 +8047,24 @@ async def recibir_respuesta_telegram(
             }
 
 
-        if texto in (
-            "👥 Usuarios",
-            "🔄 Actualizar"
-        ):
+        # Compatibilidad con la barra/ReplyKeyboard de versiones anteriores.
+        # Esos botones envían texto normal, no callback_query. Forzamos un
+        # mensaje nuevo para que la respuesta sea visible inmediatamente.
+        if texto == "👥 Usuarios":
 
             mostrar_menu_usuarios(
-                chat_id
+                chat_id,
+                forzar_nuevo=True
             )
 
 
             return {
                 "status":
-                    "menu_usuarios"
+                    "menu_usuarios_legacy"
             }
 
 
-        if texto == "📊 Estado":
+        if texto == "🔄 Actualizar":
 
             mostrar_panel_principal(
                 chat_id
@@ -8064,7 +8073,20 @@ async def recibir_respuesta_telegram(
 
             return {
                 "status":
-                    "panel_principal"
+                    "panel_actualizado_legacy"
+            }
+
+
+        if texto == "📊 Estado":
+
+            mostrar_estado_panel(
+                chat_id
+            )
+
+
+            return {
+                "status":
+                    "panel_estado_legacy"
             }
 
 
@@ -8231,11 +8253,18 @@ async def recibir_respuesta_telegram(
                 "answerCallbackQuery",
                 {
                     "callback_query_id": callback_id,
-                    "text": "Bandeja principal actualizada.",
+                    "text": "Abriendo bandeja...",
                 },
             )
-            mostrar_menu_usuarios(chat_id)
-            return {"status": "tray_refreshed"}
+
+            # Convertimos la alerta tocada en la bandeja. Antes se actualizaba
+            # una bandeja persistente vieja y parecía que el botón no hacía nada.
+            mostrar_menu_usuarios(
+                chat_id,
+                message_id
+            )
+
+            return {"status": "tray_opened"}
 
 
         # ----------------------------------------------------
@@ -8253,7 +8282,12 @@ async def recibir_respuesta_telegram(
 
                 {
                     "callback_query_id":
-                        callback_id
+                        callback_id,
+                    "text": (
+                        "Panel actualizado."
+                        if action_data == "panel:actualizar"
+                        else "Panel principal."
+                    )
                 },
 
             )
@@ -8279,7 +8313,9 @@ async def recibir_respuesta_telegram(
 
                 {
                     "callback_query_id":
-                        callback_id
+                        callback_id,
+                    "text":
+                        "Abriendo solicitudes por usuario..."
                 },
 
             )
@@ -8335,7 +8371,9 @@ async def recibir_respuesta_telegram(
 
                 {
                     "callback_query_id":
-                        callback_id
+                        callback_id,
+                    "text":
+                        "Bandeja actualizada."
                 },
 
             )
