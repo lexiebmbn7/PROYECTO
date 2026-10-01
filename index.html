@@ -8037,17 +8037,29 @@ window.addEventListener('DOMContentLoaded',()=>{
   function selectActionName(name){return name==='upload'?'dvSelectUploadCurrentFolder':'dvSelectMoveCurrentFolder';}
   function retryActionName(name){return name==='upload'?'dvRetryUploadDriveFolder':'dvRetryMoveDriveFolder';}
 
+  function normalizeFolderId(value,{allowRoot=true}={}){
+    const id=String(value??'').trim();
+    if(id)return id;
+    return allowRoot?'root':'';
+  }
+
+  function browseDataAttrs(name,folderId,kind='folder'){
+    const id=normalizeFolderId(folderId,{allowRoot:kind==='root'});
+    return `data-dv-browse-context="${esc(name)}" data-dv-browse-kind="${esc(kind)}" data-dv-folder-id="${esc(id)}"`;
+  }
+
   function breadcrumbHtml(name,data){
     const crumbs=Array.isArray(data?.breadcrumb)?data.breadcrumb.filter(Boolean):[];
-    const action=browseActionName(name);
     if(!crumbs.length){
-      return `<div class="dv-browse-breadcrumb"><button type="button" onclick="${action}('root')">Mi unidad</button></div>`;
+      return `<div class="dv-browse-breadcrumb"><button type="button" ${browseDataAttrs(name,'root','root')}>Mi unidad</button></div>`;
     }
     const html=crumbs.map((item,index)=>{
-      const id=String(item?.id||'root');
+      const rawId=String(item?.id??'').trim();
+      const id=rawId || (index===0?'root':'');
       const label=item?.name||(index===0?'Mi unidad':`Nivel ${index+1}`);
       const sep=index?'<i class="fa-solid fa-chevron-right"></i>':'';
-      return `${sep}<button type="button" onclick="${action}('${esc(id)}')">${esc(label)}</button>`;
+      if(!id)return `${sep}<span class="text-slate-400">${esc(label)}</span>`;
+      return `${sep}<button type="button" ${browseDataAttrs(name,id,index===0&&id==='root'?'root':'breadcrumb')}>${esc(label)}</button>`;
     }).join('');
     return `<div class="dv-browse-breadcrumb">${html}</div>`;
   }
@@ -8104,8 +8116,13 @@ window.addEventListener('DOMContentLoaded',()=>{
 
     const currentCard=`<div class="dv-browse-current"><div class="dv-browse-current-main"><div class="dv-browse-current-icon"><i class="fa-solid fa-folder-open"></i></div><div class="dv-browse-current-text"><b>${esc(current?.name||'Mi unidad')}</b><small>${esc(visualPath(data))}</small></div></div><div class="flex items-center gap-2">${isSelected?'<span class="dv-browse-selected-badge"><i class="fa-solid fa-circle-check"></i>Destino</span>':''}${selectButton}</div></div>`;
 
-    const folderRows=folders.length
-      ? `<div class="dv-browse-folder-list">${folders.map(folder=>`<button type="button" class="dv-browse-folder" onclick="${browseActionName(name)}('${esc(String(folder?.id||''))}')"><i class="fa-solid fa-folder"></i><span>${esc(folder?.name||'Carpeta')}</span>${folder?.modifiedTime?`<small>${esc(new Date(folder.modifiedTime).toLocaleDateString('es-PE'))}</small>`:''}<i class="fa-solid fa-chevron-right text-slate-300 text-[8px]"></i></button>`).join('')}</div>`
+    const validFolders=folders.filter(folder=>normalizeFolderId(folder?.id,{allowRoot:false}));
+    const missingIdCount=folders.length-validFolders.length;
+    if(missingIdCount){
+      console.warn('[DRIVE BROWSE] Se ignoraron carpetas sin id:',missingIdCount);
+    }
+    const folderRows=validFolders.length
+      ? `<div class="dv-browse-folder-list">${validFolders.map(folder=>`<button type="button" class="dv-browse-folder" ${browseDataAttrs(name,folder.id,'folder')}><i class="fa-solid fa-folder"></i><span>${esc(folder?.name||'Carpeta')}</span>${folder?.modifiedTime?`<small>${esc(new Date(folder.modifiedTime).toLocaleDateString('es-PE'))}</small>`:''}<i class="fa-solid fa-chevron-right text-slate-300 text-[8px]"></i></button>`).join('')}</div>`
       : `<div class="dv-browse-empty"><i class="fa-solid fa-folder-open mr-1"></i>${q?'No hay carpetas que coincidan en este nivel.':'Esta carpeta no contiene subcarpetas.'}</div>`;
 
     list.innerHTML=`<div class="dv-browse-shell">${breadcrumbHtml(name,data)}${currentCard}${folderRows}</div>`;
@@ -8113,7 +8130,20 @@ window.addEventListener('DOMContentLoaded',()=>{
 
   async function load(name,folderId,force=false){
     const ctx=context(name);if(!ctx)return;
-    const requested=String(folderId||ctx.folderId||'root');
+    const requested=normalizeFolderId(folderId??ctx.folderId,{allowRoot:true});
+    if(!requested)return;
+
+    // Evita que dos handlers disparen la misma navegación al mismo tiempo.
+    if(!force && ctx.loading && String(ctx.folderId||'')===requested)return;
+
+    // Si ya estamos mostrando exactamente este nivel, no repetir la consulta
+    // salvo que el usuario haya pulsado Actualizar/Reintentar.
+    const visibleId=normalizeFolderId(ctx.data?.current?.id,{allowRoot:false});
+    if(!force && ctx.data && String(ctx.folderId||'')===requested && visibleId===requested){
+      render(name);
+      return;
+    }
+
     const seq=++ctx.seq;
     ctx.folderId=requested;
     ctx.loading=true;ctx.error=null;
@@ -8122,7 +8152,7 @@ window.addEventListener('DOMContentLoaded',()=>{
       const data=await fetchFolder(requested,false);
       if(seq!==ctx.seq)return;
       ctx.data=data;
-      ctx.folderId=String(data?.current?.id||requested||'root');
+      ctx.folderId=normalizeFolderId(data?.current?.id??requested,{allowRoot:true});
     }catch(error){
       if(seq!==ctx.seq)return;
       ctx.error=error;
@@ -8152,8 +8182,10 @@ window.addEventListener('DOMContentLoaded',()=>{
   }
 
   window.dvBrowseUploadFolder=function(folderId){
+    const id=normalizeFolderId(folderId,{allowRoot:false});
+    if(!id){console.warn('[DRIVE BROWSE] Carpeta de subida sin id; navegación cancelada.');return;}
     const search=document.getElementById('dvUploadDestinationSearch');if(search)search.value='';
-    return load('upload',folderId||'root');
+    return load('upload',id);
   };
   window.dvRetryUploadDriveFolder=function(){return load('upload',contexts.upload.folderId||'root',true);};
   window.dvFilterUploadDestinations=function(){render('upload');};
@@ -8194,8 +8226,10 @@ window.addEventListener('DOMContentLoaded',()=>{
   try{dvResetUploadDestination=window.dvResetUploadDestination;}catch(_){}
 
   window.dvBrowseMoveFolder=function(folderId){
+    const id=normalizeFolderId(folderId,{allowRoot:false});
+    if(!id){console.warn('[DRIVE BROWSE] Carpeta de movimiento sin id; navegación cancelada.');return;}
     const search=document.getElementById('dvMoveSearch');if(search)search.value='';
-    return load('move',folderId||'root');
+    return load('move',id);
   };
   window.dvRetryMoveDriveFolder=function(){return load('move',contexts.move.folderId||'root',true);};
   window.dvFilterMoveFolders=function(){render('move');};
@@ -8250,6 +8284,28 @@ window.addEventListener('DOMContentLoaded',()=>{
       if(btn){btn.disabled=!moveSelected?.id;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i>Solicitar movimiento';}
     }
   };
+
+  function handleBrowseClick(event){
+    const button=event.target.closest?.('[data-dv-browse-context][data-dv-folder-id]');
+    if(!button)return;
+    const list=button.closest?.('#dvUploadDestinationList,#dvMoveFolderList');
+    if(!list)return;
+    const name=button.dataset.dvBrowseContext;
+    const kind=button.dataset.dvBrowseKind||'folder';
+    const allowRoot=kind==='root';
+    const id=normalizeFolderId(button.dataset.dvFolderId,{allowRoot});
+    if(!id){
+      console.warn('[DRIVE BROWSE] Click ignorado: carpeta sin id.',button);
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const search=document.getElementById(name==='upload'?'dvUploadDestinationSearch':'dvMoveSearch');
+    if(search)search.value='';
+    load(name,id);
+  }
+
+  document.addEventListener('click',handleBrowseClick);
 
   // API pública para drag & drop y futuras vistas. No expone ni maneja la caché interna.
   window.DVDriveBrowser={
