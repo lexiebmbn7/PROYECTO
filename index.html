@@ -2105,6 +2105,574 @@ body {
 #view-cola.subordinate-requests .data-table th:nth-child(7),
 #view-cola.subordinate-requests .data-table td:nth-child(7){width:8%}
 </style>
+
+
+<!-- ============================================================
+     ESTILOS COMPLEMENTARIOS DE LA INTERFAZ
+     (reubicados desde el body; contenido y orden preservados)
+============================================================ -->
+<style id="responsive-final-fix">
+/* =========================================================
+   RESPONSIVE FINAL
+   - Menú hamburguesa a la izquierda en tablet/móvil
+   - Sidebar lateral deslizante en pantallas pequeñas
+   - Nombre de usuario y bienvenida legibles
+   ========================================================= */
+.mobile-menu-btn{
+  display:none;align-items:center;justify-content:center;flex:0 0 42px;width:42px;height:42px;
+  border:1px solid rgba(255,255,255,.22);border-radius:8px;background:transparent;color:#fff;
+  cursor:pointer;font-size:18px;
+}
+.mobile-menu-btn:hover{background:rgba(255,255,255,.08)}
+#dashWelcome{font-size:1em!important;font-weight:800!important;display:inline}
+#topbar #userBadge{font-size:14px!important;font-weight:700!important;max-width:180px!important}
+#topbar #userRoleBadge{font-size:11px!important}
+
+@media (max-width:1100px){
+  #topbar .topbar-nav{gap:2px!important}
+  #topbar .top-nav-item{padding-left:10px!important;padding-right:10px!important}
+}
+
+@media (max-width:900px){
+  #topbar.app-topbar{
+    height:64px!important;min-height:64px!important;padding:0 14px!important;gap:10px!important;
+    flex-wrap:nowrap!important;
+  }
+  .mobile-menu-btn{display:flex!important}
+  #topbar .topbar-brand{
+    min-width:0!important;flex:1 1 auto!important;width:auto!important;padding:4px 0!important;
+  }
+  #topbar .topbar-title{font-size:16px!important}
+  #topbar .topbar-subtitle{font-size:9px!important}
+  #topbar .topbar-nav{display:none!important}
+  #topbar .topbar-actions{margin-left:auto!important;gap:6px!important}
+  #topbar .system-status{display:none!important}
+  #topbar .top-icon-btn{width:38px!important;height:38px!important}
+  #topbar .profile-trigger{padding:3px!important}
+  #topbar .profile-trigger .hidden.xl\:block{display:flex!important;flex-direction:column!important;min-width:0!important}
+  #topbar #userBadge{font-size:13px!important;max-width:110px!important}
+  #topbar #userRoleBadge{font-size:10px!important}
+
+  #appBody{min-height:calc(100vh - 64px)!important;display:block!important}
+  #sidebar{
+    display:flex!important;position:fixed!important;left:0!important;top:64px!important;bottom:0!important;
+    width:min(290px,84vw)!important;height:calc(100vh - 64px)!important;
+    transform:translateX(-105%)!important;transition:transform .22s ease!important;
+    z-index:100!important;overflow-y:auto!important;
+  }
+  #sidebar.mobile-open{transform:translateX(0)!important}
+  .sidebar-overlay{
+    display:none!important;position:fixed!important;inset:0!important;top:64px!important;
+    background:rgba(8,24,36,.52)!important;z-index:90!important;
+  }
+  .sidebar-overlay.show{display:block!important}
+  #mainArea{width:100%!important;min-width:0!important}
+  #mainArea main{padding:20px 16px 30px!important;max-width:none!important}
+  .dashboard-hero{
+    min-height:0!important;padding:4px 0 18px!important;display:block!important;
+  }
+  .dashboard-hero h2{font-size:clamp(24px,5vw,31px)!important;line-height:1.2!important}
+  #dashWelcome{font-size:1em!important}
+  .dashboard-hero p{font-size:12px!important}
+  .page-title{flex-wrap:wrap!important;align-items:flex-start!important}
+  .page-title h2{font-size:23px!important}
+  .file-manager-shell{grid-template-columns:1fr!important;min-height:auto!important}
+  .file-explorer-panel{border-right:0!important;border-bottom:1px solid #e4eaed!important}
+  .file-security-panel{border-left:0!important;border-top:1px solid #e4eaed!important}
+  .table-responsive,.file-table-wrap{overflow-x:auto!important;-webkit-overflow-scrolling:touch}
+  #appSection .data-table,#appSection .rule-table{min-width:650px}
+}
+
+@media (max-width:640px){
+  #topbar.app-topbar{padding:0 10px!important;gap:8px!important}
+  .mobile-menu-btn{flex-basis:40px;width:40px;height:40px;font-size:17px}
+  #topbar .topbar-title{font-size:15px!important}
+  #topbar .topbar-subtitle{display:none!important}
+  #topbar .top-icon-btn{width:36px!important;height:36px!important}
+  #topbar .top-avatar{width:34px!important;height:34px!important}
+  #topbar .profile-trigger .hidden.xl\:block{display:none!important}
+  #topbar .profile-trigger .fa-chevron-down{display:none!important}
+  #topbar #userBadge{font-size:12px!important}
+  #mainArea main{padding:16px 12px 26px!important}
+  .dashboard-hero h2{font-size:clamp(22px,7vw,28px)!important}
+  .dashboard-hero>div:first-child>p:first-child{font-size:10px!important}
+  .dashboard-hero p{font-size:11px!important}
+  .grid.grid-cols-2.xl\:grid-cols-4{grid-template-columns:1fr!important}
+  .dashboard-card{width:100%!important;min-width:0!important}
+  .section-head{flex-wrap:wrap!important}
+  .primary-btn,.secondary-btn{max-width:100%;white-space:normal!important}
+  .filter-bar{flex-wrap:wrap!important}
+  .input-modern{max-width:100%!important}
+  #loginSection>div.relative{width:100%!important}
+}
+
+@media (min-width:901px){
+  #sidebar{display:none!important}
+}
+
+/* ===== NAVBAR AUTO-FIT: sandwich solo cuando ya no caben los botones ===== */
+.mobile-menu-btn{
+  display:none;
+  align-items:center;
+  justify-content:center;
+  flex:0 0 42px;
+  width:42px;
+  height:42px;
+  border:1px solid rgba(255,255,255,.12);
+  border-radius:10px;
+  background:rgba(255,255,255,.06);
+  color:#fff;
+  cursor:pointer;
+}
+#topbar.compact-nav .mobile-menu-btn{display:flex!important}
+#topbar.compact-nav .topbar-nav{display:none!important}
+
+/* Si el sandwich aparece por falta de espacio, el sidebar debe funcionar
+   también en escritorio/tablet, no solamente por debajo de 900px. */
+#topbar.compact-nav ~ #appBody #sidebar{
+  display:flex!important;
+  position:fixed!important;
+  z-index:60!important;
+  left:0!important;
+  top:72px!important;
+  bottom:0!important;
+  width:min(290px,84vw)!important;
+  height:calc(100vh - 72px)!important;
+  transform:translateX(-105%)!important;
+  transition:transform .22s ease!important;
+  overflow-y:auto!important;
+}
+#topbar.compact-nav ~ #appBody #sidebar.mobile-open{transform:translateX(0)!important}
+#topbar.compact-nav ~ #appBody .sidebar-overlay{
+  display:none;
+  position:fixed!important;
+  z-index:50!important;
+  inset:72px 0 0 0!important;
+  background:rgba(6,20,30,.45)!important;
+}
+#topbar.compact-nav ~ #appBody .sidebar-overlay.show{display:block!important}
+
+@media (min-width:901px){
+  #topbar.compact-nav.app-topbar{
+    height:72px!important;
+    min-height:72px!important;
+    flex-wrap:nowrap!important;
+    padding:0 18px!important;
+    gap:12px!important;
+  }
+  #topbar.compact-nav .topbar-brand{
+    min-width:205px!important;
+    flex:0 0 205px!important;
+  }
+  #topbar.compact-nav .topbar-actions{
+    margin-left:auto!important;
+    flex:0 0 auto!important;
+  }
+}
+
+@media (max-width:900px){
+  #topbar.app-topbar{height:64px!important;min-height:64px!important;flex-wrap:nowrap!important;padding:0 12px!important}
+  #topbar .mobile-menu-btn{display:flex!important}
+  #topbar .topbar-nav{display:none!important}
+  #topbar .topbar-brand{min-width:0!important;flex:1 1 auto!important}
+  #topbar.compact-nav ~ #appBody #sidebar{top:64px!important;height:calc(100vh - 64px)!important}
+  #topbar.compact-nav ~ #appBody .sidebar-overlay{inset:64px 0 0 0!important}
+}
+</style>
+
+<style id="responsive-welcome-fix">
+/* Corrección definitiva del saludo en pantallas pequeñas */
+#view-inicio .dashboard-hero h2,
+#view-inicio .dashboard-hero h2 #dashWelcome{
+  font-family:Inter,"Segoe UI",system-ui,-apple-system,sans-serif !important;
+  font-size:31px !important;
+  font-weight:800 !important;
+  line-height:1.15 !important;
+  letter-spacing:-0.025em !important;
+  vertical-align:baseline !important;
+}
+#view-inicio .dashboard-hero h2 #dashWelcome{
+  display:inline !important;
+  margin:0 !important;
+  padding:0 !important;
+  color:inherit !important;
+}
+@media (max-width:900px){
+  #view-inicio .dashboard-hero h2,
+  #view-inicio .dashboard-hero h2 #dashWelcome{
+    font-size:clamp(24px,5vw,31px) !important;
+    line-height:1.15 !important;
+  }
+}
+@media (max-width:640px){
+  #view-inicio .dashboard-hero h2,
+  #view-inicio .dashboard-hero h2 #dashWelcome{
+    font-size:clamp(22px,7vw,28px) !important;
+    line-height:1.15 !important;
+  }
+}
+</style>
+
+<style id="datavault-role-v3-css">
+.role-hidden{display:none!important}
+.admin-user-name{font-weight:700;color:#1f2b31}
+.admin-user-mail{font-size:10px;color:#78909c}
+.admin-user-avatar{width:34px;height:34px;border-radius:50%;background:#eaf1f4;color:#1f2b31;display:flex;align-items:center;justify-content:center;font-weight:800}
+.admin-filter-wrap{display:flex;align-items:center;gap:8px;margin-left:auto}
+.admin-filter-wrap select{min-width:210px}
+.role-readonly-note{font-size:11px;color:#64748b;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px}
+</style>
+
+<style id="datavault-topbar-spacing-fix">
+/* ===== BARRA SUPERIOR: separación limpia entre módulos ===== */
+#topbar .topbar-nav{
+  display:flex !important;
+  align-items:center !important;
+  justify-content:flex-start !important;
+  flex:1 1 auto !important;
+  min-width:0 !important;
+  gap:10px !important;
+  margin-left:8px !important;
+  overflow:visible !important;
+  white-space:nowrap !important;
+}
+#topbar .top-nav-item{
+  flex:0 0 auto !important;
+  width:auto !important;
+  min-width:max-content !important;
+  height:44px !important;
+  padding:0 14px !important;
+  gap:7px !important;
+  font-size:13px !important;
+  line-height:1 !important;
+  letter-spacing:0 !important;
+  white-space:nowrap !important;
+}
+#topbar .top-nav-item + .top-nav-item{
+  margin-left:0 !important;
+}
+#topbar .topbar-actions{
+  flex:0 0 auto !important;
+  margin-left:auto !important;
+}
+
+/* En anchos intermedios se compacta un poco antes de pasar al menú hamburguesa. */
+@media (min-width:901px) and (max-width:1450px){
+  #topbar.app-topbar{gap:16px !important;padding-left:20px !important;padding-right:20px !important;}
+  #topbar .topbar-brand{min-width:180px !important;flex-basis:180px !important;}
+  #topbar .topbar-nav{gap:6px !important;margin-left:2px !important;}
+  #topbar .top-nav-item{padding:0 11px !important;font-size:12px !important;gap:6px !important;}
+  #topbar .top-nav-item i{font-size:12px !important;}
+}
+</style>
+
+<style id="datavault-topbar-role-final-fix">
+/* FIX DEFINITIVO DEL NAVBAR POR ROL: sin solapes ni botones duplicados */
+#topbar .topbar-brand{
+  flex:0 0 auto !important;
+}
+#topbar .topbar-nav{
+  display:flex !important;
+  flex:1 1 auto !important;
+  min-width:0 !important;
+  align-items:center !important;
+  justify-content:flex-start !important;
+  gap:8px !important;
+  overflow:hidden !important;
+  white-space:nowrap !important;
+  margin-left:6px !important;
+}
+#topbar .topbar-nav > .top-nav-item{
+  display:inline-flex !important;
+  flex:0 0 auto !important;
+  flex-shrink:0 !important;
+  width:auto !important;
+  min-width:0 !important;
+  max-width:none !important;
+  height:42px !important;
+  padding:0 12px !important;
+  align-items:center !important;
+  justify-content:center !important;
+  gap:6px !important;
+  font-size:12px !important;
+  line-height:1 !important;
+  white-space:nowrap !important;
+  overflow:visible !important;
+  text-overflow:clip !important;
+}
+#topbar .topbar-nav > .top-nav-item > span{
+  display:inline-block !important;
+  white-space:nowrap !important;
+  overflow:visible !important;
+  width:auto !important;
+  max-width:none !important;
+}
+#topbar .topbar-nav > .role-hidden,
+#topbar .topbar-nav > .hidden{
+  display:none !important;
+}
+#topbar .topbar-actions{
+  flex:0 0 auto !important;
+  margin-left:auto !important;
+}
+
+/* Cuando no entra con comodidad, se usa menú hamburguesa; nunca se aplasta el texto. */
+#topbar.dv-role-compact .mobile-menu-btn{display:flex !important;}
+#topbar.dv-role-compact .topbar-nav{display:none !important;}
+
+@media (min-width:901px) and (max-width:1200px){
+  #topbar.app-topbar{padding-left:14px !important;padding-right:14px !important;gap:10px !important;}
+  #topbar .topbar-brand{min-width:185px !important;}
+  #topbar .topbar-nav{gap:5px !important;margin-left:0 !important;}
+  #topbar .topbar-nav > .top-nav-item{padding:0 10px !important;font-size:11px !important;}
+}
+</style>
+
+<style id="datavault-operations-v1-css">
+.dv-file-operation-bar{display:flex;align-items:center;gap:7px;flex-wrap:wrap;justify-content:flex-end}
+.dv-file-operation-bar .dv-delete-operation{color:#b42318;border-color:#fecaca;background:#fff7f7}
+.dv-file-operation-bar .dv-delete-operation:hover{background:#feecec}
+.dv-upload-destination-panel{margin-left:16px;margin-right:16px;border:1px solid #dbe4ea;background:#fbfdfe;border-radius:11px;padding:12px}
+.dv-upload-destination-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px}
+.dv-upload-destination-head b{display:block;font-size:11px;color:#294252}
+.dv-upload-destination-head span:not(.dv-upload-required){display:block;font-size:9px;color:#83939c;margin-top:3px;line-height:1.4}
+.dv-upload-required{font-size:8px;font-weight:800;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;border-radius:999px;padding:4px 7px;white-space:nowrap}
+.dv-source-list{border:1px solid #dbe4ea;border-radius:10px;max-height:330px;overflow:auto;background:#fbfdfe;padding:5px}
+.dv-source-option{width:100%;border:0;background:transparent;border-radius:8px;padding:10px;display:flex;align-items:center;gap:10px;text-align:left;cursor:pointer}
+.dv-source-option:hover{background:#eef4f7}
+.dv-source-option:disabled{opacity:.5;cursor:not-allowed;background:#f8fafc}
+.dv-source-option .source-icon{width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:8px;background:#fff;border:1px solid #e2e8f0;flex:none}
+.dv-source-option .source-main{min-width:0;flex:1}
+.dv-source-option .source-name{display:block;font-size:10px;font-weight:800;color:#334e5f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dv-source-option .source-meta{display:block;font-size:8px;color:#94a3b8;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dv-source-option .source-note{font-size:8px;font-weight:800;color:#a16207;white-space:nowrap}
+#dvSourceOperationModal{position:fixed;inset:0;z-index:9998;background:rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center;padding:18px}
+#dvSourceOperationModal.dv-hidden{display:none!important}
+.dv-op-actions{display:flex;gap:6px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
+.dv-op-btn{border:1px solid #d8e1e6;background:#fff;color:#385264;border-radius:7px;padding:6px 9px;font-size:9px;font-weight:700;white-space:nowrap;cursor:pointer}
+.dv-op-btn:hover{background:#f4f8fa;border-color:#b8c8d1}
+.dv-op-btn.delete{color:#b42318;border-color:#fecaca;background:#fff7f7}
+.dv-op-btn.delete:hover{background:#feecec}
+.dv-op-btn:disabled{opacity:.45;cursor:not-allowed}
+.dv-op-legacy{font-size:8px;color:#94a3b8;white-space:nowrap}
+#dvOperationModal{position:fixed;inset:0;z-index:9999;background:rgba(8,22,32,.5);display:flex;align-items:center;justify-content:center;padding:18px}
+#dvOperationModal.dv-hidden{display:none!important}
+.dv-op-modal-card{width:min(520px,96vw);background:#fff;border-radius:15px;box-shadow:0 24px 70px rgba(15,23,42,.25);border:1px solid #e2e8f0;overflow:hidden}
+.dv-op-modal-head{padding:18px 20px;border-bottom:1px solid #edf1f4;display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.dv-op-modal-body{padding:20px}
+.dv-op-toast{position:fixed;right:22px;bottom:22px;z-index:10000;background:#173647;color:#fff;padding:11px 14px;border-radius:10px;box-shadow:0 12px 30px rgba(15,23,42,.25);font-size:12px;font-weight:700;max-width:360px}
+#dvUserCreateModal{position:fixed;inset:0;z-index:10001;background:rgba(8,22,32,.5);display:flex;align-items:center;justify-content:center;padding:18px}
+#dvUserCreateModal.dv-hidden{display:none!important}
+.dv-user-modal-card{width:min(520px,96vw);background:#fff;border-radius:15px;box-shadow:0 24px 70px rgba(15,23,42,.25);border:1px solid #e2e8f0;overflow:hidden}
+.dv-user-modal-head{padding:18px 20px;border-bottom:1px solid #edf1f4;display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.dv-user-modal-body{padding:20px}.dv-user-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.dv-user-field{display:flex;flex-direction:column;gap:6px}.dv-user-field.full{grid-column:1/-1}.dv-user-help{font-size:9px;color:#8a9cab;line-height:1.4}.dv-user-error{font-size:10px;color:#b42318;background:#fff5f5;border:1px solid #fecaca;border-radius:8px;padding:9px 10px}.dv-user-success{font-size:10px;color:#067647;background:#effcf6;border:1px solid #abefc6;border-radius:8px;padding:9px 10px}
+.dv-folder-search{position:relative}.dv-folder-search i{position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:11px;color:#8da0ae;pointer-events:none}.dv-folder-search input{padding-left:34px}
+.dv-folder-tree{border:1px solid #dbe4ea;border-radius:10px;max-height:290px;overflow:auto;background:#fbfdfe;padding:5px}
+.dv-folder-option{width:100%;display:flex;align-items:center;gap:9px;text-align:left;border:0;background:transparent;border-radius:7px;padding:8px 9px;color:#304958;cursor:pointer;font-size:10px;transition:.15s ease}.dv-folder-option:hover{background:#edf5f8}.dv-folder-option.selected{background:#dff1f7;color:#0f516d;font-weight:800}.dv-folder-option.disabled{opacity:.42;cursor:not-allowed;background:transparent}.dv-folder-option.disabled:hover{background:transparent}.dv-folder-option .folder-main{min-width:0;flex:1}.dv-folder-option .folder-name{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dv-folder-option .folder-path{font-size:8px;color:#899aa6;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dv-folder-option .folder-note{font-size:8px;color:#94a3b8;white-space:nowrap}
+.dv-move-selection{border:1px solid #dbe4ea;background:#f8fbfc;border-radius:9px;padding:10px 12px;font-size:10px;color:#526b7a;line-height:1.45}.dv-move-selection strong{color:#173647}.dv-op-pending{display:inline-flex;align-items:center;gap:5px;border-radius:999px;background:#fff7e8;color:#a15c00;border:1px solid #f7dca6;padding:5px 8px;font-size:8px;font-weight:800;white-space:nowrap}
+@media(max-width:640px){.dv-user-form-grid{grid-template-columns:1fr}.dv-user-field.full{grid-column:auto}}
+@media(max-width:900px){.dv-op-actions{justify-content:flex-start}.dv-op-btn{font-size:10px}}
+</style>
+
+<style id="datavault-decision-modal-v2">
+/* =========================================================
+   MODAL DATAVAULT · APROBAR / RECHAZAR
+   Reemplaza los confirm()/alert() del navegador por una
+   interfaz centrada y consistente con el sistema.
+   ========================================================= */
+body.dv-modal-open{overflow:hidden!important}
+
+#dvDecisionModal{
+  position:fixed;
+  inset:0;
+  z-index:100000;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:24px;
+  background:rgba(13,28,39,.52);
+  backdrop-filter:blur(5px);
+  -webkit-backdrop-filter:blur(5px);
+  opacity:1;
+  visibility:visible;
+  transition:opacity .16s ease,visibility .16s ease;
+}
+
+#dvDecisionModal.dv-hidden{
+  opacity:0;
+  visibility:hidden;
+  pointer-events:none;
+}
+
+.dv-decision-card{
+  width:min(520px,calc(100vw - 32px));
+  max-height:calc(100vh - 48px);
+  overflow:auto;
+  background:#fff;
+  border:1px solid #e2e8f0;
+  border-radius:20px;
+  box-shadow:0 28px 85px rgba(15,23,42,.30);
+  transform:translateY(0) scale(1);
+  transition:transform .18s ease,opacity .18s ease;
+}
+
+#dvDecisionModal.dv-hidden .dv-decision-card{
+  transform:translateY(12px) scale(.975);
+  opacity:0;
+}
+
+.dv-decision-top{
+  padding:24px 24px 18px;
+  display:flex;
+  align-items:flex-start;
+  gap:15px;
+}
+
+.dv-decision-icon{
+  width:48px;
+  height:48px;
+  min-width:48px;
+  border-radius:14px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:18px;
+  border:1px solid transparent;
+}
+
+.dv-decision-icon.approve,
+.dv-decision-icon.success{
+  color:#067647;
+  background:#ecfdf3;
+  border-color:#abefc6;
+}
+
+.dv-decision-icon.reject,
+.dv-decision-icon.error{
+  color:#b42318;
+  background:#fef3f2;
+  border-color:#fecdca;
+}
+
+.dv-decision-icon.info{
+  color:#175cd3;
+  background:#eff8ff;
+  border-color:#b2ddff;
+}
+
+.dv-decision-title{
+  margin:1px 0 0;
+  color:#173647;
+  font-size:20px;
+  line-height:1.2;
+  font-weight:850;
+  letter-spacing:-.02em;
+}
+
+.dv-decision-subtitle{
+  margin-top:5px;
+  color:#738696;
+  font-size:12px;
+  line-height:1.45;
+}
+
+.dv-decision-body{
+  padding:0 24px 22px;
+}
+
+.dv-decision-message{
+  padding:15px 16px;
+  border-radius:12px;
+  border:1px solid #e4ebef;
+  background:#f8fbfc;
+  color:#314b5b;
+  font-size:14px;
+  font-weight:700;
+  line-height:1.5;
+}
+
+.dv-decision-detail{
+  margin-top:10px;
+  color:#647887;
+  font-size:12px;
+  line-height:1.55;
+}
+
+.dv-decision-actions{
+  padding:17px 24px 22px;
+  border-top:1px solid #edf1f4;
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:10px;
+  background:#fbfcfd;
+}
+
+.dv-decision-btn{
+  min-height:42px;
+  border-radius:10px;
+  padding:0 16px;
+  border:1px solid #d6e0e5;
+  background:#fff;
+  color:#405966;
+  font-size:13px;
+  font-weight:800;
+  cursor:pointer;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  transition:transform .14s ease,box-shadow .14s ease,background .14s ease;
+}
+
+.dv-decision-btn:hover{
+  transform:translateY(-1px);
+  box-shadow:0 5px 14px rgba(15,23,42,.08);
+}
+
+.dv-decision-btn:focus-visible{
+  outline:3px solid rgba(59,130,246,.20);
+  outline-offset:2px;
+}
+
+.dv-decision-btn.cancel{
+  background:#fff;
+  color:#526873;
+}
+
+.dv-decision-btn.confirm.approve,
+.dv-decision-btn.confirm.success{
+  background:#16845b;
+  border-color:#16845b;
+  color:#fff;
+}
+
+.dv-decision-btn.confirm.approve:hover,
+.dv-decision-btn.confirm.success:hover{
+  background:#116b4a;
+}
+
+.dv-decision-btn.confirm.reject,
+.dv-decision-btn.confirm.error{
+  background:#b54747;
+  border-color:#b54747;
+  color:#fff;
+}
+
+.dv-decision-btn.confirm.reject:hover,
+.dv-decision-btn.confirm.error:hover{
+  background:#963c3c;
+}
+
+@media(max-width:640px){
+  #dvDecisionModal{padding:16px}
+  .dv-decision-top{padding:20px 18px 15px}
+  .dv-decision-body{padding:0 18px 18px}
+  .dv-decision-actions{padding:14px 18px 18px;flex-direction:column-reverse}
+  .dv-decision-btn{width:100%}
+  .dv-decision-title{font-size:18px}
+}
+</style>
 </head>
 <body class="bg-slate-50 text-slate-800">
 
@@ -3882,209 +4450,6 @@ window.addEventListener('DOMContentLoaded',()=>{renderDlpRules();updateDashboard
 </script>
 
 
-<style id="responsive-final-fix">
-/* =========================================================
-   RESPONSIVE FINAL
-   - Menú hamburguesa a la izquierda en tablet/móvil
-   - Sidebar lateral deslizante en pantallas pequeñas
-   - Nombre de usuario y bienvenida legibles
-   ========================================================= */
-.mobile-menu-btn{
-  display:none;align-items:center;justify-content:center;flex:0 0 42px;width:42px;height:42px;
-  border:1px solid rgba(255,255,255,.22);border-radius:8px;background:transparent;color:#fff;
-  cursor:pointer;font-size:18px;
-}
-.mobile-menu-btn:hover{background:rgba(255,255,255,.08)}
-#dashWelcome{font-size:1em!important;font-weight:800!important;display:inline}
-#topbar #userBadge{font-size:14px!important;font-weight:700!important;max-width:180px!important}
-#topbar #userRoleBadge{font-size:11px!important}
-
-@media (max-width:1100px){
-  #topbar .topbar-nav{gap:2px!important}
-  #topbar .top-nav-item{padding-left:10px!important;padding-right:10px!important}
-}
-
-@media (max-width:900px){
-  #topbar.app-topbar{
-    height:64px!important;min-height:64px!important;padding:0 14px!important;gap:10px!important;
-    flex-wrap:nowrap!important;
-  }
-  .mobile-menu-btn{display:flex!important}
-  #topbar .topbar-brand{
-    min-width:0!important;flex:1 1 auto!important;width:auto!important;padding:4px 0!important;
-  }
-  #topbar .topbar-title{font-size:16px!important}
-  #topbar .topbar-subtitle{font-size:9px!important}
-  #topbar .topbar-nav{display:none!important}
-  #topbar .topbar-actions{margin-left:auto!important;gap:6px!important}
-  #topbar .system-status{display:none!important}
-  #topbar .top-icon-btn{width:38px!important;height:38px!important}
-  #topbar .profile-trigger{padding:3px!important}
-  #topbar .profile-trigger .hidden.xl\:block{display:flex!important;flex-direction:column!important;min-width:0!important}
-  #topbar #userBadge{font-size:13px!important;max-width:110px!important}
-  #topbar #userRoleBadge{font-size:10px!important}
-
-  #appBody{min-height:calc(100vh - 64px)!important;display:block!important}
-  #sidebar{
-    display:flex!important;position:fixed!important;left:0!important;top:64px!important;bottom:0!important;
-    width:min(290px,84vw)!important;height:calc(100vh - 64px)!important;
-    transform:translateX(-105%)!important;transition:transform .22s ease!important;
-    z-index:100!important;overflow-y:auto!important;
-  }
-  #sidebar.mobile-open{transform:translateX(0)!important}
-  .sidebar-overlay{
-    display:none!important;position:fixed!important;inset:0!important;top:64px!important;
-    background:rgba(8,24,36,.52)!important;z-index:90!important;
-  }
-  .sidebar-overlay.show{display:block!important}
-  #mainArea{width:100%!important;min-width:0!important}
-  #mainArea main{padding:20px 16px 30px!important;max-width:none!important}
-  .dashboard-hero{
-    min-height:0!important;padding:4px 0 18px!important;display:block!important;
-  }
-  .dashboard-hero h2{font-size:clamp(24px,5vw,31px)!important;line-height:1.2!important}
-  #dashWelcome{font-size:1em!important}
-  .dashboard-hero p{font-size:12px!important}
-  .page-title{flex-wrap:wrap!important;align-items:flex-start!important}
-  .page-title h2{font-size:23px!important}
-  .file-manager-shell{grid-template-columns:1fr!important;min-height:auto!important}
-  .file-explorer-panel{border-right:0!important;border-bottom:1px solid #e4eaed!important}
-  .file-security-panel{border-left:0!important;border-top:1px solid #e4eaed!important}
-  .table-responsive,.file-table-wrap{overflow-x:auto!important;-webkit-overflow-scrolling:touch}
-  #appSection .data-table,#appSection .rule-table{min-width:650px}
-}
-
-@media (max-width:640px){
-  #topbar.app-topbar{padding:0 10px!important;gap:8px!important}
-  .mobile-menu-btn{flex-basis:40px;width:40px;height:40px;font-size:17px}
-  #topbar .topbar-title{font-size:15px!important}
-  #topbar .topbar-subtitle{display:none!important}
-  #topbar .top-icon-btn{width:36px!important;height:36px!important}
-  #topbar .top-avatar{width:34px!important;height:34px!important}
-  #topbar .profile-trigger .hidden.xl\:block{display:none!important}
-  #topbar .profile-trigger .fa-chevron-down{display:none!important}
-  #topbar #userBadge{font-size:12px!important}
-  #mainArea main{padding:16px 12px 26px!important}
-  .dashboard-hero h2{font-size:clamp(22px,7vw,28px)!important}
-  .dashboard-hero>div:first-child>p:first-child{font-size:10px!important}
-  .dashboard-hero p{font-size:11px!important}
-  .grid.grid-cols-2.xl\:grid-cols-4{grid-template-columns:1fr!important}
-  .dashboard-card{width:100%!important;min-width:0!important}
-  .section-head{flex-wrap:wrap!important}
-  .primary-btn,.secondary-btn{max-width:100%;white-space:normal!important}
-  .filter-bar{flex-wrap:wrap!important}
-  .input-modern{max-width:100%!important}
-  #loginSection>div.relative{width:100%!important}
-}
-
-@media (min-width:901px){
-  #sidebar{display:none!important}
-}
-
-/* ===== NAVBAR AUTO-FIT: sandwich solo cuando ya no caben los botones ===== */
-.mobile-menu-btn{
-  display:none;
-  align-items:center;
-  justify-content:center;
-  flex:0 0 42px;
-  width:42px;
-  height:42px;
-  border:1px solid rgba(255,255,255,.12);
-  border-radius:10px;
-  background:rgba(255,255,255,.06);
-  color:#fff;
-  cursor:pointer;
-}
-#topbar.compact-nav .mobile-menu-btn{display:flex!important}
-#topbar.compact-nav .topbar-nav{display:none!important}
-
-/* Si el sandwich aparece por falta de espacio, el sidebar debe funcionar
-   también en escritorio/tablet, no solamente por debajo de 900px. */
-#topbar.compact-nav ~ #appBody #sidebar{
-  display:flex!important;
-  position:fixed!important;
-  z-index:60!important;
-  left:0!important;
-  top:72px!important;
-  bottom:0!important;
-  width:min(290px,84vw)!important;
-  height:calc(100vh - 72px)!important;
-  transform:translateX(-105%)!important;
-  transition:transform .22s ease!important;
-  overflow-y:auto!important;
-}
-#topbar.compact-nav ~ #appBody #sidebar.mobile-open{transform:translateX(0)!important}
-#topbar.compact-nav ~ #appBody .sidebar-overlay{
-  display:none;
-  position:fixed!important;
-  z-index:50!important;
-  inset:72px 0 0 0!important;
-  background:rgba(6,20,30,.45)!important;
-}
-#topbar.compact-nav ~ #appBody .sidebar-overlay.show{display:block!important}
-
-@media (min-width:901px){
-  #topbar.compact-nav.app-topbar{
-    height:72px!important;
-    min-height:72px!important;
-    flex-wrap:nowrap!important;
-    padding:0 18px!important;
-    gap:12px!important;
-  }
-  #topbar.compact-nav .topbar-brand{
-    min-width:205px!important;
-    flex:0 0 205px!important;
-  }
-  #topbar.compact-nav .topbar-actions{
-    margin-left:auto!important;
-    flex:0 0 auto!important;
-  }
-}
-
-@media (max-width:900px){
-  #topbar.app-topbar{height:64px!important;min-height:64px!important;flex-wrap:nowrap!important;padding:0 12px!important}
-  #topbar .mobile-menu-btn{display:flex!important}
-  #topbar .topbar-nav{display:none!important}
-  #topbar .topbar-brand{min-width:0!important;flex:1 1 auto!important}
-  #topbar.compact-nav ~ #appBody #sidebar{top:64px!important;height:calc(100vh - 64px)!important}
-  #topbar.compact-nav ~ #appBody .sidebar-overlay{inset:64px 0 0 0!important}
-}
-</style>
-
-
-<style id="responsive-welcome-fix">
-/* Corrección definitiva del saludo en pantallas pequeñas */
-#view-inicio .dashboard-hero h2,
-#view-inicio .dashboard-hero h2 #dashWelcome{
-  font-family:Inter,"Segoe UI",system-ui,-apple-system,sans-serif !important;
-  font-size:31px !important;
-  font-weight:800 !important;
-  line-height:1.15 !important;
-  letter-spacing:-0.025em !important;
-  vertical-align:baseline !important;
-}
-#view-inicio .dashboard-hero h2 #dashWelcome{
-  display:inline !important;
-  margin:0 !important;
-  padding:0 !important;
-  color:inherit !important;
-}
-@media (max-width:900px){
-  #view-inicio .dashboard-hero h2,
-  #view-inicio .dashboard-hero h2 #dashWelcome{
-    font-size:clamp(24px,5vw,31px) !important;
-    line-height:1.15 !important;
-  }
-}
-@media (max-width:640px){
-  #view-inicio .dashboard-hero h2,
-  #view-inicio .dashboard-hero h2 #dashWelcome{
-    font-size:clamp(22px,7vw,28px) !important;
-    line-height:1.15 !important;
-  }
-}
-</style>
-
 
 <script id="datavault-current-backend-compat">
 /* =========================================================
@@ -4528,15 +4893,6 @@ window.addEventListener('DOMContentLoaded',()=>{
 </script>
 
 
-<style id="datavault-role-v3-css">
-.role-hidden{display:none!important}
-.admin-user-name{font-weight:700;color:#1f2b31}
-.admin-user-mail{font-size:10px;color:#78909c}
-.admin-user-avatar{width:34px;height:34px;border-radius:50%;background:#eaf1f4;color:#1f2b31;display:flex;align-items:center;justify-content:center;font-weight:800}
-.admin-filter-wrap{display:flex;align-items:center;gap:8px;margin-left:auto}
-.admin-filter-wrap select{min-width:210px}
-.role-readonly-note{font-size:11px;color:#64748b;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px}
-</style>
 <script id="datavault-role-v3">
 /* =========================================================
    EXPERIENCIA POR ROL
@@ -5166,51 +5522,8 @@ window.addEventListener('DOMContentLoaded',()=>{
   document.addEventListener('DOMContentLoaded',()=>{ensureAdminFileFilter();applyRoleExperience();});
   window.addEventListener('load',()=>setTimeout(applyRoleExperience,100));
 })();
-</script>\n
+</script>
 
-
-<style id="datavault-topbar-spacing-fix">
-/* ===== BARRA SUPERIOR: separación limpia entre módulos ===== */
-#topbar .topbar-nav{
-  display:flex !important;
-  align-items:center !important;
-  justify-content:flex-start !important;
-  flex:1 1 auto !important;
-  min-width:0 !important;
-  gap:10px !important;
-  margin-left:8px !important;
-  overflow:visible !important;
-  white-space:nowrap !important;
-}
-#topbar .top-nav-item{
-  flex:0 0 auto !important;
-  width:auto !important;
-  min-width:max-content !important;
-  height:44px !important;
-  padding:0 14px !important;
-  gap:7px !important;
-  font-size:13px !important;
-  line-height:1 !important;
-  letter-spacing:0 !important;
-  white-space:nowrap !important;
-}
-#topbar .top-nav-item + .top-nav-item{
-  margin-left:0 !important;
-}
-#topbar .topbar-actions{
-  flex:0 0 auto !important;
-  margin-left:auto !important;
-}
-
-/* En anchos intermedios se compacta un poco antes de pasar al menú hamburguesa. */
-@media (min-width:901px) and (max-width:1450px){
-  #topbar.app-topbar{gap:16px !important;padding-left:20px !important;padding-right:20px !important;}
-  #topbar .topbar-brand{min-width:180px !important;flex-basis:180px !important;}
-  #topbar .topbar-nav{gap:6px !important;margin-left:2px !important;}
-  #topbar .top-nav-item{padding:0 11px !important;font-size:12px !important;gap:6px !important;}
-  #topbar .top-nav-item i{font-size:12px !important;}
-}
-</style>
 
 <script id="datavault-topbar-spacing-recalc">
 (function(){
@@ -5234,68 +5547,6 @@ window.addEventListener('DOMContentLoaded',()=>{
 </script>
 
 
-
-<style id="datavault-topbar-role-final-fix">
-/* FIX DEFINITIVO DEL NAVBAR POR ROL: sin solapes ni botones duplicados */
-#topbar .topbar-brand{
-  flex:0 0 auto !important;
-}
-#topbar .topbar-nav{
-  display:flex !important;
-  flex:1 1 auto !important;
-  min-width:0 !important;
-  align-items:center !important;
-  justify-content:flex-start !important;
-  gap:8px !important;
-  overflow:hidden !important;
-  white-space:nowrap !important;
-  margin-left:6px !important;
-}
-#topbar .topbar-nav > .top-nav-item{
-  display:inline-flex !important;
-  flex:0 0 auto !important;
-  flex-shrink:0 !important;
-  width:auto !important;
-  min-width:0 !important;
-  max-width:none !important;
-  height:42px !important;
-  padding:0 12px !important;
-  align-items:center !important;
-  justify-content:center !important;
-  gap:6px !important;
-  font-size:12px !important;
-  line-height:1 !important;
-  white-space:nowrap !important;
-  overflow:visible !important;
-  text-overflow:clip !important;
-}
-#topbar .topbar-nav > .top-nav-item > span{
-  display:inline-block !important;
-  white-space:nowrap !important;
-  overflow:visible !important;
-  width:auto !important;
-  max-width:none !important;
-}
-#topbar .topbar-nav > .role-hidden,
-#topbar .topbar-nav > .hidden{
-  display:none !important;
-}
-#topbar .topbar-actions{
-  flex:0 0 auto !important;
-  margin-left:auto !important;
-}
-
-/* Cuando no entra con comodidad, se usa menú hamburguesa; nunca se aplasta el texto. */
-#topbar.dv-role-compact .mobile-menu-btn{display:flex !important;}
-#topbar.dv-role-compact .topbar-nav{display:none !important;}
-
-@media (min-width:901px) and (max-width:1200px){
-  #topbar.app-topbar{padding-left:14px !important;padding-right:14px !important;gap:10px !important;}
-  #topbar .topbar-brand{min-width:185px !important;}
-  #topbar .topbar-nav{gap:5px !important;margin-left:0 !important;}
-  #topbar .topbar-nav > .top-nav-item{padding:0 10px !important;font-size:11px !important;}
-}
-</style>
 
 <script id="datavault-topbar-role-final-script">
 (function(){
@@ -5482,52 +5733,6 @@ window.addEventListener('DOMContentLoaded',()=>{
 </script>
 
 
-
-<style id="datavault-operations-v1-css">
-.dv-file-operation-bar{display:flex;align-items:center;gap:7px;flex-wrap:wrap;justify-content:flex-end}
-.dv-file-operation-bar .dv-delete-operation{color:#b42318;border-color:#fecaca;background:#fff7f7}
-.dv-file-operation-bar .dv-delete-operation:hover{background:#feecec}
-.dv-upload-destination-panel{margin-left:16px;margin-right:16px;border:1px solid #dbe4ea;background:#fbfdfe;border-radius:11px;padding:12px}
-.dv-upload-destination-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px}
-.dv-upload-destination-head b{display:block;font-size:11px;color:#294252}
-.dv-upload-destination-head span:not(.dv-upload-required){display:block;font-size:9px;color:#83939c;margin-top:3px;line-height:1.4}
-.dv-upload-required{font-size:8px;font-weight:800;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;border-radius:999px;padding:4px 7px;white-space:nowrap}
-.dv-source-list{border:1px solid #dbe4ea;border-radius:10px;max-height:330px;overflow:auto;background:#fbfdfe;padding:5px}
-.dv-source-option{width:100%;border:0;background:transparent;border-radius:8px;padding:10px;display:flex;align-items:center;gap:10px;text-align:left;cursor:pointer}
-.dv-source-option:hover{background:#eef4f7}
-.dv-source-option:disabled{opacity:.5;cursor:not-allowed;background:#f8fafc}
-.dv-source-option .source-icon{width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:8px;background:#fff;border:1px solid #e2e8f0;flex:none}
-.dv-source-option .source-main{min-width:0;flex:1}
-.dv-source-option .source-name{display:block;font-size:10px;font-weight:800;color:#334e5f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.dv-source-option .source-meta{display:block;font-size:8px;color:#94a3b8;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.dv-source-option .source-note{font-size:8px;font-weight:800;color:#a16207;white-space:nowrap}
-#dvSourceOperationModal{position:fixed;inset:0;z-index:9998;background:rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center;padding:18px}
-#dvSourceOperationModal.dv-hidden{display:none!important}
-.dv-op-actions{display:flex;gap:6px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
-.dv-op-btn{border:1px solid #d8e1e6;background:#fff;color:#385264;border-radius:7px;padding:6px 9px;font-size:9px;font-weight:700;white-space:nowrap;cursor:pointer}
-.dv-op-btn:hover{background:#f4f8fa;border-color:#b8c8d1}
-.dv-op-btn.delete{color:#b42318;border-color:#fecaca;background:#fff7f7}
-.dv-op-btn.delete:hover{background:#feecec}
-.dv-op-btn:disabled{opacity:.45;cursor:not-allowed}
-.dv-op-legacy{font-size:8px;color:#94a3b8;white-space:nowrap}
-#dvOperationModal{position:fixed;inset:0;z-index:9999;background:rgba(8,22,32,.5);display:flex;align-items:center;justify-content:center;padding:18px}
-#dvOperationModal.dv-hidden{display:none!important}
-.dv-op-modal-card{width:min(520px,96vw);background:#fff;border-radius:15px;box-shadow:0 24px 70px rgba(15,23,42,.25);border:1px solid #e2e8f0;overflow:hidden}
-.dv-op-modal-head{padding:18px 20px;border-bottom:1px solid #edf1f4;display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
-.dv-op-modal-body{padding:20px}
-.dv-op-toast{position:fixed;right:22px;bottom:22px;z-index:10000;background:#173647;color:#fff;padding:11px 14px;border-radius:10px;box-shadow:0 12px 30px rgba(15,23,42,.25);font-size:12px;font-weight:700;max-width:360px}
-#dvUserCreateModal{position:fixed;inset:0;z-index:10001;background:rgba(8,22,32,.5);display:flex;align-items:center;justify-content:center;padding:18px}
-#dvUserCreateModal.dv-hidden{display:none!important}
-.dv-user-modal-card{width:min(520px,96vw);background:#fff;border-radius:15px;box-shadow:0 24px 70px rgba(15,23,42,.25);border:1px solid #e2e8f0;overflow:hidden}
-.dv-user-modal-head{padding:18px 20px;border-bottom:1px solid #edf1f4;display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
-.dv-user-modal-body{padding:20px}.dv-user-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.dv-user-field{display:flex;flex-direction:column;gap:6px}.dv-user-field.full{grid-column:1/-1}.dv-user-help{font-size:9px;color:#8a9cab;line-height:1.4}.dv-user-error{font-size:10px;color:#b42318;background:#fff5f5;border:1px solid #fecaca;border-radius:8px;padding:9px 10px}.dv-user-success{font-size:10px;color:#067647;background:#effcf6;border:1px solid #abefc6;border-radius:8px;padding:9px 10px}
-.dv-folder-search{position:relative}.dv-folder-search i{position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:11px;color:#8da0ae;pointer-events:none}.dv-folder-search input{padding-left:34px}
-.dv-folder-tree{border:1px solid #dbe4ea;border-radius:10px;max-height:290px;overflow:auto;background:#fbfdfe;padding:5px}
-.dv-folder-option{width:100%;display:flex;align-items:center;gap:9px;text-align:left;border:0;background:transparent;border-radius:7px;padding:8px 9px;color:#304958;cursor:pointer;font-size:10px;transition:.15s ease}.dv-folder-option:hover{background:#edf5f8}.dv-folder-option.selected{background:#dff1f7;color:#0f516d;font-weight:800}.dv-folder-option.disabled{opacity:.42;cursor:not-allowed;background:transparent}.dv-folder-option.disabled:hover{background:transparent}.dv-folder-option .folder-main{min-width:0;flex:1}.dv-folder-option .folder-name{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dv-folder-option .folder-path{font-size:8px;color:#899aa6;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dv-folder-option .folder-note{font-size:8px;color:#94a3b8;white-space:nowrap}
-.dv-move-selection{border:1px solid #dbe4ea;background:#f8fbfc;border-radius:9px;padding:10px 12px;font-size:10px;color:#526b7a;line-height:1.45}.dv-move-selection strong{color:#173647}.dv-op-pending{display:inline-flex;align-items:center;gap:5px;border-radius:999px;background:#fff7e8;color:#a15c00;border:1px solid #f7dca6;padding:5px 8px;font-size:8px;font-weight:800;white-space:nowrap}
-@media(max-width:640px){.dv-user-form-grid{grid-template-columns:1fr}.dv-user-field.full{grid-column:auto}}
-@media(max-width:900px){.dv-op-actions{justify-content:flex-start}.dv-op-btn{font-size:10px}}
-</style>
 
 <script id="datavault-operations-v1">
 /* =========================================================
@@ -7127,206 +7332,6 @@ window.addEventListener('DOMContentLoaded',()=>{
 })();
 </script>
 
-
-<style id="datavault-decision-modal-v2">
-/* =========================================================
-   MODAL DATAVAULT · APROBAR / RECHAZAR
-   Reemplaza los confirm()/alert() del navegador por una
-   interfaz centrada y consistente con el sistema.
-   ========================================================= */
-body.dv-modal-open{overflow:hidden!important}
-
-#dvDecisionModal{
-  position:fixed;
-  inset:0;
-  z-index:100000;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  padding:24px;
-  background:rgba(13,28,39,.52);
-  backdrop-filter:blur(5px);
-  -webkit-backdrop-filter:blur(5px);
-  opacity:1;
-  visibility:visible;
-  transition:opacity .16s ease,visibility .16s ease;
-}
-
-#dvDecisionModal.dv-hidden{
-  opacity:0;
-  visibility:hidden;
-  pointer-events:none;
-}
-
-.dv-decision-card{
-  width:min(520px,calc(100vw - 32px));
-  max-height:calc(100vh - 48px);
-  overflow:auto;
-  background:#fff;
-  border:1px solid #e2e8f0;
-  border-radius:20px;
-  box-shadow:0 28px 85px rgba(15,23,42,.30);
-  transform:translateY(0) scale(1);
-  transition:transform .18s ease,opacity .18s ease;
-}
-
-#dvDecisionModal.dv-hidden .dv-decision-card{
-  transform:translateY(12px) scale(.975);
-  opacity:0;
-}
-
-.dv-decision-top{
-  padding:24px 24px 18px;
-  display:flex;
-  align-items:flex-start;
-  gap:15px;
-}
-
-.dv-decision-icon{
-  width:48px;
-  height:48px;
-  min-width:48px;
-  border-radius:14px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  font-size:18px;
-  border:1px solid transparent;
-}
-
-.dv-decision-icon.approve,
-.dv-decision-icon.success{
-  color:#067647;
-  background:#ecfdf3;
-  border-color:#abefc6;
-}
-
-.dv-decision-icon.reject,
-.dv-decision-icon.error{
-  color:#b42318;
-  background:#fef3f2;
-  border-color:#fecdca;
-}
-
-.dv-decision-icon.info{
-  color:#175cd3;
-  background:#eff8ff;
-  border-color:#b2ddff;
-}
-
-.dv-decision-title{
-  margin:1px 0 0;
-  color:#173647;
-  font-size:20px;
-  line-height:1.2;
-  font-weight:850;
-  letter-spacing:-.02em;
-}
-
-.dv-decision-subtitle{
-  margin-top:5px;
-  color:#738696;
-  font-size:12px;
-  line-height:1.45;
-}
-
-.dv-decision-body{
-  padding:0 24px 22px;
-}
-
-.dv-decision-message{
-  padding:15px 16px;
-  border-radius:12px;
-  border:1px solid #e4ebef;
-  background:#f8fbfc;
-  color:#314b5b;
-  font-size:14px;
-  font-weight:700;
-  line-height:1.5;
-}
-
-.dv-decision-detail{
-  margin-top:10px;
-  color:#647887;
-  font-size:12px;
-  line-height:1.55;
-}
-
-.dv-decision-actions{
-  padding:17px 24px 22px;
-  border-top:1px solid #edf1f4;
-  display:flex;
-  align-items:center;
-  justify-content:flex-end;
-  gap:10px;
-  background:#fbfcfd;
-}
-
-.dv-decision-btn{
-  min-height:42px;
-  border-radius:10px;
-  padding:0 16px;
-  border:1px solid #d6e0e5;
-  background:#fff;
-  color:#405966;
-  font-size:13px;
-  font-weight:800;
-  cursor:pointer;
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
-  gap:8px;
-  transition:transform .14s ease,box-shadow .14s ease,background .14s ease;
-}
-
-.dv-decision-btn:hover{
-  transform:translateY(-1px);
-  box-shadow:0 5px 14px rgba(15,23,42,.08);
-}
-
-.dv-decision-btn:focus-visible{
-  outline:3px solid rgba(59,130,246,.20);
-  outline-offset:2px;
-}
-
-.dv-decision-btn.cancel{
-  background:#fff;
-  color:#526873;
-}
-
-.dv-decision-btn.confirm.approve,
-.dv-decision-btn.confirm.success{
-  background:#16845b;
-  border-color:#16845b;
-  color:#fff;
-}
-
-.dv-decision-btn.confirm.approve:hover,
-.dv-decision-btn.confirm.success:hover{
-  background:#116b4a;
-}
-
-.dv-decision-btn.confirm.reject,
-.dv-decision-btn.confirm.error{
-  background:#b54747;
-  border-color:#b54747;
-  color:#fff;
-}
-
-.dv-decision-btn.confirm.reject:hover,
-.dv-decision-btn.confirm.error:hover{
-  background:#963c3c;
-}
-
-@media(max-width:640px){
-  #dvDecisionModal{padding:16px}
-  .dv-decision-top{padding:20px 18px 15px}
-  .dv-decision-body{padding:0 18px 18px}
-  .dv-decision-actions{padding:14px 18px 18px;flex-direction:column-reverse}
-  .dv-decision-btn{width:100%}
-  .dv-decision-title{font-size:18px}
-}
-</style>
 
 <div id="dvDecisionModal" class="dv-hidden" role="dialog" aria-modal="true" aria-labelledby="dvDecisionTitle" aria-describedby="dvDecisionMessage">
   <div class="dv-decision-card" tabindex="-1">
