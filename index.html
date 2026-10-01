@@ -3335,10 +3335,55 @@ function filterFiles(specialFolder){
   else rows=rows.filter(r=>!selected || auditFolderName(r)===selected);
   renderFilesTable(rows);
 }
-function exportSimpleReport(){
-  const rows = auditCache || [];
-  const csv=['Archivo,Usuario,Carpeta,Estado,Hash SHA-256,Fecha',...rows.map(r=>[r.nombre_archivo,r.usuario_solicitante,auditFolderName(r),r.estado,r.hash_sha256,r.fecha_solicitud].map(v=>'"'+String(v??'').replaceAll('"','""')+'"').join(','))].join('\n');
-  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='datavault_reporte_auditoria.csv'; a.click(); URL.revokeObjectURL(a.href);
+async function exportSimpleReport(){
+  const btn=document.getElementById('btnExportReport');
+  const originalHtml=btn?.innerHTML||'';
+
+  try{
+    if(btn){
+      btn.disabled=true;
+      btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>Generando Excel...';
+    }
+
+    const {data}=await supabaseClient.auth.getSession();
+    const token=data?.session?.access_token;
+    if(!token) throw new Error('La sesión ha expirado. Inicia sesión nuevamente.');
+
+    const response=await fetch(`${API_URL}/reports/excel`,{
+      method:'GET',
+      headers:{Authorization:`Bearer ${token}`}
+    });
+
+    if(!response.ok){
+      let detail='No se pudo generar el reporte Excel.';
+      try{
+        const errorData=await response.json();
+        detail=typeof errorData?.detail==='string'?errorData.detail:detail;
+      }catch(_){}
+      throw new Error(detail);
+    }
+
+    const blob=await response.blob();
+    const disposition=response.headers.get('content-disposition')||'';
+    const match=disposition.match(/filename="?([^";]+)"?/i);
+    const filename=match?.[1]||'datavault_reporte_auditoria.xlsx';
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;
+    a.download=filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }catch(error){
+    console.error('REPORT EXCEL ERROR',error);
+    alert(error?.message||'No se pudo generar el reporte Excel.');
+  }finally{
+    if(btn){
+      btn.disabled=false;
+      btn.innerHTML=originalHtml;
+    }
+  }
 }
 
 async function loadReports(){
