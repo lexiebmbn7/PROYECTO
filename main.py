@@ -1976,6 +1976,261 @@ def notificar_solicitud_operacion_telegram(solicitud: dict):
         except Exception as error:
             print("[TELEGRAM OPERACION MENU ERROR]", error)
 
+
+# ============================================================
+# PAPELERA + HISTORIAL DE ELIMINACIONES (PUNTOS 18-21)
+# ============================================================
+
+def registrar_historial_eliminacion(
+    solicitud: dict,
+    objeto: dict,
+    resuelto_por: str,
+) -> dict | None:
+    """Registra solo eliminaciones realmente aplicadas en Google Drive."""
+
+    solicitud_id = str((solicitud or {}).get("id") or "").strip()
+    solicitante_id = str((solicitud or {}).get("solicitante_id") or "").strip()
+
+    if not solicitud_id or not solicitante_id:
+        print("[TRASH HISTORY] solicitud incompleta; no se registró historial.")
+        return None
+
+    filas = list((objeto or {}).get("filas") or [])
+    auditoria_ids = [
+        str(fila.get("id"))
+        for fila in filas
+        if fila.get("id")
+    ]
+
+    payload = {
+        "solicitud_operacion_id": solicitud_id,
+        "objeto_tipo": str((objeto or {}).get("tipo") or "").upper() or None,
+        "auditoria_id": (
+            str((objeto or {}).get("auditoria_id"))
+            if (objeto or {}).get("auditoria_id")
+            else None
+        ),
+        "lote_id": (
+            str((objeto or {}).get("lote_id"))
+            if (objeto or {}).get("lote_id")
+            else None
+        ),
+        "solicitante_id": solicitante_id,
+        "solicitante_nombre": (solicitud or {}).get("solicitante_nombre"),
+        "solicitante_correo": (solicitud or {}).get("solicitante_correo"),
+        "nombre_objeto": (
+            (solicitud or {}).get("nombre_objeto")
+            or (objeto or {}).get("nombre")
+            or "Archivo/Carpeta"
+        ),
+        "drive_id": str((objeto or {}).get("drive_id") or "") or None,
+        "drive_parent_id": str((objeto or {}).get("drive_parent_id") or "") or None,
+        "ubicacion_anterior": (
+            (solicitud or {}).get("carpeta_origen")
+            or (objeto or {}).get("ubicacion")
+            or "DRIVE PROYECTO"
+        ),
+        "eliminado_por": str(resuelto_por or "") or None,
+        "fecha_eliminacion": ahora_iso(),
+        "estado": "EN_PAPELERA",
+        "detalle": {
+            "cantidad_registros": len(filas),
+            "auditoria_ids": auditoria_ids,
+            "resultado_drive": "TRASHED",
+        },
+        "updated_at": ahora_iso(),
+    }
+
+    try:
+        existente = (
+            supabase_admin
+            .table("elementos_eliminados")
+            .select("id")
+            .eq("solicitud_operacion_id", solicitud_id)
+            .limit(1)
+            .execute()
+        )
+
+        if existente.data:
+            respuesta = (
+                supabase_admin
+                .table("elementos_eliminados")
+                .update(payload)
+                .eq("id", existente.data[0]["id"])
+                .execute()
+            )
+        else:
+            payload["created_at"] = ahora_iso()
+            respuesta = (
+                supabase_admin
+                .table("elementos_eliminados")
+                .insert(payload)
+                .execute()
+            )
+
+        return (respuesta.data or [None])[0]
+
+    except Exception as error:
+        print("[TRASH HISTORY ERROR]", solicitud_id, error)
+        return None
+
+
+def construir_items_papelera(filas: list) -> list:
+    """Agrupa carpetas eliminadas como una sola unidad visual."""
+
+    carpetas = {}
+    archivos = []
+
+    for fila in filas or []:
+        estado_archivo = str(fila.get("estado_archivo") or "").upper()
+        if not estado_archivo.startswith("ELIMINADO"):
+            continue
+
+        drive_folder_id = str(fila.get("drive_folder_id") or "").strip()
+        lote_id = str(fila.get("lote_id") or "").strip()
+
+        if drive_folder_id and lote_id:
+            clave = f"{drive_folder_id}:{lote_id}"
+
+            grupo = carpetas.setdefault(
+                clave,
+                {
+                    "tipo": "CARPETA",
+                    "id": lote_id,
+                    "lote_id": lote_id,
+                    "auditoria_id": None,
+                    "drive_id": drive_folder_id,
+                    "nombre": (
+                        obtener_carpeta_desde_ruta(fila.get("ruta_relativa"))
+                        or "Carpeta"
+                    ),
+                    "solicitante_id": fila.get("solicitante_id"),
+                    "solicitante_nombre": fila.get("solicitante_nombre"),
+                    "solicitante_correo": fila.get("solicitante_correo"),
+                    "ubicacion_anterior": (
+                        fila.get("ubicacion_drive")
+                        or "DRIVE PROYECTO"
+                    ),
+                    "fecha_eliminacion": fila.get("fecha_eliminacion"),
+                    "estado_archivo": estado_archivo,
+                    "cantidad_archivos": 0,
+                    "tamano_bytes": 0,
+                },
+            )
+
+            grupo["cantidad_archivos"] += 1
+            grupo["tamano_bytes"] += int(fila.get("tamano_bytes") or 0)
+
+            if str(fila.get("fecha_eliminacion") or "") > str(
+                grupo.get("fecha_eliminacion") or ""
+            ):
+                grupo["fecha_eliminacion"] = fila.get("fecha_eliminacion")
+
+            continue
+
+        archivos.append({
+            "tipo": "ARCHIVO",
+            "id": str(fila.get("id") or ""),
+            "auditoria_id": str(fila.get("id") or ""),
+            "lote_id": None,
+            "drive_id": str(fila.get("drive_file_id") or "") or None,
+            "nombre": fila.get("nombre_archivo") or "Archivo",
+            "solicitante_id": fila.get("solicitante_id"),
+            "solicitante_nombre": fila.get("solicitante_nombre"),
+            "solicitante_correo": fila.get("solicitante_correo"),
+            "ubicacion_anterior": (
+                fila.get("ubicacion_drive")
+                or "DRIVE PROYECTO"
+            ),
+            "fecha_eliminacion": fila.get("fecha_eliminacion"),
+            "estado_archivo": estado_archivo,
+            "cantidad_archivos": 1,
+            "tamano_bytes": int(fila.get("tamano_bytes") or 0),
+        })
+
+    items = [*carpetas.values(), *archivos]
+    items.sort(
+        key=lambda item: str(item.get("fecha_eliminacion") or ""),
+        reverse=True,
+    )
+
+    return items
+
+
+def consultar_papelera_backend(
+    usuario: dict,
+    solo_usuario: bool = False,
+) -> dict:
+    """Admin ve todo; subordinado solo sus propios eliminados."""
+
+    es_admin = str(usuario.get("rol") or "").lower() == "jefe"
+
+    query = (
+        supabase_admin
+        .table("auditoria_custodia")
+        .select(
+            "id,lote_id,nombre_archivo,ruta_relativa,tamano_bytes,"
+            "solicitante_id,solicitante_nombre,solicitante_correo,"
+            "estado,estado_archivo,fecha_eliminacion,"
+            "drive_file_id,drive_folder_id,drive_parent_id,ubicacion_drive"
+        )
+        .like("estado_archivo", "ELIMINADO%")
+        .order("fecha_eliminacion", desc=True)
+    )
+
+    if solo_usuario or not es_admin:
+        query = query.eq(
+            "solicitante_id",
+            str(usuario.get("id") or ""),
+        )
+
+    respuesta = query.execute()
+    filas = respuesta.data or []
+    items = construir_items_papelera(filas)
+
+    return {
+        "status": "ok",
+        "rol": usuario.get("rol"),
+        "solo_usuario": bool(solo_usuario or not es_admin),
+        "total_items": len(items),
+        "total_registros": len(filas),
+        "items": items,
+    }
+
+
+def consultar_historial_eliminaciones(
+    usuario: dict,
+    solo_usuario: bool = False,
+) -> dict:
+    """Historial persistente de eliminaciones aprobadas."""
+
+    es_admin = str(usuario.get("rol") or "").lower() == "jefe"
+
+    query = (
+        supabase_admin
+        .table("elementos_eliminados")
+        .select("*")
+        .order("fecha_eliminacion", desc=True)
+    )
+
+    if solo_usuario or not es_admin:
+        query = query.eq(
+            "solicitante_id",
+            str(usuario.get("id") or ""),
+        )
+
+    respuesta = query.execute()
+    filas = respuesta.data or []
+
+    return {
+        "status": "ok",
+        "rol": usuario.get("rol"),
+        "solo_usuario": bool(solo_usuario or not es_admin),
+        "total": len(filas),
+        "historial": filas,
+    }
+
+
 def procesar_solicitud_operacion(
     solicitud_id: str,
     aprobar: bool,
@@ -2007,6 +2262,21 @@ def procesar_solicitud_operacion(
             return solicitud, False
 
         if not aprobar:
+            tipo_rechazado = str(
+                solicitud.get("tipo_operacion") or ""
+            ).upper()
+
+            resultado_rechazo = (
+                "Eliminación rechazada por el custodio. "
+                "El elemento permanece activo y no fue enviado a la papelera."
+                if tipo_rechazado == "ELIMINAR"
+                else
+                "Operación rechazada por el custodio."
+            )
+
+            # PUNTO 20:
+            # Si se rechaza ELIMINAR, no se toca Drive, no se cambia
+            # estado_archivo y no se crea historial de papelera.
             actualizado = (
                 supabase_admin
                 .table("solicitudes_operacion")
@@ -2014,7 +2284,7 @@ def procesar_solicitud_operacion(
                     "estado": "RECHAZADO",
                     "fecha_resolucion": ahora_iso(),
                     "resuelto_por": str(resuelto_por),
-                    "resultado": "Operación rechazada por el custodio.",
+                    "resultado": resultado_rechazo,
                 })
                 .eq("id", solicitud_id)
                 .eq("estado", "PENDIENTE")
@@ -2033,13 +2303,40 @@ def procesar_solicitud_operacion(
         cambios = {"fecha_ultima_operacion": ahora_iso()}
 
         if tipo == "ELIMINAR":
-            enviar_a_papelera_google_drive(objeto["drive_id"])
+            resultado_drive = enviar_a_papelera_google_drive(
+                objeto["drive_id"]
+            )
+
+            if not resultado_drive or not resultado_drive.get("trashed"):
+                raise RuntimeError(
+                    "Google Drive no confirmó el envío a la papelera."
+                )
+
+            fecha_eliminacion = ahora_iso()
+
             cambios.update({
                 "en_drive": False,
                 "estado_archivo": "ELIMINADO",
-                "fecha_eliminacion": ahora_iso(),
+                "fecha_eliminacion": fecha_eliminacion,
             })
-            resultado_texto = "Elemento enviado a la papelera de Google Drive."
+
+            # PUNTO 21:
+            # Solo una eliminación aprobada y confirmada por Drive
+            # entra al historial independiente.
+            historial = registrar_historial_eliminacion(
+                solicitud,
+                objeto,
+                str(resuelto_por),
+            )
+
+            resultado_texto = (
+                "Elemento enviado a la papelera de Google Drive."
+                if historial
+                else
+                "Elemento enviado a la papelera de Google Drive. "
+                "Advertencia: el historial independiente no pudo registrarse; "
+                "revisa los logs del backend."
+            )
 
         elif tipo == "MOVER":
             destino_id = str(
@@ -7045,6 +7342,55 @@ def obtener_carpetas_drive(
         ]
 
     }
+
+
+
+# ============================================================
+# API PAPELERA / HISTORIAL (PUNTOS 18-21)
+# ============================================================
+
+@app.get("/trash")
+def listar_papelera(
+    request: Request,
+):
+    """Admin ve todo; subordinado ve únicamente sus propios elementos."""
+    usuario = obtener_usuario_supabase_desde_request(request)
+    return consultar_papelera_backend(usuario)
+
+
+@app.get("/trash/mine")
+def listar_mi_papelera(
+    request: Request,
+):
+    usuario = obtener_usuario_supabase_desde_request(request)
+    return consultar_papelera_backend(
+        usuario,
+        solo_usuario=True,
+    )
+
+
+@app.get("/admin/trash")
+def listar_papelera_admin(
+    request: Request,
+):
+    admin = obtener_admin_desde_request(request)
+    return consultar_papelera_backend(admin)
+
+
+@app.get("/trash/history")
+def listar_historial_papelera(
+    request: Request,
+):
+    usuario = obtener_usuario_supabase_desde_request(request)
+    return consultar_historial_eliminaciones(usuario)
+
+
+@app.get("/admin/trash/history")
+def listar_historial_papelera_admin(
+    request: Request,
+):
+    admin = obtener_admin_desde_request(request)
+    return consultar_historial_eliminaciones(admin)
 
 
 @app.post("/operations/request")
