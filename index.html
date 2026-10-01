@@ -2807,12 +2807,13 @@ body.dv-modal-open{overflow:hidden!important}
 #view-gestor .status-pill{font-size:9px!important}
 #view-gestor .dv-op-actions{display:flex!important;align-items:center!important;gap:4px!important;justify-content:flex-start!important}
 #view-gestor .dv-op-btn{
-  width:34px!important;height:34px!important;padding:0!important;border:0!important;border-radius:50%!important;background:transparent!important;
-  color:#5f6368!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;font-size:0!important;
+  min-width:74px!important;height:34px!important;padding:0 10px!important;border:1px solid #dadce0!important;border-radius:17px!important;background:#fff!important;
+  color:#3c4043!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;gap:6px!important;font-size:11px!important;font-weight:600!important;
 }
-#view-gestor .dv-op-btn i{font-size:13px!important;margin:0!important}
-#view-gestor .dv-op-btn:hover{background:#f1f3f4!important;color:#202124!important}
-#view-gestor .dv-op-btn.delete:hover{background:#fce8e6!important;color:#b3261e!important}
+#view-gestor .dv-op-btn i{font-size:11px!important;margin:0!important}
+#view-gestor .dv-op-btn:hover{background:#f1f3f4!important;border-color:#c7c9cc!important;color:#202124!important}
+#view-gestor .dv-op-btn.delete{color:#b3261e!important;border-color:#f3c7c3!important;background:#fff!important}
+#view-gestor .dv-op-btn.delete:hover{background:#fce8e6!important;border-color:#e6aaa5!important;color:#b3261e!important}
 #view-gestor .file-content-footer{min-height:44px!important;padding:10px 18px!important;background:#fff!important;border-top:0!important;color:#5f6368!important}
 #view-gestor .file-security-panel{border-left:0!important;border-radius:18px!important;background:#f8fafd!important;padding:0!important}
 
@@ -6133,7 +6134,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     if(!approved) return '<span class="dv-op-legacy">Disponible al aprobar</span>';
     if(!linked) return '<span class="dv-op-legacy" title="Registro histórico sin ID de Drive">Sin vínculo Drive</span>';
     const safe=escapeHtml(String(id));
-    return `<div class="dv-op-actions"><button type="button" class="dv-op-btn" title="Mover" aria-label="Mover" onclick="event.stopPropagation();dvRequestMove('${kind}','${safe}')"><i class="fa-solid fa-folder-tree"></i></button><button type="button" class="dv-op-btn delete" title="Eliminar" aria-label="Eliminar" onclick="event.stopPropagation();dvRequestDelete('${kind}','${safe}')"><i class="fa-solid fa-trash-can"></i></button></div>`;
+    return `<div class="dv-op-actions"><button type="button" class="dv-op-btn" title="Mover" aria-label="Mover" onclick="event.stopPropagation();dvRequestMove('${kind}','${safe}')"><i class="fa-solid fa-folder-tree"></i><span>Mover</span></button><button type="button" class="dv-op-btn delete" title="Eliminar" aria-label="Eliminar" onclick="event.stopPropagation();dvRequestDelete('${kind}','${safe}')"><i class="fa-solid fa-trash-can"></i><span>Eliminar</span></button></div>`;
   }
 
   function opsLooseRow(r){
