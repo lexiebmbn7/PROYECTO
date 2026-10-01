@@ -7192,6 +7192,16 @@ window.addEventListener('DOMContentLoaded',()=>{
   }
 
   async function hydrateNow(reason='manual'){
+    // No ejecutar consultas protegidas hasta que Supabase confirme una sesión.
+    // Esto evita la carrera de arranque que antes producía errores falsos
+    // "No hay sesión activa" justo antes del evento SIGNED_IN/INITIAL_SESSION.
+    const { data: sessionData, error: sessionError } = await supabaseClient.auth.getSession();
+    if(sessionError){
+      console.warn('[DATAVAULT HYDRATION V2] sesión no disponible todavía:', sessionError.message || sessionError);
+      return;
+    }
+    if(!sessionData?.session?.user) return;
+
     const seq = ++dvHydrationSeq;
     if(dvHydrationBusy){
       dvHydrationQueued = true;
@@ -7237,25 +7247,23 @@ window.addEventListener('DOMContentLoaded',()=>{
   }
 
   async function boot(){
-    // Reintentos cortos: cubren restauración de sesión, render y Railway frío.
-    setHomeLoading();
-    await sleep(80);
-    await hydrateNow('boot-80ms');
-    await sleep(350);
-
-    const body = document.getElementById('inicioTableBody');
-    if(body && /Cargando registros|No se pudieron cargar/i.test(body.textContent || '')){
-      await hydrateNow('boot-retry-430ms');
+    // En el arranque solo hidratamos si Supabase ya restauró/confirmó la sesión.
+    // Si todavía no existe, onAuthStateChange hará la carga cuando llegue SIGNED_IN
+    // o INITIAL_SESSION. No hacemos reintentos protegidos a ciegas.
+    const { data, error } = await supabaseClient.auth.getSession();
+    if(error){
+      console.warn('[DATAVAULT HYDRATION V2] no se pudo leer la sesión inicial:', error.message || error);
+      return;
     }
+    if(!data?.session?.user) return;
 
+    setHomeLoading();
+    await hydrateNow('boot-session-ready');
     connectHydrationRealtime();
   }
 
   // Sesión restaurada al recargar la página.
-  document.addEventListener('DOMContentLoaded', () => {
-    boot();
-    setTimeout(() => hydrateNow('boot-backup-1200ms'), 1200);
-  });
+  document.addEventListener('DOMContentLoaded', boot);
 
   // Login nuevo / refresh del token.
   supabaseClient.auth.onAuthStateChange((event, session) => {
@@ -7648,6 +7656,14 @@ window.addEventListener('DOMContentLoaded',()=>{
     clearTimeout(dvDashTimer);
 
     dvDashTimer = setTimeout(async () => {
+      // No consultar endpoints protegidos antes de que Supabase tenga sesión.
+      const { data: sessionData, error: sessionError } = await supabaseClient.auth.getSession();
+      if(sessionError){
+        console.warn('[DATAVAULT DASHBOARD V3] sesión no disponible todavía:', sessionError.message || sessionError);
+        return;
+      }
+      if(!sessionData?.session?.user) return;
+
       if(dvDashBusy){
         dvDashQueued = true;
         return;
@@ -7701,10 +7717,18 @@ window.addEventListener('DOMContentLoaded',()=>{
     }
   }
 
-  function boot(){
-    setTimeout(() => refreshDashboard('boot'), 100);
-    setTimeout(() => refreshDashboard('boot-backup'), 900);
-    setTimeout(connectRealtime, 400);
+  async function boot(){
+    // Igual que Hydration: el Dashboard espera una sesión real antes de pedir
+    // operaciones protegidas. El evento de Auth se encarga del login posterior.
+    const { data, error } = await supabaseClient.auth.getSession();
+    if(error){
+      console.warn('[DATAVAULT DASHBOARD V3] no se pudo leer la sesión inicial:', error.message || error);
+      return;
+    }
+    if(!data?.session?.user) return;
+
+    refreshDashboard('boot-session-ready');
+    setTimeout(connectRealtime, 200);
   }
 
   document.addEventListener('DOMContentLoaded', boot);
