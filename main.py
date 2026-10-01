@@ -5,16 +5,21 @@ import io
 import mimetypes
 import os
 import threading
-import requests
-from datetime import datetime, timezone
+import base64
+import httpx
+from datetime import datetime, timezone, timedelta
 from uuid import UUID, uuid4
 from typing import List
 
 from fastapi import FastAPI, File, UploadFile, Request, Form, HTTPException, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from supabase import create_client, Client
+
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -128,6 +133,20 @@ GOOGLE_FOLDER_ID = os.getenv(
 ).strip()
 
 
+# Raíz autorizada para la nueva navegación. "root" permite trabajar con toda
+# Mi unidad usando únicamente las credenciales del backend.
+GOOGLE_DRIVE_ROOT_ID = os.getenv(
+    "GOOGLE_DRIVE_ROOT_ID",
+    "root"
+).strip() or "root"
+
+
+DRIVE_CACHE_TTL_SECONDS = max(
+    10,
+    int(os.getenv("DRIVE_CACHE_TTL_SECONDS", "60"))
+)
+
+
 SUPABASE_TEMP_BUCKET = os.getenv(
     "SUPABASE_TEMP_BUCKET",
     "custodia-pendiente"
@@ -148,6 +167,81 @@ MAX_BATCH_FILES = int(os.getenv("MAX_BATCH_FILES", "100"))
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "25"))
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 
+# Cliente HTTP reutilizable para Supabase Auth / Telegram.
+# Evita abrir una conexión nueva en cada llamada externa.
+HTTP_TIMEOUT_SECONDS = float(os.getenv("HTTP_TIMEOUT_SECONDS", "20"))
+HTTP_CLIENT = httpx.Client(
+    timeout=httpx.Timeout(HTTP_TIMEOUT_SECONDS),
+    limits=httpx.Limits(
+        max_connections=40,
+        max_keepalive_connections=20,
+    ),
+    follow_redirects=True,
+)
+
+
+# ============================================================
+# ESTADOS / ERRORES NORMALIZADOS (PUNTOS 27-28)
+# ============================================================
+
+ESTADO_PENDIENTE = "PENDIENTE"
+ESTADO_APROBADO = "APROBADO"
+ESTADO_RECHAZADO = "RECHAZADO"
+ESTADO_ERROR = "ERROR"
+
+ESTADO_ARCHIVO_ACTIVO = "ACTIVO"
+ESTADO_ARCHIVO_ELIMINADO = "ELIMINADO"
+ESTADO_ARCHIVO_ELIMINADO_EXTERNAMENTE = "ELIMINADO_EXTERNAMENTE"
+
+
+def normalizar_estado(valor, predeterminado=ESTADO_PENDIENTE) -> str:
+    texto = str(valor or "").strip().upper().replace(" ", "_")
+    alias = {
+        "PENDING": ESTADO_PENDIENTE,
+        "EN_COLA": ESTADO_PENDIENTE,
+        "PENDIENTE": ESTADO_PENDIENTE,
+        "APPROVED": ESTADO_APROBADO,
+        "APROBADA": ESTADO_APROBADO,
+        "APROBADO": ESTADO_APROBADO,
+        "REJECTED": ESTADO_RECHAZADO,
+        "RECHAZADA": ESTADO_RECHAZADO,
+        "RECHAZADO": ESTADO_RECHAZADO,
+        "FAILED": ESTADO_ERROR,
+        "FALLO": ESTADO_ERROR,
+        "ERROR": ESTADO_ERROR,
+    }
+    return alias.get(texto, texto or predeterminado)
+
+
+def normalizar_estado_archivo(valor, predeterminado=ESTADO_ARCHIVO_ACTIVO) -> str:
+    texto = str(valor or "").strip().upper().replace(" ", "_")
+    alias = {
+        "ACTIVE": ESTADO_ARCHIVO_ACTIVO,
+        "ACTIVO": ESTADO_ARCHIVO_ACTIVO,
+        "DELETED": ESTADO_ARCHIVO_ELIMINADO,
+        "ELIMINADO": ESTADO_ARCHIVO_ELIMINADO,
+        "TRASHED": ESTADO_ARCHIVO_ELIMINADO,
+        "ELIMINADO_EXTERNAMENTE": ESTADO_ARCHIVO_ELIMINADO_EXTERNAMENTE,
+    }
+    return alias.get(texto, texto or predeterminado)
+
+
+def detalle_error(codigo: str, mensaje: str, contexto=None) -> dict:
+    detalle = {
+        "code": str(codigo or "ERROR").strip().upper(),
+        "message": str(mensaje or "Error no especificado."),
+    }
+    if contexto not in (None, {}, []):
+        detalle["context"] = contexto
+    return detalle
+
+
+def error_api(status_code: int, codigo: str, mensaje: str, contexto=None):
+    return HTTPException(
+        status_code=status_code,
+        detail=detalle_error(codigo, mensaje, contexto),
+    )
+
 
 # ============================================================
 # GOOGLE DRIVE UPLOAD
@@ -158,7 +252,6 @@ def google_drive_configurado() -> bool:
         GOOGLE_CLIENT_ID,
         GOOGLE_CLIENT_SECRET,
         GOOGLE_REFRESH_TOKEN,
-        GOOGLE_FOLDER_ID
     ])
 
 
@@ -211,6 +304,11 @@ def crear_carpeta_google_drive(
     if not carpeta_id:
         raise RuntimeError(f"Google Drive no devolvió ID para la carpeta {nombre}")
 
+    try:
+        invalidar_cache_drive()
+    except Exception:
+        pass
+
     return carpeta_id
 
 
@@ -254,6 +352,11 @@ def subir_archivo_google_drive_en_carpeta(
     archivo_id = respuesta.get("id")
     if not archivo_id:
         raise RuntimeError(f"Google Drive no devolvió ID para {nombre_archivo}")
+
+    try:
+        invalidar_cache_drive()
+    except Exception:
+        pass
 
     return archivo_id
 
@@ -1088,6 +1191,26 @@ def guardar_politica_dlp(
         },
     )
 
+    registrar_evento_auditoria(
+        evento="POLITICA_DLP_MODIFICADA",
+        categoria="DLP",
+        actor=admin,
+        accion=accion,
+        objeto_tipo="POLITICA_DLP",
+        objeto_id=codigo,
+        estado=ESTADO_APROBADO,
+        detalle={
+            "anterior": {
+                "activa": actual.get("activa"),
+                "valor": actual.get("valor"),
+            },
+            "nuevo": {
+                "activa": nuevo.get("activa"),
+                "valor": nuevo.get("valor"),
+            },
+        },
+    )
+
     return nuevo
 
 
@@ -1237,6 +1360,192 @@ def limpiar_temporal_de_registro(registro: dict) -> bool:
     return eliminado
 
 
+
+# ============================================================
+# AUDITORÍA AMPLIADA + LOGIN (PUNTOS 22-24)
+# ============================================================
+
+def _ip_request(request: Request | None) -> str | None:
+    if request is None:
+        return None
+
+    forwarded = str(
+        request.headers.get("x-forwarded-for")
+        or ""
+    ).strip()
+
+    if forwarded:
+        return forwarded.split(",")[0].strip() or None
+
+    try:
+        return request.client.host if request.client else None
+    except Exception:
+        return None
+
+
+def _jwt_payload_sin_verificar(token: str) -> dict:
+    """Solo extrae claims de un JWT que YA fue validado contra Supabase."""
+    try:
+        partes = str(token or "").split(".")
+        if len(partes) < 2:
+            return {}
+
+        payload = partes[1]
+        payload += "=" * (-len(payload) % 4)
+
+        return json.loads(
+            base64.urlsafe_b64decode(
+                payload.encode("utf-8")
+            ).decode("utf-8")
+        )
+    except Exception:
+        return {}
+
+
+def registrar_evento_auditoria(
+    evento: str,
+    categoria: str = "SISTEMA",
+    actor: dict | None = None,
+    accion: str | None = None,
+    objeto_tipo: str | None = None,
+    objeto_id: str | None = None,
+    estado: str | None = None,
+    detalle=None,
+    request: Request | None = None,
+    session_hash: str | None = None,
+) -> bool:
+    actor = actor or {}
+
+    payload = {
+        "evento": str(evento or "EVENTO").upper(),
+        "categoria": str(categoria or "SISTEMA").upper(),
+        "actor_id": str(actor.get("id") or "") or None,
+        "actor_nombre": actor.get("nombre"),
+        "actor_correo": actor.get("correo"),
+        "actor_rol": actor.get("rol"),
+        "accion": str(accion or evento or "EVENTO").upper(),
+        "objeto_tipo": str(objeto_tipo or "").upper() or None,
+        "objeto_id": str(objeto_id or "") or None,
+        "estado": normalizar_estado(estado, "") if estado else None,
+        "detalle": detalle if detalle is not None else {},
+        "ip": _ip_request(request),
+        "user_agent": (
+            str(request.headers.get("user-agent") or "")[:500]
+            if request is not None
+            else None
+        ),
+        "session_hash": session_hash,
+        "created_at": ahora_iso(),
+    }
+
+    try:
+        (
+            supabase_admin
+            .table("auditoria_eventos_v2")
+            .insert(payload)
+            .execute()
+        )
+        return True
+
+    except Exception as error:
+        texto = str(error).lower()
+
+        # El login se deduplica por session_hash. Un duplicado es normal.
+        if session_hash and (
+            "duplicate" in texto
+            or "unique" in texto
+            or "23505" in texto
+        ):
+            return False
+
+        print("[AUDITORIA EVENTO ERROR]", evento, error)
+        return False
+
+
+def notificar_login_subordinado_telegram(
+    usuario: dict,
+    request: Request | None = None,
+):
+    if not politica_dlp_activa("ALERTA_LOGIN_SUBORDINADO"):
+        return
+
+    if not politica_dlp_activa("ALERTA_TELEGRAM"):
+        return
+
+    if not TELEGRAM_TOKEN or not AUTHORIZED_CHAT_IDS:
+        return
+
+    texto = (
+        "🔐 INICIO DE SESIÓN DATAVAULT\n\n"
+        f"👤 {usuario.get('nombre') or 'Usuario'}\n"
+        f"📧 {usuario.get('correo') or 'Sin correo'}\n"
+        f"🧩 Rol: {usuario.get('rol') or 'subordinado'}\n"
+        f"🕒 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"
+    )
+
+    for chat_id in AUTHORIZED_CHAT_IDS:
+        try:
+            telegram_request(
+                "sendMessage",
+                {
+                    "chat_id": chat_id,
+                    "text": texto,
+                },
+            )
+        except Exception as error:
+            print("[TELEGRAM LOGIN ALERT ERROR]", error)
+
+
+def registrar_login_usuario_si_corresponde(
+    usuario: dict,
+    access_token: str,
+    request: Request,
+):
+    claims = _jwt_payload_sin_verificar(access_token)
+
+    # Supabase suele mantener session_id durante los refresh del mismo login.
+    # Si no está presente usamos el hash del access token como fallback.
+    referencia_sesion = str(
+        claims.get("session_id")
+        or claims.get("sid")
+        or ""
+    ).strip()
+
+    if referencia_sesion:
+        session_hash = hashlib.sha256(
+            referencia_sesion.encode("utf-8")
+        ).hexdigest()
+    else:
+        session_hash = hashlib.sha256(
+            str(access_token).encode("utf-8")
+        ).hexdigest()
+
+    insertado = registrar_evento_auditoria(
+        evento="LOGIN",
+        categoria="AUTENTICACION",
+        actor=usuario,
+        accion="INICIAR_SESION",
+        objeto_tipo="SESION",
+        objeto_id=referencia_sesion or None,
+        estado="APROBADO",
+        detalle={
+            "proveedor": "SUPABASE_AUTH",
+            "rol": usuario.get("rol"),
+        },
+        request=request,
+        session_hash=session_hash,
+    )
+
+    if (
+        insertado
+        and str(usuario.get("rol") or "").lower() == "subordinado"
+    ):
+        notificar_login_subordinado_telegram(
+            usuario,
+            request=request,
+        )
+
+
 # ============================================================
 # IDENTIDAD REAL DEL USUARIO DESDE SUPABASE AUTH
 # ============================================================
@@ -1260,7 +1569,7 @@ def obtener_usuario_supabase_desde_request(request: Request) -> dict:
         )
 
     try:
-        respuesta = requests.get(
+        respuesta = HTTP_CLIENT.get(
             f"{SUPABASE_URL}/auth/v1/user",
             headers={
                 "apikey": SUPABASE_KEY,
@@ -1268,7 +1577,7 @@ def obtener_usuario_supabase_desde_request(request: Request) -> dict:
             },
             timeout=15
         )
-    except requests.RequestException as error:
+    except httpx.HTTPError as error:
         print("[SUPABASE AUTH ERROR]", error)
         raise HTTPException(
             status_code=503,
@@ -1317,12 +1626,24 @@ def obtener_usuario_supabase_desde_request(request: Request) -> dict:
             detail="Supabase no devolvió el UID del usuario."
         )
 
-    return {
+    usuario_normalizado = {
         "id": solicitante_id,
         "nombre": solicitante_nombre,
         "correo": solicitante_correo,
         "rol": rol,
     }
+
+    try:
+        registrar_login_usuario_si_corresponde(
+            usuario_normalizado,
+            access_token,
+            request,
+        )
+    except Exception as error:
+        # Un problema de auditoría/Telegram nunca invalida una sesión válida.
+        print("[LOGIN AUDIT BACKGROUND ERROR]", error)
+
+    return usuario_normalizado
 
 
 def obtener_admin_desde_request(request: Request) -> dict:
@@ -1356,151 +1677,405 @@ def obtener_archivo_drive(service, file_id: str):
     )
 
 
-def listar_carpetas_drive_raiz():
-    """Lista únicamente las carpetas hijas directas del directorio autorizado.
+def _cache_drive_get(cache_key: str):
+    try:
+        respuesta = (
+            supabase_admin
+            .table("drive_cache_navegacion")
+            .select("payload,expires_at")
+            .eq("cache_key", str(cache_key))
+            .gt("expires_at", ahora_iso())
+            .limit(1)
+            .execute()
+        )
+        if respuesta.data:
+            return respuesta.data[0].get("payload")
+    except Exception as error:
+        print("[DRIVE CACHE GET]", error)
+    return None
 
-    Se conserva porque otras funciones del proyecto la utilizan para operaciones
-    sobre la raíz. Para el selector de movimiento se usa la versión recursiva.
-    """
 
-    service = obtener_servicio_google_drive()
+def _cache_drive_set(cache_key: str, payload):
+    ahora = datetime.now(timezone.utc)
+    expira = ahora + timedelta(seconds=DRIVE_CACHE_TTL_SECONDS)
 
-    consulta = (
-        f"'{GOOGLE_FOLDER_ID}' in parents and "
-        "mimeType='application/vnd.google-apps.folder' and trashed=false"
-    )
+    fila = {
+        "cache_key": str(cache_key),
+        "payload": payload,
+        "created_at": ahora.isoformat(),
+        "updated_at": ahora.isoformat(),
+        "expires_at": expira.isoformat(),
+    }
 
-    respuesta = (
+    try:
+        existente = (
+            supabase_admin
+            .table("drive_cache_navegacion")
+            .select("id")
+            .eq("cache_key", str(cache_key))
+            .limit(1)
+            .execute()
+        )
+
+        if existente.data:
+            (
+                supabase_admin
+                .table("drive_cache_navegacion")
+                .update(fila)
+                .eq("id", existente.data[0]["id"])
+                .execute()
+            )
+        else:
+            (
+                supabase_admin
+                .table("drive_cache_navegacion")
+                .insert(fila)
+                .execute()
+            )
+    except Exception as error:
+        print("[DRIVE CACHE SET]", error)
+
+
+def invalidar_cache_drive():
+    """Invalida navegación después de subir, mover o eliminar."""
+    try:
+        (
+            supabase_admin
+            .table("drive_cache_navegacion")
+            .delete()
+            .like("cache_key", "%")
+            .execute()
+        )
+    except Exception as error:
+        print("[DRIVE CACHE INVALIDATE]", error)
+
+
+def obtener_raiz_drive_autorizada(service=None) -> dict:
+    cache_key = f"root:{GOOGLE_DRIVE_ROOT_ID}"
+    cached = _cache_drive_get(cache_key)
+    if cached:
+        return cached
+
+    service = service or obtener_servicio_google_drive()
+
+    meta = (
         service
         .files()
-        .list(
-            q=consulta,
-            fields="files(id,name,parents)",
-            orderBy="name",
-            pageSize=200,
+        .get(
+            fileId=GOOGLE_DRIVE_ROOT_ID,
+            fields="id,name,mimeType,parents,trashed",
             supportsAllDrives=True,
-            includeItemsFromAllDrives=True,
         )
         .execute()
     )
 
-    return respuesta.get("files") or []
+    raiz = {
+        "id": str(meta.get("id") or GOOGLE_DRIVE_ROOT_ID),
+        "name": "Mi unidad" if GOOGLE_DRIVE_ROOT_ID == "root" else (
+            meta.get("name") or "Raíz autorizada"
+        ),
+        "mimeType": meta.get("mimeType"),
+        "parents": meta.get("parents") or [],
+        "path": "Mi unidad" if GOOGLE_DRIVE_ROOT_ID == "root" else (
+            meta.get("name") or "Raíz autorizada"
+        ),
+    }
+
+    _cache_drive_set(cache_key, raiz)
+    return raiz
+
+
+def _normalizar_drive_id(folder_id: str, service=None) -> str:
+    valor = str(folder_id or "").strip()
+
+    if not valor or valor == "root":
+        return obtener_raiz_drive_autorizada(service)["id"]
+
+    if valor == GOOGLE_DRIVE_ROOT_ID:
+        return obtener_raiz_drive_autorizada(service)["id"]
+
+    return valor
+
+
+def resolver_ruta_drive(folder_id: str) -> dict:
+    """Valida pertenencia a la raíz autorizada sin recorrer todo Drive."""
+
+    service = obtener_servicio_google_drive()
+    raiz = obtener_raiz_drive_autorizada(service)
+    raiz_id = str(raiz["id"])
+
+    objetivo_id = _normalizar_drive_id(folder_id, service)
+
+    cache_key = f"path:{raiz_id}:{objetivo_id}"
+    cached = _cache_drive_get(cache_key)
+    if cached:
+        return cached
+
+    actual_id = objetivo_id
+    visitados = set()
+    cadena = []
+    autorizado = False
+
+    for _ in range(80):
+        if actual_id in visitados:
+            break
+        visitados.add(actual_id)
+
+        meta = (
+            service
+            .files()
+            .get(
+                fileId=actual_id,
+                fields="id,name,mimeType,parents,trashed",
+                supportsAllDrives=True,
+            )
+            .execute()
+        )
+
+        if meta.get("trashed"):
+            raise error_api(
+                409,
+                "DRIVE_FOLDER_TRASHED",
+                "La carpeta seleccionada está en la papelera de Google Drive.",
+            )
+
+        cadena.append(meta)
+
+        if str(meta.get("id")) == raiz_id:
+            autorizado = True
+            break
+
+        padres = meta.get("parents") or []
+        if not padres:
+            break
+
+        actual_id = str(padres[0])
+
+    if not autorizado:
+        raise error_api(
+            403,
+            "DRIVE_OUTSIDE_SCOPE",
+            "La carpeta no pertenece a la raíz de Drive autorizada para DataVault.",
+        )
+
+    cadena.reverse()
+
+    nombres = []
+    breadcrumb = []
+    for indice, meta in enumerate(cadena):
+        nombre = (
+            raiz.get("name")
+            if indice == 0
+            else str(meta.get("name") or "Carpeta")
+        )
+        nombres.append(nombre)
+        breadcrumb.append({
+            "id": str(meta.get("id")),
+            "name": nombre,
+        })
+
+    objetivo = cadena[-1]
+
+    if (
+        objetivo.get("mimeType")
+        != "application/vnd.google-apps.folder"
+    ):
+        raise error_api(
+            400,
+            "DRIVE_DESTINATION_NOT_FOLDER",
+            "El destino seleccionado no es una carpeta de Google Drive.",
+        )
+
+    respuesta = {
+        "id": str(objetivo.get("id")),
+        "name": (
+            raiz.get("name")
+            if str(objetivo.get("id")) == raiz_id
+            else str(objetivo.get("name") or "Carpeta")
+        ),
+        "parent_id": (
+            str((objetivo.get("parents") or [None])[0])
+            if objetivo.get("parents")
+            else None
+        ),
+        "path": " / ".join(nombres),
+        "depth": max(0, len(cadena) - 1),
+        "ancestors": [
+            str(x.get("id"))
+            for x in cadena[:-1]
+        ],
+        "breadcrumb": breadcrumb,
+        "root": str(objetivo.get("id")) == raiz_id,
+    }
+
+    _cache_drive_set(cache_key, respuesta)
+    return respuesta
+
+
+def listar_hijos_drive(
+    folder_id: str,
+    include_files: bool = True,
+) -> dict:
+    """Lista solo los hijos inmediatos. No hace búsqueda recursiva."""
+
+    service = obtener_servicio_google_drive()
+    actual = resolver_ruta_drive(folder_id)
+    actual_id = str(actual["id"])
+
+    cache_key = (
+        f"children:{actual_id}:"
+        f"{'all' if include_files else 'folders'}"
+    )
+    cached = _cache_drive_get(cache_key)
+    if cached:
+        return cached
+
+    consulta = f"'{actual_id}' in parents and trashed=false"
+
+    page_token = None
+    elementos = []
+
+    while True:
+        respuesta = (
+            service
+            .files()
+            .list(
+                q=consulta,
+                fields=(
+                    "nextPageToken,"
+                    "files(id,name,mimeType,parents,size,modifiedTime)"
+                ),
+                orderBy="folder,name",
+                pageSize=500,
+                pageToken=page_token,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+            )
+            .execute()
+        )
+
+        elementos.extend(respuesta.get("files") or [])
+
+        page_token = respuesta.get("nextPageToken")
+        if not page_token:
+            break
+
+    folders = []
+    files = []
+
+    for item in elementos:
+        es_carpeta = (
+            item.get("mimeType")
+            == "application/vnd.google-apps.folder"
+        )
+
+        normalizado = {
+            "id": str(item.get("id") or ""),
+            "name": str(item.get("name") or ""),
+            "mimeType": item.get("mimeType"),
+            "parent_id": actual_id,
+            "modifiedTime": item.get("modifiedTime"),
+        }
+
+        if es_carpeta:
+            normalizado["type"] = "folder"
+            folders.append(normalizado)
+        elif include_files:
+            normalizado["type"] = "file"
+            try:
+                normalizado["size"] = int(item.get("size") or 0)
+            except Exception:
+                normalizado["size"] = 0
+            files.append(normalizado)
+
+    salida = {
+        "current": actual,
+        "breadcrumb": actual.get("breadcrumb") or [],
+        "folders": folders,
+        "files": files,
+    }
+
+    _cache_drive_set(cache_key, salida)
+    return salida
+
+
+def listar_carpetas_drive_raiz():
+    raiz = obtener_raiz_drive_autorizada()
+    salida = listar_hijos_drive(
+        raiz["id"],
+        include_files=False,
+    )
+    return salida.get("folders") or []
 
 
 def listar_carpetas_drive_recursivas():
-    """Devuelve todas las carpetas debajo de GOOGLE_FOLDER_ID.
+    """Compatibilidad con el selector antiguo.
 
-    Cada entrada incluye su ruta, profundidad y ancestros para poder mostrar un
-    explorador buscable en la web y validar que una carpeta no se mueva dentro
-    de sí misma o de una de sus subcarpetas.
+    La navegación nueva usa /drive/browse (hijos inmediatos). Esta función solo
+    mantiene el frontend existente y guarda el resultado plano en caché.
     """
 
-    service = obtener_servicio_google_drive()
+    raiz = obtener_raiz_drive_autorizada()
+    cache_key = f"flat-folders:{raiz['id']}"
+
+    cached = _cache_drive_get(cache_key)
+    if cached:
+        return cached
 
     pendientes = [{
-        "id": GOOGLE_FOLDER_ID,
-        "path": "DRIVE PROYECTO",
+        "id": raiz["id"],
+        "path": raiz["path"],
         "depth": 0,
         "ancestors": [],
     }]
 
-    visitados = {GOOGLE_FOLDER_ID}
+    visitados = {str(raiz["id"])}
     carpetas = []
 
     while pendientes:
         padre = pendientes.pop(0)
-        page_token = None
 
-        while True:
-            consulta = (
-                f"'{padre['id']}' in parents and "
-                "mimeType='application/vnd.google-apps.folder' and trashed=false"
-            )
+        hijos = listar_hijos_drive(
+            padre["id"],
+            include_files=False,
+        ).get("folders") or []
 
-            respuesta = (
-                service
-                .files()
-                .list(
-                    q=consulta,
-                    fields="nextPageToken,files(id,name,parents)",
-                    orderBy="name",
-                    pageSize=200,
-                    pageToken=page_token,
-                    supportsAllDrives=True,
-                    includeItemsFromAllDrives=True,
-                )
-                .execute()
-            )
+        for carpeta in hijos:
+            carpeta_id = str(carpeta.get("id") or "")
+            if not carpeta_id or carpeta_id in visitados:
+                continue
 
-            for carpeta in respuesta.get("files") or []:
-                carpeta_id = str(carpeta.get("id") or "").strip()
+            visitados.add(carpeta_id)
 
-                if not carpeta_id or carpeta_id in visitados:
-                    continue
+            nombre = str(carpeta.get("name") or "Carpeta")
+            path = f"{padre['path']} / {nombre}"
 
-                visitados.add(carpeta_id)
-
-                nombre = (
-                    str(carpeta.get("name") or "Carpeta").strip()
-                    or "Carpeta"
-                )
-
-                path = f"{padre['path']} / {nombre}"
-
-                ancestors = [
+            item = {
+                "id": carpeta_id,
+                "name": nombre,
+                "parent_id": padre["id"],
+                "path": path,
+                "depth": int(padre["depth"]) + 1,
+                "ancestors": [
                     *padre["ancestors"],
-                    padre["id"]
-                ]
+                    padre["id"],
+                ],
+            }
 
-                item = {
-                    "id": carpeta_id,
-                    "name": nombre,
-                    "parent_id": padre["id"],
-                    "path": path,
-                    "depth": int(padre["depth"]) + 1,
-                    "ancestors": ancestors,
-                }
+            carpetas.append(item)
+            pendientes.append(item)
 
-                carpetas.append(item)
-                pendientes.append(item)
+            if len(carpetas) >= 5000:
+                _cache_drive_set(cache_key, carpetas)
+                return carpetas
 
-                if len(carpetas) >= 2000:
-                    return carpetas
-
-            page_token = respuesta.get("nextPageToken")
-
-            if not page_token:
-                break
-
+    _cache_drive_set(cache_key, carpetas)
     return carpetas
 
 
 def validar_destino_drive(destino_id: str):
-
-    destino_id = str(destino_id or "").strip()
-
-    if not destino_id or destino_id == GOOGLE_FOLDER_ID:
-        return {
-            "id": GOOGLE_FOLDER_ID,
-            "name": "DRIVE PROYECTO",
-            "parent_id": None,
-            "path": "DRIVE PROYECTO",
-            "depth": 0,
-            "ancestors": [],
-        }
-
-    for carpeta in listar_carpetas_drive_recursivas():
-
-        if str(carpeta.get("id")) == destino_id:
-            return carpeta
-
-    raise HTTPException(
-        status_code=400,
-        detail=(
-            "La carpeta destino no pertenece al "
-            "directorio autorizado de DataVault."
-        ),
-    )
+    """Valida un destino concreto sin buscar recursivamente todo Drive."""
+    return resolver_ruta_drive(destino_id)
 
 
 def mover_objeto_google_drive(
@@ -1545,19 +2120,22 @@ def mover_objeto_google_drive(
     if remove_parents:
         kwargs["removeParents"] = remove_parents
 
-    return (
+    resultado = (
         service
         .files()
         .update(**kwargs)
         .execute()
     )
 
+    invalidar_cache_drive()
+    return resultado
+
 
 def enviar_a_papelera_google_drive(file_id: str):
 
     service = obtener_servicio_google_drive()
 
-    return (
+    resultado = (
         service
         .files()
         .update(
@@ -1568,6 +2146,9 @@ def enviar_a_papelera_google_drive(file_id: str):
         )
         .execute()
     )
+
+    invalidar_cache_drive()
+    return resultado
 
 
 def obtener_objeto_operable(
@@ -2302,16 +2883,37 @@ def procesar_solicitud_operacion(
                 supabase_admin
                 .table("solicitudes_operacion")
                 .update({
-                    "estado": "RECHAZADO",
+                    "estado": ESTADO_RECHAZADO,
                     "fecha_resolucion": ahora_iso(),
                     "resuelto_por": str(resuelto_por),
                     "resultado": resultado_rechazo,
                 })
                 .eq("id", solicitud_id)
-                .eq("estado", "PENDIENTE")
+                .eq("estado", ESTADO_PENDIENTE)
                 .execute()
             )
-            return (actualizado.data or [solicitud])[0], True
+
+            solicitud_final = (actualizado.data or [solicitud])[0]
+
+            registrar_evento_auditoria(
+                evento="OPERACION_RECHAZADA",
+                categoria="OPERACIONES",
+                actor={
+                    "id": str(resuelto_por),
+                    "nombre": str(resuelto_por),
+                    "rol": "custodio",
+                },
+                accion=tipo_rechazado,
+                objeto_tipo=solicitud.get("objeto_tipo"),
+                objeto_id=solicitud_id,
+                estado=ESTADO_RECHAZADO,
+                detalle={
+                    "nombre_objeto": solicitud.get("nombre_objeto"),
+                    "resultado": resultado_rechazo,
+                },
+            )
+
+            return solicitud_final, True
 
         objeto = obtener_objeto_operable(
             str(solicitud.get("solicitante_id") or ""),
@@ -2396,21 +2998,60 @@ def procesar_solicitud_operacion(
 
         actualizar_auditoria_operacion(objeto, cambios)
 
+        destino_final_id = None
+        destino_final_ruta = None
+
+        if tipo == "MOVER":
+            destino_final_id = str(
+                solicitud.get("carpeta_destino_id") or ""
+            ) or None
+            destino_final_ruta = (
+                solicitud.get("carpeta_destino_nombre")
+                or None
+            )
+        elif tipo == "ELIMINAR":
+            destino_final_id = str(objeto.get("drive_id") or "") or None
+            destino_final_ruta = "PAPELERA_GOOGLE_DRIVE"
+
         actualizado = (
             supabase_admin
             .table("solicitudes_operacion")
             .update({
-                "estado": "APROBADO",
+                "estado": ESTADO_APROBADO,
                 "fecha_resolucion": ahora_iso(),
                 "resuelto_por": str(resuelto_por),
                 "resultado": resultado_texto,
+                "destino_final_id": destino_final_id,
+                "destino_final_ruta": destino_final_ruta,
             })
             .eq("id", solicitud_id)
-            .eq("estado", "PENDIENTE")
+            .eq("estado", ESTADO_PENDIENTE)
             .execute()
         )
 
-        return (actualizado.data or [solicitud])[0], True
+        solicitud_final = (actualizado.data or [solicitud])[0]
+
+        registrar_evento_auditoria(
+            evento="OPERACION_APROBADA",
+            categoria="OPERACIONES",
+            actor={
+                "id": str(resuelto_por),
+                "nombre": str(resuelto_por),
+                "rol": "custodio",
+            },
+            accion=tipo,
+            objeto_tipo=objeto.get("tipo"),
+            objeto_id=solicitud_id,
+            estado=ESTADO_APROBADO,
+            detalle={
+                "nombre_objeto": objeto.get("nombre"),
+                "resultado": resultado_texto,
+                "destino_final_id": destino_final_id,
+                "destino_final_ruta": destino_final_ruta,
+            },
+        )
+
+        return solicitud_final, True
 
 
 def procesar_operacion_telegram_background(
@@ -2522,7 +3163,7 @@ def telegram_request(
 
     try:
 
-        response = requests.post(
+        response = HTTP_CLIENT.post(
             url,
             json=payload,
             timeout=15
@@ -4801,7 +5442,19 @@ async def registrar_y_solicitar_custodia(
             solicitante_nombre,
 
         "solicitante_correo":
-            solicitante_correo
+            solicitante_correo,
+
+        "drive_parent_id":
+            (GOOGLE_FOLDER_ID or GOOGLE_DRIVE_ROOT_ID),
+
+        "ubicacion_drive":
+            "DRIVE PROYECTO",
+
+        "destino_solicitado_id":
+            (GOOGLE_FOLDER_ID or GOOGLE_DRIVE_ROOT_ID),
+
+        "destino_solicitado_ruta":
+            "DRIVE PROYECTO"
 
     }
 
@@ -4918,6 +5571,25 @@ async def registrar_y_solicitar_custodia(
     finally:
         del contenido
 
+
+    registrar_evento_auditoria(
+        evento="SOLICITUD_SUBIDA",
+        categoria="CUSTODIA",
+        actor=usuario_auth,
+        accion="SUBIR_ARCHIVO",
+        objeto_tipo="ARCHIVO",
+        objeto_id=str(id_auditoria),
+        estado=ESTADO_PENDIENTE,
+        detalle={
+            "nombre_archivo": nombre_final,
+            "sha256": hash_sha256,
+            "destino_solicitado_id": (
+                GOOGLE_FOLDER_ID or GOOGLE_DRIVE_ROOT_ID
+            ),
+            "destino_solicitado_ruta": "DRIVE PROYECTO",
+        },
+        request=request,
+    )
 
     # La solicitud ya está persistida. Telegram se procesa en segundo plano:
     # una caída del bot no invalida ni elimina la solicitud.
@@ -5408,6 +6080,12 @@ async def registrar_lote_custodia(
                 "ubicacion_drive":
                     destino_upload_path,
 
+                "destino_solicitado_id":
+                    destino_upload_id,
+
+                "destino_solicitado_ruta":
+                    destino_upload_path,
+
             }
 
 
@@ -5544,6 +6222,23 @@ async def registrar_lote_custodia(
 
 
     if procesados:
+        registrar_evento_auditoria(
+            evento="SOLICITUD_SUBIDA_LOTE",
+            categoria="CUSTODIA",
+            actor=usuario_auth,
+            accion="SUBIR_LOTE",
+            objeto_tipo="LOTE",
+            objeto_id=lote_uuid,
+            estado=ESTADO_PENDIENTE,
+            detalle={
+                "total_registrados": len(procesados),
+                "total_errores": len(errores),
+                "destino_solicitado_id": destino_upload_id,
+                "destino_solicitado_ruta": destino_upload_path,
+            },
+            request=request,
+        )
+
         background_tasks.add_task(
             notificar_menu_pendientes_background,
             base_url_actual,
@@ -5577,17 +6272,17 @@ async def registrar_lote_custodia(
 
     estado = (
 
-        "cancelado"
+        "CANCELADO"
 
         if cancelado
 
         else (
 
-            "partial"
+            "PARCIAL"
 
             if errores
 
-            else "ok"
+            else "REGISTRADO"
 
         )
 
@@ -5851,7 +6546,7 @@ async def crear_usuario_desde_web(
 
     try:
 
-        respuesta = requests.post(
+        respuesta = HTTP_CLIENT.post(
 
             supabase_auth_url,
 
@@ -5864,7 +6559,7 @@ async def crear_usuario_desde_web(
         )
 
 
-    except requests.RequestException as error:
+    except httpx.HTTPError as error:
 
         print(
             "[SUPABASE CREATE USER ERROR]",
@@ -6026,7 +6721,7 @@ async def listar_usuarios_desde_web(
 
     try:
 
-        respuesta = requests.get(
+        respuesta = HTTP_CLIENT.get(
 
             f"{SUPABASE_URL}"
             f"/auth/v1/admin/users",
@@ -6043,7 +6738,7 @@ async def listar_usuarios_desde_web(
         )
 
 
-    except requests.RequestException as error:
+    except httpx.HTTPError as error:
 
         print(
             "[SUPABASE LIST USERS ERROR]",
@@ -6262,7 +6957,7 @@ async def eliminar_usuario_desde_web(
         )
 
 
-    except requests.RequestException as error:
+    except httpx.HTTPError as error:
 
         print(
             "[SUPABASE DELETE USER ERROR]",
@@ -6500,6 +7195,19 @@ def resolver_custodia_archivo(
                         ),
 
                     "ubicacion_drive":
+                        (
+                            registro.get("ubicacion_drive")
+                            or "DRIVE PROYECTO"
+                        ),
+
+                    "destino_final_id":
+                        (
+                            registro.get("drive_parent_id")
+                            or GOOGLE_FOLDER_ID
+                            or GOOGLE_DRIVE_ROOT_ID
+                        ),
+
+                    "destino_final_ruta":
                         (
                             registro.get("ubicacion_drive")
                             or "DRIVE PROYECTO"
@@ -6802,6 +7510,19 @@ def resolver_custodia_carpeta(
                         ),
 
                     "ubicacion_drive":
+                        (
+                            documentos[0].get("ubicacion_drive")
+                            or "DRIVE PROYECTO"
+                        ),
+
+                    "destino_final_id":
+                        (
+                            documentos[0].get("drive_parent_id")
+                            or GOOGLE_FOLDER_ID
+                            or GOOGLE_DRIVE_ROOT_ID
+                        ),
+
+                    "destino_final_ruta":
                         (
                             documentos[0].get("ubicacion_drive")
                             or "DRIVE PROYECTO"
@@ -7271,99 +7992,406 @@ async def cancelar_custodia_desde_web(
     return resultado
 
 
+
+# ============================================================
+# REPORTES EXCEL XLSX (PUNTOS 25-26)
+# ============================================================
+
+def _safe_select_tabla(tabla: str, columnas: str = "*") -> list:
+    try:
+        respuesta = (
+            supabase_admin
+            .table(tabla)
+            .select(columnas)
+            .execute()
+        )
+        return respuesta.data or []
+    except Exception as error:
+        print(f"[REPORT TABLE ERROR] {tabla}", error)
+        return []
+
+
+def _valor_excel(valor):
+    if valor is None:
+        return ""
+    if isinstance(valor, (dict, list, tuple, set)):
+        return json.dumps(
+            valor,
+            ensure_ascii=False,
+            default=str,
+        )
+    return valor
+
+
+def _formatear_hoja_excel(ws):
+    if ws.max_row < 1:
+        return
+
+    header_fill = PatternFill(
+        fill_type="solid",
+        fgColor="1F4E78",
+    )
+    header_font = Font(
+        bold=True,
+        color="FFFFFF",
+    )
+    borde = Border(
+        bottom=Side(
+            style="thin",
+            color="B7B7B7",
+        )
+    )
+
+    for celda in ws[1]:
+        celda.fill = header_fill
+        celda.font = header_font
+        celda.alignment = Alignment(
+            horizontal="center",
+            vertical="center",
+        )
+        celda.border = borde
+
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = ws.dimensions
+
+    for columna in ws.columns:
+        letra = get_column_letter(columna[0].column)
+        max_len = 0
+
+        for celda in columna:
+            texto = str(celda.value or "")
+            max_len = max(
+                max_len,
+                min(len(texto), 60),
+            )
+
+            if isinstance(celda.value, datetime):
+                celda.number_format = "yyyy-mm-dd hh:mm:ss"
+
+            celda.alignment = Alignment(
+                vertical="top",
+                wrap_text=True,
+            )
+
+        ws.column_dimensions[letra].width = max(
+            12,
+            min(max_len + 2, 55),
+        )
+
+
+def _crear_hoja_datos(
+    wb: Workbook,
+    titulo: str,
+    columnas: list,
+    filas: list,
+):
+    ws = wb.create_sheet(title=titulo[:31])
+    ws.append([col[0] for col in columnas])
+
+    for fila in filas:
+        ws.append([
+            _valor_excel(fila.get(col[1]))
+            for col in columnas
+        ])
+
+    _formatear_hoja_excel(ws)
+    return ws
+
+
+def generar_reporte_excel_datavault() -> bytes:
+    auditoria = _safe_select_tabla("auditoria_custodia")
+    operaciones = _safe_select_tabla("solicitudes_operacion")
+    eliminados = _safe_select_tabla("elementos_eliminados")
+    eventos = _safe_select_tabla("auditoria_eventos_v2")
+    dlp = _safe_select_tabla("dlp_auditoria")
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Resumen"
+
+    total = len(auditoria)
+    aprobados = sum(
+        1 for x in auditoria
+        if normalizar_estado(x.get("estado")) == ESTADO_APROBADO
+    )
+    pendientes = sum(
+        1 for x in auditoria
+        if normalizar_estado(x.get("estado")) == ESTADO_PENDIENTE
+    )
+    rechazados = sum(
+        1 for x in auditoria
+        if normalizar_estado(x.get("estado")) == ESTADO_RECHAZADO
+    )
+
+    ws.append(["INDICADOR", "VALOR"])
+    ws.append(["Generado UTC", ahora_iso()])
+    ws.append(["Documentos auditados", total])
+    ws.append(["Aprobados", aprobados])
+    ws.append(["Pendientes", pendientes])
+    ws.append(["Rechazados", rechazados])
+    ws.append(["Operaciones registradas", len(operaciones)])
+    ws.append(["Elementos eliminados", len(eliminados)])
+    ws.append(["Eventos de auditoría", len(eventos)])
+    ws.append(["Cambios DLP", len(dlp)])
+    _formatear_hoja_excel(ws)
+
+    _crear_hoja_datos(
+        wb,
+        "Custodia",
+        [
+            ("ID", "id"),
+            ("Archivo", "nombre_archivo"),
+            ("Usuario", "solicitante_nombre"),
+            ("Correo", "solicitante_correo"),
+            ("Estado", "estado"),
+            ("Estado archivo", "estado_archivo"),
+            ("Tamaño bytes", "tamano_bytes"),
+            ("SHA256", "hash_sha256"),
+            ("Ruta relativa", "ruta_relativa"),
+            ("Destino solicitado", "destino_solicitado_ruta"),
+            ("Destino final", "destino_final_ruta"),
+            ("Ubicación Drive", "ubicacion_drive"),
+            ("Fecha solicitud", "fecha_solicitud"),
+            ("Fecha transferencia", "fecha_transferencia"),
+            ("Fecha eliminación", "fecha_eliminacion"),
+        ],
+        auditoria,
+    )
+
+    _crear_hoja_datos(
+        wb,
+        "Operaciones",
+        [
+            ("ID", "id"),
+            ("Tipo", "tipo_operacion"),
+            ("Objeto", "objeto_tipo"),
+            ("Nombre", "nombre_objeto"),
+            ("Usuario", "solicitante_nombre"),
+            ("Origen", "carpeta_origen"),
+            ("Destino solicitado", "destino_solicitado_ruta"),
+            ("Destino final", "destino_final_ruta"),
+            ("Estado", "estado"),
+            ("Fecha solicitud", "fecha_solicitud"),
+            ("Fecha resolución", "fecha_resolucion"),
+            ("Resultado", "resultado"),
+        ],
+        operaciones,
+    )
+
+    _crear_hoja_datos(
+        wb,
+        "Eliminaciones",
+        [
+            ("ID", "id"),
+            ("Tipo", "objeto_tipo"),
+            ("Nombre", "nombre_objeto"),
+            ("Usuario", "solicitante_nombre"),
+            ("Correo", "solicitante_correo"),
+            ("Ruta anterior", "ubicacion_anterior"),
+            ("Estado", "estado"),
+            ("Fecha eliminación", "fecha_eliminacion"),
+            ("Detalle", "detalle"),
+        ],
+        eliminados,
+    )
+
+    _crear_hoja_datos(
+        wb,
+        "Auditoria",
+        [
+            ("Evento", "evento"),
+            ("Categoría", "categoria"),
+            ("Acción", "accion"),
+            ("Actor", "actor_nombre"),
+            ("Correo", "actor_correo"),
+            ("Rol", "actor_rol"),
+            ("Objeto", "objeto_tipo"),
+            ("Objeto ID", "objeto_id"),
+            ("Estado", "estado"),
+            ("IP", "ip"),
+            ("Fecha", "created_at"),
+            ("Detalle", "detalle"),
+        ],
+        eventos,
+    )
+
+    _crear_hoja_datos(
+        wb,
+        "Cambios DLP",
+        [
+            ("Política", "politica_codigo"),
+            ("Acción", "accion"),
+            ("Valor anterior", "valor_anterior"),
+            ("Valor nuevo", "valor_nuevo"),
+            ("Actor", "actor_nombre"),
+            ("Correo", "actor_correo"),
+            ("Fecha", "fecha"),
+        ],
+        dlp,
+    )
+
+    salida = io.BytesIO()
+    wb.save(salida)
+    salida.seek(0)
+    return salida.getvalue()
+
+
+@app.get("/reports/audit.xlsx")
+def descargar_reporte_excel(
+    request: Request,
+):
+    admin = obtener_admin_desde_request(request)
+
+    contenido = generar_reporte_excel_datavault()
+
+    registrar_evento_auditoria(
+        evento="REPORTE_EXCEL_GENERADO",
+        categoria="REPORTES",
+        actor=admin,
+        accion="EXPORTAR_XLSX",
+        objeto_tipo="REPORTE",
+        objeto_id=None,
+        estado=ESTADO_APROBADO,
+        detalle={
+            "formato": "xlsx",
+            "bytes": len(contenido),
+        },
+        request=request,
+    )
+
+    nombre = (
+        "datavault_reporte_"
+        + datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        + ".xlsx"
+    )
+
+    return StreamingResponse(
+        io.BytesIO(contenido),
+        media_type=(
+            "application/vnd.openxmlformats-officedocument."
+            "spreadsheetml.sheet"
+        ),
+        headers={
+            "Content-Disposition": f'attachment; filename="{nombre}"'
+        },
+    )
+
+
+@app.get("/drive/browse")
+def navegar_drive(
+    request: Request,
+    folder_id: str = "root",
+    include_files: bool = True,
+):
+    obtener_usuario_supabase_desde_request(request)
+
+    if not google_drive_configurado():
+        raise error_api(
+            503,
+            "DRIVE_NOT_CONFIGURED",
+            "Google Drive no está configurado.",
+        )
+
+    try:
+        return {
+            "status": "ok",
+            "root": obtener_raiz_drive_autorizada(),
+            **listar_hijos_drive(
+                folder_id,
+                include_files=bool(include_files),
+            ),
+            "cache_ttl_seconds": DRIVE_CACHE_TTL_SECONDS,
+        }
+    except HTTPException:
+        raise
+    except Exception as error:
+        print("[DRIVE BROWSE ERROR]", error)
+        raise error_api(
+            502,
+            "DRIVE_BROWSE_FAILED",
+            "No se pudo consultar la carpeta de Google Drive.",
+        )
+
+
+@app.get("/drive/breadcrumb")
+def breadcrumb_drive(
+    request: Request,
+    folder_id: str = "root",
+):
+    obtener_usuario_supabase_desde_request(request)
+
+    try:
+        info = resolver_ruta_drive(folder_id)
+        return {
+            "status": "ok",
+            "folder": info,
+            "breadcrumb": info.get("breadcrumb") or [],
+        }
+    except HTTPException:
+        raise
+    except Exception as error:
+        print("[DRIVE BREADCRUMB ERROR]", error)
+        raise error_api(
+            502,
+            "DRIVE_BREADCRUMB_FAILED",
+            "No se pudo obtener la ruta de Google Drive.",
+        )
+
+
+@app.post("/drive/cache/invalidate")
+def invalidar_cache_drive_api(
+    request: Request,
+):
+    obtener_admin_desde_request(request)
+    invalidar_cache_drive()
+    return {
+        "status": "ok",
+        "message": "Caché de navegación de Drive invalidada.",
+    }
+
+
 @app.get("/drive-folders")
 def obtener_carpetas_drive(
     request: Request
 ):
-
-    obtener_usuario_supabase_desde_request(
-        request
-    )
-
+    """Compatibilidad con el selector antiguo del frontend."""
+    obtener_usuario_supabase_desde_request(request)
 
     if not google_drive_configurado():
-
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "Google Drive no está configurado."
-            )
+        raise error_api(
+            503,
+            "DRIVE_NOT_CONFIGURED",
+            "Google Drive no está configurado.",
         )
 
-
-    carpetas = (
-        listar_carpetas_drive_recursivas()
-    )
-
+    raiz = obtener_raiz_drive_autorizada()
+    carpetas = listar_carpetas_drive_recursivas()
 
     return {
-
         "folders": [
-
             {
-                "id":
-                    GOOGLE_FOLDER_ID,
-
-                "name":
-                    "DRIVE PROYECTO",
-
-                "parent_id":
-                    None,
-
-                "path":
-                    "DRIVE PROYECTO",
-
-                "depth":
-                    0,
-
-                "ancestors":
-                    [],
-
-                "root":
-                    True,
+                "id": raiz.get("id"),
+                "name": raiz.get("name"),
+                "parent_id": None,
+                "path": raiz.get("path"),
+                "depth": 0,
+                "ancestors": [],
+                "root": True,
             },
-
             *[
-
                 {
-                    "id":
-                        c.get("id"),
-
-                    "name":
-                        c.get("name"),
-
-                    "parent_id":
-                        c.get(
-                            "parent_id"
-                        ),
-
-                    "path":
-                        c.get("path"),
-
-                    "depth":
-                        c.get(
-                            "depth",
-                            1
-                        ),
-
-                    "ancestors":
-                        c.get(
-                            "ancestors"
-                        )
-                        or [],
-
-                    "root":
-                        False,
+                    "id": c.get("id"),
+                    "name": c.get("name"),
+                    "parent_id": c.get("parent_id"),
+                    "path": c.get("path"),
+                    "depth": c.get("depth", 1),
+                    "ancestors": c.get("ancestors") or [],
+                    "root": False,
                 }
-
                 for c in carpetas
-
             ],
-
         ]
-
     }
-
 
 
 # ============================================================
@@ -7729,8 +8757,25 @@ async def solicitar_operacion(
                 else None
             ),
 
+        "destino_solicitado_id":
+            (
+                destino["id"]
+                if destino
+                else None
+            ),
+
+        "destino_solicitado_ruta":
+            (
+                (
+                    destino.get("path")
+                    or destino.get("name")
+                )
+                if destino
+                else None
+            ),
+
         "estado":
-            "PENDIENTE",
+            ESTADO_PENDIENTE,
 
     }
 
@@ -7752,13 +8797,32 @@ async def solicitar_operacion(
 
     if not respuesta.data:
 
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                "No se pudo registrar "
-                "la solicitud."
-            )
+        raise error_api(
+            500,
+            "OPERATION_REQUEST_NOT_SAVED",
+            "No se pudo registrar la solicitud de operación.",
         )
+
+    registrar_evento_auditoria(
+        evento="SOLICITUD_OPERACION",
+        categoria="OPERACIONES",
+        actor=usuario,
+        accion=tipo,
+        objeto_tipo=objeto_tipo,
+        objeto_id=str(respuesta.data[0].get("id") or ""),
+        estado=ESTADO_PENDIENTE,
+        detalle={
+            "nombre_objeto": objeto.get("nombre"),
+            "origen": objeto.get("ubicacion"),
+            "destino_solicitado_id": (
+                destino.get("id") if destino else None
+            ),
+            "destino_solicitado_ruta": (
+                destino.get("path") if destino else None
+            ),
+        },
+        request=request,
+    )
 
 
     solicitud = (
@@ -9615,7 +10679,7 @@ async def recibir_respuesta_telegram(
             )
 
             # Telegram permite ejecutar un método Bot API directamente como
-            # respuesta al webhook. Esto es más rápido que requests.post().
+            # respuesta al webhook. Esto es más rápido que HTTP_CLIENT.post().
             return {
                 "method": "answerCallbackQuery",
                 "callback_query_id": callback_id,
