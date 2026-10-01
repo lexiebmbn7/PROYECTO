@@ -1,25 +1,114 @@
-# Python
+# =========================
+# PYTHON
+# =========================
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.py[cod]
+*$py.class
 
-# Variables privadas
+
+# =========================
+# VARIABLES PRIVADAS
+# =========================
 .env
 .env.*
-
-# Excepción: plantilla
 !.env.example
 
-# Entornos virtuales
+
+# =========================
+# ENTORNOS VIRTUALES
+# =========================
 venv/
 env/
 .venv/
+ENV/
+env.bak/
+venv.bak/
 
-# IDE
+
+# =========================
+# PYTHON / BUILD
+# =========================
+build/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+
+# =========================
+# CACHE / TESTS
+# =========================
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+
+# =========================
+# IDE / EDITORES
+# =========================
 .vscode/
 .idea/
+*.swp
+*.swo
 
-# Sistema
+
+# =========================
+# SISTEMA OPERATIVO
+# =========================
 .DS_Store
 Thumbs.db
+desktop.ini
+
+
+# =========================
+# LOGS
+# =========================
+*.log
+logs/
+
+
+# =========================
+# ARCHIVOS TEMPORALES
+# =========================
+*.tmp
+*.temp
+*.bak
+*.old
+
+
+# =========================
+# SECRETOS / CREDENCIALES
+# =========================
+credentials.json
+service-account.json
+token.json
+secrets.json
+*.pem
+*.key
+
+
+# =========================
+# RAILWAY / LOCAL
+# =========================
+.railway/
+
+
+# =========================
+# NO IGNORAR PLANTILLAS
+# =========================
+!.env.example
