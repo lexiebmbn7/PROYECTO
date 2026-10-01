@@ -2062,6 +2062,49 @@ body {
 @media(max-width:760px){#loginSection .login-form-panel{padding:30px 24px!important}#loginSection .login-options{align-items:flex-start!important;flex-direction:column!important}#view-gestor .file-manager-shell.subordinate-layout{grid-template-columns:1fr!important}}
 </style>
 
+
+<style id="frontend-two-last-fixes">
+/* 1. Subordinado: Actividad reciente alineada al ancho de las 4 tarjetas superiores. */
+#view-inicio .subordinate-recent-grid{
+  grid-template-columns:minmax(0,1fr)!important;
+}
+#view-inicio .subordinate-recent-grid > .dashboard-card:not(.role-hidden){
+  width:100%!important;
+  max-width:none!important;
+  margin-left:auto!important;
+  margin-right:auto!important;
+}
+
+/* 2. Subordinado: Mis solicitudes sin Acciones y sin scroll horizontal innecesario. */
+#view-cola.subordinate-requests .overflow-x-auto{
+  overflow-x:hidden!important;
+}
+#view-cola.subordinate-requests .data-table{
+  width:100%!important;
+  table-layout:fixed!important;
+  white-space:normal!important;
+}
+#view-cola.subordinate-requests .data-table th,
+#view-cola.subordinate-requests .data-table td{
+  white-space:normal!important;
+  overflow-wrap:anywhere!important;
+  word-break:break-word!important;
+}
+#view-cola.subordinate-requests .data-table th:nth-child(1),
+#view-cola.subordinate-requests .data-table td:nth-child(1){width:7%}
+#view-cola.subordinate-requests .data-table th:nth-child(2),
+#view-cola.subordinate-requests .data-table td:nth-child(2){width:10%}
+#view-cola.subordinate-requests .data-table th:nth-child(3),
+#view-cola.subordinate-requests .data-table td:nth-child(3){width:34%}
+#view-cola.subordinate-requests .data-table th:nth-child(4),
+#view-cola.subordinate-requests .data-table td:nth-child(4){width:20%}
+#view-cola.subordinate-requests .data-table th:nth-child(5),
+#view-cola.subordinate-requests .data-table td:nth-child(5){width:10%}
+#view-cola.subordinate-requests .data-table th:nth-child(6),
+#view-cola.subordinate-requests .data-table td:nth-child(6){width:11%}
+#view-cola.subordinate-requests .data-table th:nth-child(7),
+#view-cola.subordinate-requests .data-table td:nth-child(7){width:8%}
+</style>
 </head>
 <body class="bg-slate-50 text-slate-800">
 
@@ -4492,6 +4535,31 @@ window.addEventListener('DOMContentLoaded',()=>{
 
     // Home: el subordinado no administra políticas ni ve gráficos corporativos.
     ['Actividad de archivos','Tipos de eventos DLP','Estado de protección'].forEach(title=>{const c=findCardByTitle(title);if(c)c.classList.toggle('role-hidden',!admin);});
+
+    // En subordinado, Actividad reciente ocupa todo el ancho de las 4 tarjetas superiores.
+    const recentCard=findCardByTitle('Actividad reciente');
+    const recentGrid=recentCard?.parentElement;
+    if(recentGrid){
+      recentGrid.style.gridTemplateColumns=admin?'':'minmax(0, 1fr)';
+      recentGrid.classList.toggle('subordinate-recent-grid',!admin);
+    }
+
+    // En Mis solicitudes del subordinado no se muestra la columna Acciones.
+    const colaView=document.getElementById('view-cola');
+    if(colaView) colaView.classList.toggle('subordinate-requests',!admin);
+    const colaHeadRow=document.querySelector('#view-cola .data-table thead tr');
+    if(colaHeadRow){
+      let actionsHead=[...colaHeadRow.children].find(th=>norm(th.textContent)==='acciones');
+      if(admin && !actionsHead){
+        actionsHead=document.createElement('th');
+        actionsHead.textContent='Acciones';
+        actionsHead.dataset.roleActionsHead='1';
+        colaHeadRow.appendChild(actionsHead);
+      }else if(!admin && actionsHead){
+        actionsHead.remove();
+      }
+    }
+
     const auditLink=[...document.querySelectorAll('#view-inicio button')].find(b=>/Ver auditoría/i.test(b.textContent||''));
     if(auditLink) auditLink.classList.toggle('role-hidden',!admin);
 
@@ -4601,12 +4669,14 @@ window.addEventListener('DOMContentLoaded',()=>{
     const st=document.getElementById('solStateFilter')?.value||'';
     let units=groupAuditUnits(isAdmin()?roleAllAudit:roleAllAudit.filter(belongsToMe));
     units=units.filter(u=>{const state=unitStatus(u);const text=norm([unitName(u),u.name,u.email,u.lote_id].join(' '));return(!q||text.includes(q))&&(!st||state===st);});
-    tbody.innerHTML=units.length?units.map((u,i)=>{const state=unitStatus(u),name=unitName(u);const path=u.lote_id?'Carpeta / lote':'Archivo suelto';return `<tr>
+    tbody.innerHTML=units.length?units.map((u,i)=>{
+      const state=unitStatus(u),name=unitName(u);
+      const actionCell=isAdmin()?`<td>${state==='PENDIENTE'?'<span class="text-xs text-blue-600 font-semibold"><i class="fa-brands fa-telegram mr-1"></i>Resolver en Telegram</span>':'—'}</td>`:'';
+      return `<tr>
       <td>#${escapeHtml(String(u.lote_id||u.rows[0]?.id||i+1).slice(-8))}</td>
       <td>${u.lote_id?'Carpeta':'Archivo'}<div class="text-[9px] text-slate-400">${u.rows.length} archivo(s)</div></td>
-      <td>${escapeHtml(name)}</td><td>Google Drive</td><td>${escapeHtml(u.name)}</td><td>${formatShortDate(u.fecha)}</td><td>${statusPill(state)}</td>
-      <td>${isAdmin()&&state==='PENDIENTE'?'<span class="text-xs text-blue-600 font-semibold"><i class="fa-brands fa-telegram mr-1"></i>Resolver en Telegram</span>':'—'}</td>
-    </tr>`}).join(''):'<tr><td colspan="8" class="p-8 text-center text-slate-400">No se encontraron solicitudes.</td></tr>';
+      <td>${escapeHtml(name)}</td><td>Google Drive</td><td>${escapeHtml(u.name)}</td><td>${formatShortDate(u.fecha)}</td><td>${statusPill(state)}</td>${actionCell}
+    </tr>`}).join(''):`<tr><td colspan="${isAdmin()?8:7}" class="p-8 text-center text-slate-400">No se encontraron solicitudes.</td></tr>`;
     const pending=units.filter(u=>unitStatus(u)==='PENDIENTE').length;
     const sum=document.getElementById('solSummary');if(sum)sum.textContent=`${units.length} unidad(es) · ${pending} pendiente(s)`;
     const mini=document.getElementById('solPendingMini');if(mini)mini.textContent=pending;
