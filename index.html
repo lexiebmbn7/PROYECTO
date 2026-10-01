@@ -2814,6 +2814,28 @@ body.dv-modal-open{overflow:hidden!important}
 #view-gestor .dv-op-btn:hover{background:#f1f3f4!important;border-color:#c7c9cc!important;color:#202124!important}
 #view-gestor .dv-op-btn.delete{color:#b3261e!important;border-color:#f3c7c3!important;background:#fff!important}
 #view-gestor .dv-op-btn.delete:hover{background:#fce8e6!important;border-color:#e6aaa5!important;color:#b3261e!important}
+
+/* Arrastrar para mover, estilo Drive. Solo afecta al frontend: al soltar se crea la solicitud MOVER existente. */
+#view-gestor .dv-draggable-row{cursor:grab}
+#view-gestor .dv-draggable-row:active{cursor:grabbing}
+#view-gestor .dv-draggable-row.dv-dragging>td{opacity:.42;background:#eef5fb!important}
+#view-gestor.dv-drag-mode .tree-item[data-dv-drop-folder-id],
+#view-gestor.dv-drag-mode .tree-subitem[data-dv-drop-folder-id],
+#view-gestor.dv-drag-mode tr[data-dv-drop-folder-id]>td{
+  transition:background .12s ease,box-shadow .12s ease,transform .12s ease;
+}
+#view-gestor.dv-drag-mode .tree-item[data-dv-drop-folder-id],
+#view-gestor.dv-drag-mode .tree-subitem[data-dv-drop-folder-id]{
+  box-shadow:inset 0 0 0 1px rgba(11,87,208,.18);
+}
+#view-gestor .dv-drop-target-active{
+  background:#c2e7ff!important;color:#001d35!important;box-shadow:inset 0 0 0 2px #0b57d0!important;
+}
+#view-gestor tr.dv-drop-target-active>td{background:#e8f0fe!important;box-shadow:inset 0 2px 0 #0b57d0,inset 0 -2px 0 #0b57d0!important}
+#view-gestor .dv-drop-target-blocked{cursor:not-allowed!important;opacity:.55}
+#view-gestor .dv-drag-destination-note{
+  margin:5px 8px 7px;padding:7px 10px;border-radius:9px;background:#e8f0fe;color:#174ea6;font-size:10px;font-weight:700;
+}
 #view-gestor .file-content-footer{min-height:44px!important;padding:10px 18px!important;background:#fff!important;border-top:0!important;color:#5f6368!important}
 #view-gestor .file-security-panel{border-left:0!important;border-radius:18px!important;background:#f8fafd!important;padding:0!important}
 
@@ -3890,6 +3912,7 @@ const dropZoneEl = document.getElementById('dropZone');
 const dropUploadAllowed = () => !['jefe','admin','administrador'].includes(String(currentRole || '').trim().toLowerCase());
 ['dragenter', 'dragover'].forEach(evt => {
   dropZoneEl.addEventListener(evt, e => {
+    if(e.dataTransfer?.types?.includes('application/x-datavault-item')) return;
     if(!dropUploadAllowed()) return;
     e.preventDefault();
     dropZoneEl.classList.add('drop-active');
@@ -3897,12 +3920,14 @@ const dropUploadAllowed = () => !['jefe','admin','administrador'].includes(Strin
 });
 ['dragleave', 'drop'].forEach(evt => {
   dropZoneEl.addEventListener(evt, e => {
+    if(e.dataTransfer?.types?.includes('application/x-datavault-item')) return;
     if(!dropUploadAllowed()) return;
     e.preventDefault();
     dropZoneEl.classList.remove('drop-active');
   });
 });
 dropZoneEl.addEventListener('drop', async e => {
+  if(e.dataTransfer?.types?.includes('application/x-datavault-item')) return;
   if (!dropUploadAllowed() || dvUploadInProgress) return;
 
   const items = Array.from(e.dataTransfer?.items || []);
@@ -5945,6 +5970,10 @@ window.addEventListener('DOMContentLoaded',()=>{
   let dvMoveSelectedId='';
   let dvSourceOperationType='';
   let dvSourceOperationUnits=[];
+  let dvDragSource=null;
+  let dvDragFolders=[];
+  let dvDragFoldersPromise=null;
+  let dvDragMoveBusy=false;
 
   const norm=v=>String(v??'').trim().toLowerCase();
   const isAdmin=()=>['jefe','admin','administrador'].includes(norm(currentRole));
@@ -6121,6 +6150,19 @@ window.addEventListener('DOMContentLoaded',()=>{
     return dvOpenSourceOperation(op);
   };
 
+  function dvCanDragMove(kind,id,rowsOrRow){
+    if(isAdmin())return false;
+    const rows=Array.isArray(rowsOrRow)?rowsOrRow:[rowsOrRow];
+    const approved=rows.length>0 && rows.every(r=>String(r?.estado||'').toUpperCase()==='APROBADO') && !rows.some(deleted);
+    const linked=kind==='CARPETA' ? !!String(rows[0]?.drive_folder_id||'').trim() : !!String(rows[0]?.drive_file_id||'').trim();
+    return approved && linked && !pendingOperation(kind,id);
+  }
+
+  function dvDragAttrs(kind,id,rowsOrRow){
+    if(!dvCanDragMove(kind,id,rowsOrRow))return '';
+    return `draggable="true" data-dv-drag-kind="${kind}" data-dv-drag-id="${escapeHtml(String(id||''))}" title="Arrastra para mover"`;
+  }
+
   function operationButtons(kind, id, rowsOrRow){
     if(isAdmin()) return '<span class="dv-op-legacy">Supervisión</span>';
     const rows=Array.isArray(rowsOrRow)?rowsOrRow:[rowsOrRow];
@@ -6139,12 +6181,14 @@ window.addEventListener('DOMContentLoaded',()=>{
 
   function opsLooseRow(r){
     const display=rowState(r);
-    return `<tr><td><div class="flex items-center gap-2"><div class="h-7 w-7 rounded-md bg-[#edf3f5] text-[#6c8698] flex items-center justify-center"><i class="fa-solid ${dvIconFor(r.nombre_archivo)} text-[10px]"></i></div><div><p class="font-semibold text-[#1f2b31] text-[9px]">${escapeHtml(r.nombre_archivo||'Sin nombre')}</p><p class="dv-unit-sub">${escapeHtml(r.solicitante_nombre||r.usuario_solicitante||'—')}</p></div></div></td><td class="text-[8px] text-slate-500">${escapeHtml(r.ubicacion_drive||'Archivo suelto')}</td><td><span class="integrity-ok"><i class="fa-solid fa-fingerprint"></i> Verificado</span></td><td><span class="status-pill ${stateClass(display)}">${escapeHtml(display)}</span></td><td class="text-[8px] text-slate-400">${dvDate(r.fecha_ultima_operacion||r.fecha_solicitud)}</td><td>${operationButtons('ARCHIVO',r.id,r)}</td></tr>`;
+    return `<tr class="${dvCanDragMove('ARCHIVO',r.id,r)?'dv-draggable-row':''}" ${dvDragAttrs('ARCHIVO',r.id,r)}><td><div class="flex items-center gap-2"><div class="h-7 w-7 rounded-md bg-[#edf3f5] text-[#6c8698] flex items-center justify-center"><i class="fa-solid ${dvIconFor(r.nombre_archivo)} text-[10px]"></i></div><div><p class="font-semibold text-[#1f2b31] text-[9px]">${escapeHtml(r.nombre_archivo||'Sin nombre')}</p><p class="dv-unit-sub">${escapeHtml(r.solicitante_nombre||r.usuario_solicitante||'—')}</p></div></div></td><td class="text-[8px] text-slate-500">${escapeHtml(r.ubicacion_drive||'Archivo suelto')}</td><td><span class="integrity-ok"><i class="fa-solid fa-fingerprint"></i> Verificado</span></td><td><span class="status-pill ${stateClass(display)}">${escapeHtml(display)}</span></td><td class="text-[8px] text-slate-400">${dvDate(r.fecha_ultima_operacion||r.fecha_solicitud)}</td><td>${operationButtons('ARCHIVO',r.id,r)}</td></tr>`;
   }
 
   function opsFolderRows(rows,loteId){
     const root=dvRoot(rows[0])||'Carpeta';const total=rows.reduce((s,r)=>s+Number(r.tamano_bytes||0),0);const state=groupState(rows);const id=dvFolderDetailId(loteId);const tree=dvBuildTree(rows);const last=rows.map(r=>r.fecha_ultima_operacion||r.fecha_solicitud||'').sort().reverse()[0];
-    return `<tr class="dv-folder-summary"><td><button class="dv-folder-toggle" onclick="toggleDvFolder('${escapeHtml(String(loteId))}')"><span class="dv-caret" id="${id}-icon">▶</span><i class="fa-solid fa-folder text-amber-500"></i><span>${escapeHtml(root)}</span><span class="dv-folder-chip">${rows.length} archivo(s)</span></button></td><td class="text-[8px] text-slate-500">${escapeHtml(rows[0]?.ubicacion_drive||'Carpeta / lote')}</td><td><span class="integrity-ok"><i class="fa-solid fa-fingerprint"></i> ${formatBytes(total)}</span></td><td><span class="status-pill ${stateClass(state)}">${escapeHtml(state)}</span></td><td class="text-[8px] text-slate-400">${dvDate(last)}</td><td>${operationButtons('CARPETA',loteId,rows)}</td></tr><tr id="${id}" class="hidden dv-folder-detail"><td colspan="6"><div class="dv-folder-panel"><div class="flex flex-wrap justify-between gap-2 mb-2"><div><b class="text-[11px] text-slate-700"><i class="fa-solid fa-folder-open mr-2 text-amber-500"></i>${escapeHtml(root)}</b><div class="text-[8px] text-slate-400 mt-1">Lote ${escapeHtml(String(loteId))}</div></div><span class="text-[9px] text-slate-500">${rows.length} archivo(s) · ${formatBytes(total)}</span></div><div class="dv-tree">${dvRenderTree(tree)}</div></div></td></tr>`;
+    const driveFolderId=String(rows[0]?.drive_folder_id||'').trim();
+    const dropAttrs=driveFolderId?`data-dv-drop-folder-id="${escapeHtml(driveFolderId)}" data-dv-drop-folder-path="${escapeHtml(rows[0]?.ubicacion_drive||root)}"`:'';
+    return `<tr class="dv-folder-summary${dvCanDragMove('CARPETA',loteId,rows)?' dv-draggable-row':''}" ${dvDragAttrs('CARPETA',loteId,rows)} ${dropAttrs}><td><button class="dv-folder-toggle" onclick="toggleDvFolder('${escapeHtml(String(loteId))}')"><span class="dv-caret" id="${id}-icon">▶</span><i class="fa-solid fa-folder text-amber-500"></i><span>${escapeHtml(root)}</span><span class="dv-folder-chip">${rows.length} archivo(s)</span></button></td><td class="text-[8px] text-slate-500">${escapeHtml(rows[0]?.ubicacion_drive||'Carpeta / lote')}</td><td><span class="integrity-ok"><i class="fa-solid fa-fingerprint"></i> ${formatBytes(total)}</span></td><td><span class="status-pill ${stateClass(state)}">${escapeHtml(state)}</span></td><td class="text-[8px] text-slate-400">${dvDate(last)}</td><td>${operationButtons('CARPETA',loteId,rows)}</td></tr><tr id="${id}" class="hidden dv-folder-detail"><td colspan="6"><div class="dv-folder-panel"><div class="flex flex-wrap justify-between gap-2 mb-2"><div><b class="text-[11px] text-slate-700"><i class="fa-solid fa-folder-open mr-2 text-amber-500"></i>${escapeHtml(root)}</b><div class="text-[8px] text-slate-400 mt-1">Lote ${escapeHtml(String(loteId))}</div></div><span class="text-[9px] text-slate-500">${rows.length} archivo(s) · ${formatBytes(total)}</span></div><div class="dv-tree">${dvRenderTree(tree)}</div></div></td></tr>`;
   }
 
   // Render final del Explorador con acciones integradas.
@@ -6168,6 +6212,165 @@ window.addEventListener('DOMContentLoaded',()=>{
     }
     renderFilesTable(rows);
   };
+
+  function dvFindDragFolder(folderId){
+    return (dvDragFolders||[]).find(f=>String(f?.id||'')===String(folderId||''))||null;
+  }
+
+  async function dvEnsureDragFolders(){
+    if(dvDragFolders.length)return dvDragFolders;
+    if(dvDragFoldersPromise)return dvDragFoldersPromise;
+    dvDragFoldersPromise=(async()=>{
+      try{
+        if(typeof dvUploadDestinationFolders!=='undefined' && Array.isArray(dvUploadDestinationFolders) && dvUploadDestinationFolders.length){
+          dvDragFolders=dvUploadDestinationFolders.slice();
+          return dvDragFolders;
+        }
+      }catch(_){ }
+      const res=await fetch(`${API_URL}/drive-folders`,{headers:await authHeaders(false)});
+      const data=await res.json().catch(()=>({}));
+      if(!res.ok)throw new Error(typeof data.detail==='string'?data.detail:`Error HTTP ${res.status}`);
+      dvDragFolders=(Array.isArray(data.folders)?data.folders:[]).slice().sort((a,b)=>{
+        if(Boolean(a?.root)!==Boolean(b?.root))return a?.root?-1:1;
+        return String(a?.path||a?.name||'').localeCompare(String(b?.path||b?.name||''),'es',{numeric:true,sensitivity:'base'});
+      });
+      return dvDragFolders;
+    })().finally(()=>{dvDragFoldersPromise=null;});
+    return dvDragFoldersPromise;
+  }
+
+  function dvDragRestriction(source,folder){
+    if(!source||!folder)return 'Destino no disponible';
+    const folderId=String(folder?.id||'');
+    if(!folderId)return 'Destino no disponible';
+    if(source.currentParent && folderId===String(source.currentParent))return 'Ya está en esta carpeta';
+    if(source.kind==='CARPETA'){
+      if(source.driveId && folderId===String(source.driveId))return 'No puedes mover una carpeta dentro de sí misma';
+      const ancestors=Array.isArray(folder?.ancestors)?folder.ancestors.map(String):[];
+      if(source.driveId && ancestors.includes(String(source.driveId)))return 'No puedes moverla dentro de una subcarpeta propia';
+    }
+    return '';
+  }
+
+  function dvClearDropHighlights(){
+    document.querySelectorAll('#view-gestor .dv-drop-target-active,#view-gestor .dv-drop-target-blocked').forEach(el=>el.classList.remove('dv-drop-target-active','dv-drop-target-blocked'));
+  }
+
+  function dvRestoreDragSidebar(){
+    const rootBtn=document.querySelector('#view-gestor [data-folder=""]');
+    if(rootBtn){rootBtn.removeAttribute('data-dv-drop-folder-id');rootBtn.removeAttribute('data-dv-drop-folder-path');}
+    const label=document.querySelector('#view-gestor .tree-folder span');
+    if(label)label.textContent='Carpetas';
+    if(typeof dvRenderDynamicFolders==='function')dvRenderDynamicFolders();
+  }
+
+  function dvRenderDragDestinations(){
+    if(!dvDragSource)return;
+    const box=document.getElementById('dynamicFolderTree');
+    if(!box)return;
+    const rootFolder=(dvDragFolders||[]).find(f=>f?.root || Number(f?.depth||0)===0);
+    const rootBtn=document.querySelector('#view-gestor [data-folder=""]');
+    if(rootBtn && rootFolder){
+      rootBtn.dataset.dvDropFolderId=String(rootFolder.id||'');
+      rootBtn.dataset.dvDropFolderPath=String(rootFolder.path||rootFolder.name||'DRIVE PROYECTO');
+    }
+    const label=document.querySelector('#view-gestor .tree-folder span');
+    if(label)label.textContent='Suelta en una carpeta';
+    const folders=(dvDragFolders||[]).filter(f=>!(f?.root || Number(f?.depth||0)===0));
+    const rows=folders.map(f=>{
+      const depth=Math.min(Math.max(Number(f?.depth||1)-1,0),7);
+      const restriction=dvDragRestriction(dvDragSource,f);
+      return `<button type="button" class="tree-subitem${restriction?' dv-drop-target-blocked':''}" data-dv-drop-folder-id="${escapeHtml(String(f?.id||''))}" data-dv-drop-folder-path="${escapeHtml(String(f?.path||f?.name||'Carpeta'))}" style="padding-left:${14+(depth*15)}px!important" title="${escapeHtml(restriction||('Mover a '+String(f?.path||f?.name||'Carpeta')))}"><i class="fa-solid fa-folder"></i><span class="truncate">${escapeHtml(f?.name||'Carpeta')}</span></button>`;
+    }).join('');
+    box.innerHTML=`<div class="dv-drag-destination-note"><i class="fa-solid fa-hand-pointer mr-1"></i>Suelta el elemento sobre el destino</div>${rows||'<p class="tree-subitem text-slate-400">No hay carpetas destino</p>'}`;
+  }
+
+  async function dvSubmitDraggedMove(source,folder){
+    if(dvDragMoveBusy||!source||!folder)return;
+    const restriction=dvDragRestriction(source,folder);
+    if(restriction){toast(restriction);return;}
+    dvDragMoveBusy=true;
+    try{
+      const payload={tipo_operacion:'MOVER',objeto_tipo:source.kind,carpeta_destino_id:String(folder.id)};
+      if(source.kind==='CARPETA')payload.lote_id=source.id;else payload.auditoria_id=source.id;
+      const res=await fetch(`${API_URL}/operations/request`,{method:'POST',headers:await authHeaders(),body:JSON.stringify(payload)});
+      const data=await res.json().catch(()=>({}));
+      if(!res.ok)throw new Error(typeof data.detail==='string'?data.detail:`Error HTTP ${res.status}`);
+      toast(`Solicitud para mover “${source.name}” a “${folder.path||folder.name||'carpeta'}” enviada al custodio.`);
+      await loadCola();
+      if(typeof loadFilesView==='function')await loadFilesView();
+    }catch(err){
+      alert('No se pudo solicitar el movimiento: '+(err?.message||err));
+    }finally{
+      dvDragMoveBusy=false;
+    }
+  }
+
+  document.addEventListener('dragstart',e=>{
+    const row=e.target.closest?.('#view-gestor [data-dv-drag-kind][data-dv-drag-id]');
+    if(!row)return;
+    if(e.target.closest?.('button,a,input,select,textarea')){e.preventDefault();return;}
+    if(isAdmin()){e.preventDefault();return;}
+    const source=dvMoveContext(row.dataset.dvDragKind,row.dataset.dvDragId);
+    if(!source?.driveId){e.preventDefault();return;}
+    dvDragSource=source;
+    row.classList.add('dv-dragging');
+    document.getElementById('view-gestor')?.classList.add('dv-drag-mode');
+    try{
+      e.dataTransfer.effectAllowed='move';
+      e.dataTransfer.setData('application/x-datavault-item',JSON.stringify({kind:source.kind,id:source.id}));
+      e.dataTransfer.setData('text/plain',source.name||'DataVault');
+    }catch(_){ }
+    dvEnsureDragFolders().then(()=>{if(dvDragSource)dvRenderDragDestinations();}).catch(err=>{console.warn('[DRAG MOVE DESTINATIONS]',err);toast('No se pudieron cargar las carpetas destino.');});
+  });
+
+  document.addEventListener('dragover',e=>{
+    if(!dvDragSource)return;
+    const target=e.target.closest?.('#view-gestor [data-dv-drop-folder-id]');
+    if(!target)return;
+    const folderId=target.dataset.dvDropFolderId;
+    const folder=dvFindDragFolder(folderId)||{id:folderId,path:target.dataset.dvDropFolderPath||'Carpeta',name:target.dataset.dvDropFolderPath||'Carpeta',ancestors:[]};
+    dvClearDropHighlights();
+    const restriction=dvDragRestriction(dvDragSource,folder);
+    if(restriction){target.classList.add('dv-drop-target-blocked');if(e.dataTransfer)e.dataTransfer.dropEffect='none';return;}
+    e.preventDefault();
+    target.classList.add('dv-drop-target-active');
+    if(e.dataTransfer)e.dataTransfer.dropEffect='move';
+  });
+
+  document.addEventListener('dragleave',e=>{
+    if(!dvDragSource)return;
+    const target=e.target.closest?.('#view-gestor [data-dv-drop-folder-id]');
+    if(!target)return;
+    if(e.relatedTarget && target.contains(e.relatedTarget))return;
+    target.classList.remove('dv-drop-target-active');
+  });
+
+  document.addEventListener('drop',async e=>{
+    if(!dvDragSource)return;
+    const target=e.target.closest?.('#view-gestor [data-dv-drop-folder-id]');
+    if(!target)return;
+    e.preventDefault();
+    e.stopPropagation();
+    const source=dvDragSource;
+    try{await dvEnsureDragFolders();}catch(err){toast('No se pudieron validar las carpetas destino.');return;}
+    const folderId=target.dataset.dvDropFolderId;
+    const folder=dvFindDragFolder(folderId)||{id:folderId,path:target.dataset.dvDropFolderPath||'Carpeta',name:target.dataset.dvDropFolderPath||'Carpeta',ancestors:[]};
+    const restriction=dvDragRestriction(source,folder);
+    if(restriction){toast(restriction);return;}
+    dvClearDropHighlights();
+    await dvSubmitDraggedMove(source,folder);
+  });
+
+  document.addEventListener('dragend',e=>{
+    const row=e.target.closest?.('#view-gestor [data-dv-drag-kind][data-dv-drag-id]');
+    if(row)row.classList.remove('dv-dragging');
+    if(!dvDragSource)return;
+    dvDragSource=null;
+    dvClearDropHighlights();
+    document.getElementById('view-gestor')?.classList.remove('dv-drag-mode');
+    dvRestoreDragSidebar();
+  });
 
   function dvMoveContext(kind,id){
     const target=String(id||'');
