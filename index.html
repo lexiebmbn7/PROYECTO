@@ -2857,6 +2857,38 @@ body.dv-modal-open{overflow:hidden!important}
 }
 </style>
 
+
+<style id="datavault-drive-browse-adapter-v1">
+/* Navegador por niveles conectado a GET /drive/browse */
+.dv-browse-shell{display:flex;flex-direction:column;gap:10px}
+.dv-browse-breadcrumb{display:flex;align-items:center;gap:5px;flex-wrap:wrap;padding:2px 1px;font-size:10px;color:#5f6368}
+.dv-browse-breadcrumb button{border:0;background:transparent;color:#0b57d0;font-weight:700;padding:3px 4px;border-radius:5px;cursor:pointer}
+.dv-browse-breadcrumb button:hover{background:#eef3fd}
+.dv-browse-breadcrumb i{font-size:7px;color:#9aa0a6}
+.dv-browse-current{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid #dfe5eb;background:#fff;border-radius:10px;padding:10px 11px}
+.dv-browse-current-main{min-width:0;display:flex;align-items:center;gap:9px}
+.dv-browse-current-icon{width:30px;height:30px;border-radius:8px;background:#eef3fd;color:#0b57d0;display:flex;align-items:center;justify-content:center;flex:none}
+.dv-browse-current-text{min-width:0}
+.dv-browse-current-text b{display:block;color:#202124;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dv-browse-current-text small{display:block;color:#7a858d;font-size:8px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dv-browse-select-current{border:1px solid #a8c7fa;background:#fff;color:#0b57d0;border-radius:18px;padding:7px 11px;font-size:9px;font-weight:800;cursor:pointer;white-space:nowrap}
+.dv-browse-select-current:hover{background:#ecf3fe}
+.dv-browse-select-current:disabled{opacity:.45;cursor:not-allowed;background:#f8fafc}
+.dv-browse-folder-list{display:flex;flex-direction:column;gap:3px}
+.dv-browse-folder{width:100%;display:flex;align-items:center;gap:9px;text-align:left;border:0;background:transparent;border-radius:8px;padding:9px 10px;color:#334155;cursor:pointer}
+.dv-browse-folder:hover{background:#eef3f8}
+.dv-browse-folder i.fa-folder{color:#5f6368;width:18px;text-align:center}
+.dv-browse-folder span{min-width:0;flex:1;font-size:10px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dv-browse-folder small{font-size:8px;color:#9aa0a6;white-space:nowrap}
+.dv-browse-empty{padding:18px;text-align:center;color:#94a3b8;font-size:10px}
+.dv-browse-loading{padding:24px;text-align:center;color:#64748b;font-size:10px}
+.dv-browse-error{display:flex;flex-direction:column;align-items:center;gap:9px;padding:20px;text-align:center;color:#7f1d1d;font-size:10px;background:#fff7f7;border:1px solid #fecaca;border-radius:10px}
+.dv-browse-retry{border:1px solid #d0d7de;background:#fff;border-radius:18px;padding:7px 12px;color:#334155;font-size:9px;font-weight:800;cursor:pointer}
+.dv-browse-retry:hover{background:#f4f6f8}
+.dv-browse-selected-badge{display:inline-flex;align-items:center;gap:5px;background:#e6f4ea;color:#137333;border-radius:999px;padding:4px 7px;font-size:8px;font-weight:800;white-space:nowrap}
+#dvUploadDestinationList.dv-folder-tree,#dvMoveFolderList.dv-folder-tree{padding:8px;max-height:330px}
+</style>
+
 </head>
 <body class="bg-slate-50 text-slate-800">
 
@@ -3100,7 +3132,7 @@ body.dv-modal-open{overflow:hidden!important}
           <div><b><i class="fa-solid fa-folder-tree mr-2"></i>Destino en Google Drive</b><span>Elige dónde quedará el archivo o la carpeta cuando el custodio apruebe la subida.</span></div>
           <div class="flex items-center gap-2"><button type="button" class="icon-btn" title="Actualizar carpetas de Drive" onclick="dvEnsureUploadDestinationFolders(true)"><i class="fa-solid fa-rotate"></i></button><span class="dv-upload-required">Obligatorio</span></div>
         </div>
-        <div class="dv-folder-search"><i class="fa-solid fa-magnifying-glass"></i><input id="dvUploadDestinationSearch" class="input-modern w-full" placeholder="Buscar carpeta o subcarpeta..." autocomplete="off" oninput="dvFilterUploadDestinations()"></div>
+        <div class="dv-folder-search"><i class="fa-solid fa-magnifying-glass"></i><input id="dvUploadDestinationSearch" class="input-modern w-full" placeholder="Buscar en esta carpeta..." autocomplete="off" oninput="dvFilterUploadDestinations()"></div>
         <div id="dvUploadDestinationList" class="dv-folder-tree mt-2"><div class="p-4 text-center text-xs text-slate-400"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Cargando carpetas...</div></div>
         <div id="dvUploadDestinationSelection" class="dv-move-selection mt-2">Selecciona una carpeta. Para dejar archivos sueltos, selecciona explícitamente <b>DRIVE PROYECTO</b>.</div>
       </div>
@@ -3190,6 +3222,39 @@ let currentUser = null; // objeto completo de Supabase Auth
 let selectedFiles = [];          // archivos elegidos para subir (lote)
 let auditRealtimeChannel = null;
 let colaRealtimeChannel = null;
+
+// =======================================================
+// AUTH / HTTP GLOBAL · único helper para rutas protegidas
+// =======================================================
+async function authHeaders(json=true) {
+  const { data, error } = await supabaseClient.auth.getSession();
+  if (error) throw error;
+  const token = data?.session?.access_token;
+  if (!token) throw new Error('No existe una sesión válida. Inicia sesión nuevamente.');
+  const headers = { Authorization: `Bearer ${token}` };
+  if (json) headers['Content-Type'] = 'application/json';
+  return headers;
+}
+window.authHeaders = authHeaders;
+
+function dvHttpErrorMessage(response, data, fallback='No se pudo completar la operación.') {
+  const detail = data?.detail;
+  const backendMessage =
+    (detail && typeof detail === 'object' && (detail.message || detail.mensaje || detail.detail)) ||
+    (typeof detail === 'string' ? detail : '') ||
+    data?.message || '';
+
+  if (backendMessage) return String(backendMessage);
+
+  const status = Number(response?.status || 0);
+  if (status === 401) return 'Tu sesión expiró o no es válida. Inicia sesión nuevamente.';
+  if (status === 403) return 'No tienes permisos para acceder a esta ubicación de Google Drive.';
+  if (status === 409) return 'La carpeta o el estado actual no permiten completar esta operación.';
+  if (status === 502) return 'No se pudo cargar Google Drive. Intenta nuevamente.';
+  if (status === 503) return 'Google Drive no está configurado en el servidor.';
+  return fallback;
+}
+window.dvHttpErrorMessage = dvHttpErrorMessage;
 
 // =======================================================
 // UTILIDADES
@@ -4131,20 +4196,16 @@ async function exportSimpleReport(){
       btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>Generando Excel...';
     }
 
-    const {data}=await supabaseClient.auth.getSession();
-    const token=data?.session?.access_token;
-    if(!token) throw new Error('La sesión ha expirado. Inicia sesión nuevamente.');
-
-    const response=await fetch(`${API_URL}/reports/excel`,{
+    const response=await fetch(`${API_URL}/reports/audit.xlsx`,{
       method:'GET',
-      headers:{Authorization:`Bearer ${token}`}
+      headers:await authHeaders(false)
     });
 
     if(!response.ok){
       let detail='No se pudo generar el reporte Excel.';
       try{
         const errorData=await response.json();
-        detail=typeof errorData?.detail==='string'?errorData.detail:detail;
+        detail=dvHttpErrorMessage(response,errorData,detail);
       }catch(_){}
       throw new Error(detail);
     }
@@ -4710,14 +4771,6 @@ function dvRefreshUploadButtonState(){
   if(btn)btn.disabled=!!dvUploadInProgress || !dvSelectedEntries.length || !dvUploadDestinationSelectedId;
 }
 
-async function dvUploadAuthHeaders(){
-  const {data,error}=await supabaseClient.auth.getSession();
-  if(error)throw error;
-  const token=data?.session?.access_token;
-  if(!token)throw new Error('Tu sesión expiró. Inicia sesión nuevamente.');
-  return {Authorization:`Bearer ${token}`};
-}
-
 async function dvEnsureUploadDestinationFolders(force=false){
   const panel=document.getElementById('dvUploadDestinationPanel');
   if(!dvSelectedEntries.length){if(panel)panel.classList.add('hidden');return;}
@@ -4728,9 +4781,9 @@ async function dvEnsureUploadDestinationFolders(force=false){
   const list=document.getElementById('dvUploadDestinationList');
   if(list)list.innerHTML='<div class="p-4 text-center text-xs text-slate-400"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Cargando carpetas de Google Drive...</div>';
   try{
-    const res=await fetch(`${API_URL}/drive-folders`,{headers:await dvUploadAuthHeaders()});
+    const res=await fetch(`${API_URL}/drive-folders`,{headers:await authHeaders(false)});
     const data=await res.json().catch(()=>({}));
-    if(!res.ok)throw new Error(typeof data.detail==='string'?data.detail:`Error HTTP ${res.status}`);
+    if(!res.ok)throw new Error(dvHttpErrorMessage(res,data));
     dvUploadDestinationFolders=(Array.isArray(data.folders)?data.folders:[]).slice().sort((a,b)=>{
       if(Boolean(a?.root)!==Boolean(b?.root))return a?.root?-1:1;
       return String(a?.path||a?.name||'').localeCompare(String(b?.path||b?.name||''),'es',{numeric:true,sensitivity:'base'});
@@ -4962,7 +5015,7 @@ submitUploadBatch = async function(){
     fd.append('carpeta_destino_id',dvUploadDestinationSelectedId);
     const res=await fetch(`${API_URL}/upload-batch`,{method:'POST',headers:{Authorization:`Bearer ${token}`},body:fd,signal:dvUploadController.signal});
     let data={}; try{data=await res.json();}catch(_){ }
-    if(!res.ok){let msg=`Error HTTP ${res.status}`;if(typeof data.detail==='string')msg=data.detail;else if(data.detail&&typeof data.detail==='object')msg=data.detail.mensaje||msg;throw new Error(msg);}
+    if(!res.ok)throw new Error(dvHttpErrorMessage(res,data,'No se pudo registrar la solicitud de subida.'));
     const n=data.total_registrados??dvSelectedEntries.length;
     status.className=(data.total_errores||0)>0?'mt-3 text-sm font-semibold text-amber-600':'mt-3 text-sm font-semibold text-emerald-600';
     status.innerHTML=`<i class="fa-solid fa-circle-check mr-2"></i>${dvSelectionMode==='folder'?'Carpeta':'Lote'} registrado: ${n} archivo(s). Destino solicitado: ${escapeHtml(data?.destino_drive?.path||dvUploadDestinationSelectedPath||'Google Drive')}.`;
@@ -5403,18 +5456,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     renderRoleRecent(rows);
   }
 
-  // Helpers locales del modulo de usuarios administrativos.
-  // Se mantienen dentro de este bloque para que crear/listar/eliminar
-  // usuarios pueda autenticar las llamadas al backend correctamente.
-  async function authHeaders(json=true){
-    const {data,error}=await supabaseClient.auth.getSession();
-    if(error) throw error;
-    const token=data?.session?.access_token;
-    if(!token) throw new Error('Sesión expirada. Vuelve a iniciar sesión.');
-    const headers={Authorization:`Bearer ${token}`};
-    if(json) headers['Content-Type']='application/json';
-    return headers;
-  }
+  // Las llamadas administrativas usan authHeaders global.
 
   function toast(msg){
     const old=document.getElementById('dvOpToast');
@@ -5995,16 +6037,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     if(s==='PENDIENTE')return 'status-pending';
     return 'status-rejected';
   };
-
-  async function authHeaders(json=true){
-    const {data,error}=await supabaseClient.auth.getSession();
-    if(error) throw error;
-    const token=data?.session?.access_token;
-    if(!token) throw new Error('Sesión expirada. Vuelve a iniciar sesión.');
-    const h={Authorization:`Bearer ${token}`};
-    if(json)h['Content-Type']='application/json';
-    return h;
-  }
+  // authHeaders global compartido por todos los módulos del frontend.
 
   function toast(msg){
     const old=document.getElementById('dvOpToast');if(old)old.remove();
@@ -6221,19 +6254,26 @@ window.addEventListener('DOMContentLoaded',()=>{
     if(dvDragFolders.length)return dvDragFolders;
     if(dvDragFoldersPromise)return dvDragFoldersPromise;
     dvDragFoldersPromise=(async()=>{
-      try{
-        if(typeof dvUploadDestinationFolders!=='undefined' && Array.isArray(dvUploadDestinationFolders) && dvUploadDestinationFolders.length){
-          dvDragFolders=dvUploadDestinationFolders.slice();
-          return dvDragFolders;
-        }
-      }catch(_){ }
-      const res=await fetch(`${API_URL}/drive-folders`,{headers:await authHeaders(false)});
-      const data=await res.json().catch(()=>({}));
-      if(!res.ok)throw new Error(typeof data.detail==='string'?data.detail:`Error HTTP ${res.status}`);
-      dvDragFolders=(Array.isArray(data.folders)?data.folders:[]).slice().sort((a,b)=>{
-        if(Boolean(a?.root)!==Boolean(b?.root))return a?.root?-1:1;
-        return String(a?.path||a?.name||'').localeCompare(String(b?.path||b?.name||''),'es',{numeric:true,sensitivity:'base'});
-      });
+      const data=await window.DVDriveBrowser.fetchFolder('root',false);
+      const current=data?.current||data?.root||{};
+      const rootPath=String(current?.path||current?.name||'Mi unidad');
+      const rootFolder={
+        id:String(current?.id||''),
+        name:String(current?.name||'Mi unidad'),
+        path:rootPath,
+        parent_id:current?.parent_id||null,
+        depth:0,
+        ancestors:[],
+        root:true
+      };
+      const children=(Array.isArray(data?.folders)?data.folders:[]).map(folder=>({
+        ...folder,
+        path:`${rootPath} / ${String(folder?.name||'Carpeta')}`,
+        depth:1,
+        ancestors:[String(current?.id||'')],
+        root:false
+      }));
+      dvDragFolders=[rootFolder,...children].filter(f=>f.id);
       return dvDragFolders;
     })().finally(()=>{dvDragFoldersPromise=null;});
     return dvDragFoldersPromise;
@@ -6295,7 +6335,7 @@ window.addEventListener('DOMContentLoaded',()=>{
       if(source.kind==='CARPETA')payload.lote_id=source.id;else payload.auditoria_id=source.id;
       const res=await fetch(`${API_URL}/operations/request`,{method:'POST',headers:await authHeaders(),body:JSON.stringify(payload)});
       const data=await res.json().catch(()=>({}));
-      if(!res.ok)throw new Error(typeof data.detail==='string'?data.detail:`Error HTTP ${res.status}`);
+      if(!res.ok)throw new Error(dvHttpErrorMessage(res,data));
       toast(`Solicitud para mover “${source.name}” a “${folder.path||folder.name||'carpeta'}” enviada al custodio.`);
       await loadCola();
       if(typeof loadFilesView==='function')await loadFilesView();
@@ -6473,7 +6513,7 @@ window.addEventListener('DOMContentLoaded',()=>{
       if(dvCurrentMove.kind==='CARPETA')payload.lote_id=dvCurrentMove.id;else payload.auditoria_id=dvCurrentMove.id;
       const res=await fetch(`${API_URL}/operations/request`,{method:'POST',headers:await authHeaders(),body:JSON.stringify(payload)});
       const data=await res.json().catch(()=>({}));
-      if(!res.ok)throw new Error(typeof data.detail==='string'?data.detail:`Error HTTP ${res.status}`);
+      if(!res.ok)throw new Error(dvHttpErrorMessage(res,data));
       dvCloseMoveModal();toast('Solicitud de movimiento enviada al custodio.');await loadCola();
       if(typeof loadFilesView==='function')await loadFilesView();
     }catch(err){alert('No se pudo solicitar el movimiento: '+(err.message||err));}
@@ -6506,7 +6546,7 @@ window.addEventListener('DOMContentLoaded',()=>{
       if(kind==='CARPETA')payload.lote_id=id;else payload.auditoria_id=id;
       const res=await fetch(`${API_URL}/operations/request`,{method:'POST',headers:await authHeaders(),body:JSON.stringify(payload)});
       const data=await res.json().catch(()=>({}));
-      if(!res.ok)throw new Error(typeof data.detail==='string'?data.detail:`Error HTTP ${res.status}`);
+      if(!res.ok)throw new Error(dvHttpErrorMessage(res,data));
       await dvShowMessageModal({
         type:'success',
         title:'Solicitud enviada',
@@ -6570,7 +6610,7 @@ window.addEventListener('DOMContentLoaded',()=>{
         })
       });
       const data=await res.json().catch(()=>({}));
-      if(!res.ok)throw new Error(typeof data.detail==='string'?data.detail:`Error HTTP ${res.status}`);
+      if(!res.ok)throw new Error(dvHttpErrorMessage(res,data));
 
       await loadCola();
       if(typeof loadRoleHome==='function')await loadRoleHome();
@@ -6662,7 +6702,7 @@ window.addEventListener('DOMContentLoaded',()=>{
         body:JSON.stringify(payload)
       });
       const data=await res.json().catch(()=>({}));
-      if(!res.ok)throw new Error(typeof data.detail==='string'?data.detail:`Error HTTP ${res.status}`);
+      if(!res.ok)throw new Error(dvHttpErrorMessage(res,data));
 
       const cantidad=Number(data.procesados||0);
 
@@ -6942,6 +6982,11 @@ window.addEventListener('DOMContentLoaded',()=>{
         // Actualiza solicitudes/aprobaciones.
         await loadCola();
 
+        // El dashboard reutiliza este mismo evento Realtime; no abre otro canal.
+        if(typeof window.dvRefreshDashboardInventory === 'function'){
+          window.dvRefreshDashboardInventory('main-realtime');
+        }
+
         // IMPORTANTE: no llamar loadFilesView() aquí.
         // loadFilesView() muestra "Cargando archivos..." y provocaba el
         // parpadeo visual en cada evento Realtime.
@@ -6966,7 +7011,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     window.__dvOpsRealtime=supabaseClient.channel('datavault_operaciones_realtime_v1')
       .on('postgres_changes',{event:'*',schema:'public',table:'auditoria_custodia'},refreshAll)
       .on('postgres_changes',{event:'*',schema:'public',table:'solicitudes_operacion'},refreshAll)
-      .subscribe(status=>console.log('[DATAVAULT REALTIME]',status));
+      .subscribe(status=>{if(['CHANNEL_ERROR','TIMED_OUT','CLOSED'].includes(status))console.warn('[DATAVAULT REALTIME]',status);});
   };
 
   async function backfillLegacyDriveIds(){
@@ -7648,36 +7693,12 @@ window.addEventListener('DOMContentLoaded',()=>{
   }
 
   function connectRealtime(){
+    // La actualización Realtime del dashboard se dispara desde el canal
+    // principal de DataVault. Evitamos una segunda suscripción a las mismas tablas.
     if(dvDashChannel){
-      try{
-        supabaseClient.removeChannel(dvDashChannel);
-      }catch(_){}
+      try{ supabaseClient.removeChannel(dvDashChannel); }catch(_){}
       dvDashChannel = null;
     }
-
-    dvDashChannel = supabaseClient
-      .channel('datavault_dashboard_inventory_v3')
-      .on(
-        'postgres_changes',
-        {
-          event:'*',
-          schema:'public',
-          table:'auditoria_custodia'
-        },
-        () => refreshDashboard('realtime-auditoria')
-      )
-      .on(
-        'postgres_changes',
-        {
-          event:'*',
-          schema:'public',
-          table:'solicitudes_operacion'
-        },
-        () => refreshDashboard('realtime-operaciones')
-      )
-      .subscribe(status =>
-        console.log('[DATAVAULT DASHBOARD REALTIME]', status)
-      );
   }
 
   function boot(){
@@ -7941,6 +7962,290 @@ window.addEventListener('DOMContentLoaded',()=>{
       });
     });
   };
+})();
+</script>
+
+
+<script id="datavault-backend-22-38-adapter-v1">
+/* =========================================================
+   FRONTEND ADAPTER · BACKEND 22–38
+   - Drive por niveles: /drive/browse
+   - Breadcrumb del backend
+   - Un único authHeaders global
+   - Loading/error/retry por nivel
+   - Reporte: /reports/audit.xlsx
+   ========================================================= */
+(function(){
+  const contexts={
+    upload:{folderId:'root',data:null,error:null,loading:false,seq:0},
+    move:{folderId:'root',data:null,error:null,loading:false,seq:0}
+  };
+  let moveSource=null;
+  let moveSelected=null;
+
+  const esc=v=>typeof escapeHtml==='function'?escapeHtml(v):String(v??'');
+  const norm=v=>String(v??'').trim().toLowerCase();
+
+  function context(name){return contexts[name];}
+
+  async function fetchFolder(folderId='root',includeFiles=false){
+    const id=String(folderId||'root').trim()||'root';
+    const headers=await authHeaders(false);
+    const url=`${API_URL}/drive/browse?folder_id=${encodeURIComponent(id)}&include_files=${includeFiles?'true':'false'}`;
+    const response=await fetch(url,{method:'GET',headers});
+    const data=await response.json().catch(()=>({}));
+    if(!response.ok){
+      throw new Error(dvHttpErrorMessage(response,data,'No se pudo cargar Google Drive.'));
+    }
+    return data;
+  }
+
+  function listElement(name){
+    return document.getElementById(name==='upload'?'dvUploadDestinationList':'dvMoveFolderList');
+  }
+
+  function searchValue(name){
+    const id=name==='upload'?'dvUploadDestinationSearch':'dvMoveSearch';
+    return norm(document.getElementById(id)?.value||'');
+  }
+
+  function browseActionName(name){return name==='upload'?'dvBrowseUploadFolder':'dvBrowseMoveFolder';}
+  function selectActionName(name){return name==='upload'?'dvSelectUploadCurrentFolder':'dvSelectMoveCurrentFolder';}
+  function retryActionName(name){return name==='upload'?'dvRetryUploadDriveFolder':'dvRetryMoveDriveFolder';}
+
+  function breadcrumbHtml(name,data){
+    const crumbs=Array.isArray(data?.breadcrumb)?data.breadcrumb.filter(Boolean):[];
+    const action=browseActionName(name);
+    if(!crumbs.length){
+      return `<div class="dv-browse-breadcrumb"><button type="button" onclick="${action}('root')">Mi unidad</button></div>`;
+    }
+    const html=crumbs.map((item,index)=>{
+      const id=String(item?.id||'root');
+      const label=item?.name||(index===0?'Mi unidad':`Nivel ${index+1}`);
+      const sep=index?'<i class="fa-solid fa-chevron-right"></i>':'';
+      return `${sep}<button type="button" onclick="${action}('${esc(id)}')">${esc(label)}</button>`;
+    }).join('');
+    return `<div class="dv-browse-breadcrumb">${html}</div>`;
+  }
+
+  function visualPath(data){
+    const path=String(data?.current?.path||'').trim();
+    if(path)return path;
+    const crumbs=Array.isArray(data?.breadcrumb)?data.breadcrumb:[];
+    const joined=crumbs.map(x=>String(x?.name||'').trim()).filter(Boolean).join(' / ');
+    return joined||String(data?.current?.name||'Mi unidad').trim()||'Mi unidad';
+  }
+
+  function moveRestriction(current){
+    if(!moveSource||!current)return '';
+    const currentId=String(current?.id||'');
+    if(moveSource.currentParent && currentId===String(moveSource.currentParent))return 'Esta es la ubicación actual.';
+    if(moveSource.kind==='CARPETA'){
+      if(moveSource.driveId && currentId===String(moveSource.driveId))return 'No puedes mover una carpeta dentro de sí misma.';
+      const ids=(Array.isArray(current?.breadcrumb)?current.breadcrumb:[]).map(x=>String(x?.id||''));
+      if(moveSource.driveId && ids.includes(String(moveSource.driveId)) && currentId!==String(moveSource.driveId)){
+        return 'No puedes moverla dentro de una subcarpeta propia.';
+      }
+    }
+    return '';
+  }
+
+  function render(name){
+    const ctx=context(name);
+    const list=listElement(name);
+    if(!ctx||!list)return;
+
+    if(ctx.loading){
+      list.innerHTML='<div class="dv-browse-loading"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Cargando carpetas...</div>';
+      return;
+    }
+    if(ctx.error){
+      list.innerHTML=`<div class="dv-browse-error"><i class="fa-solid fa-triangle-exclamation"></i><b>No se pudo cargar Google Drive.</b><span>${esc(ctx.error.message||String(ctx.error))}</span><button type="button" class="dv-browse-retry" onclick="${retryActionName(name)}()"><i class="fa-solid fa-rotate mr-1"></i>Reintentar</button></div>`;
+      return;
+    }
+    const data=ctx.data;
+    if(!data){list.innerHTML='<div class="dv-browse-empty">Selecciona una ubicación.</div>';return;}
+
+    const q=searchValue(name);
+    const folders=(Array.isArray(data.folders)?data.folders:[]).filter(f=>!q||norm(f?.name).includes(q));
+    const current=data.current||{};
+    const restriction=name==='move'?moveRestriction(current):'';
+    const isSelected=name==='upload'
+      ? String(dvUploadDestinationSelectedId||'')===String(current?.id||'')
+      : String(moveSelected?.id||'')===String(current?.id||'');
+
+    const selectButton=restriction
+      ? `<button type="button" class="dv-browse-select-current" disabled title="${esc(restriction)}">No disponible</button>`
+      : `<button type="button" class="dv-browse-select-current" onclick="${selectActionName(name)}()"><i class="fa-solid fa-check mr-1"></i>${isSelected?'Seleccionada':'Seleccionar esta carpeta'}</button>`;
+
+    const currentCard=`<div class="dv-browse-current"><div class="dv-browse-current-main"><div class="dv-browse-current-icon"><i class="fa-solid fa-folder-open"></i></div><div class="dv-browse-current-text"><b>${esc(current?.name||'Mi unidad')}</b><small>${esc(visualPath(data))}</small></div></div><div class="flex items-center gap-2">${isSelected?'<span class="dv-browse-selected-badge"><i class="fa-solid fa-circle-check"></i>Destino</span>':''}${selectButton}</div></div>`;
+
+    const folderRows=folders.length
+      ? `<div class="dv-browse-folder-list">${folders.map(folder=>`<button type="button" class="dv-browse-folder" onclick="${browseActionName(name)}('${esc(String(folder?.id||''))}')"><i class="fa-solid fa-folder"></i><span>${esc(folder?.name||'Carpeta')}</span>${folder?.modifiedTime?`<small>${esc(new Date(folder.modifiedTime).toLocaleDateString('es-PE'))}</small>`:''}<i class="fa-solid fa-chevron-right text-slate-300 text-[8px]"></i></button>`).join('')}</div>`
+      : `<div class="dv-browse-empty"><i class="fa-solid fa-folder-open mr-1"></i>${q?'No hay carpetas que coincidan en este nivel.':'Esta carpeta no contiene subcarpetas.'}</div>`;
+
+    list.innerHTML=`<div class="dv-browse-shell">${breadcrumbHtml(name,data)}${currentCard}${folderRows}</div>`;
+  }
+
+  async function load(name,folderId,force=false){
+    const ctx=context(name);if(!ctx)return;
+    const requested=String(folderId||ctx.folderId||'root');
+    const seq=++ctx.seq;
+    ctx.folderId=requested;
+    ctx.loading=true;ctx.error=null;
+    render(name);
+    try{
+      const data=await fetchFolder(requested,false);
+      if(seq!==ctx.seq)return;
+      ctx.data=data;
+      ctx.folderId=String(data?.current?.id||requested||'root');
+    }catch(error){
+      if(seq!==ctx.seq)return;
+      ctx.error=error;
+    }finally{
+      if(seq===ctx.seq){ctx.loading=false;render(name);}
+    }
+  }
+
+  function sourceForMove(kind,id){
+    const target=String(id||'');
+    if(kind==='CARPETA'){
+      const rows=(auditCache||[]).filter(r=>String(r?.lote_id||'')===target);
+      const row=rows[0]||{};
+      return {kind:'CARPETA',id:target,name:(typeof dvRoot==='function'?dvRoot(row):'')||'Carpeta',driveId:String(row?.drive_folder_id||''),currentParent:String(row?.drive_parent_id||'')};
+    }
+    const row=(auditCache||[]).find(r=>String(r?.id||'')===target)||{};
+    return {kind:'ARCHIVO',id:target,name:row?.nombre_archivo||'Archivo',driveId:String(row?.drive_file_id||''),currentParent:String(row?.drive_parent_id||'')};
+  }
+
+  function ensureMoveModal(){
+    if(document.getElementById('dvOperationModal'))return;
+    const modal=document.createElement('div');
+    modal.id='dvOperationModal';modal.className='dv-hidden';
+    modal.innerHTML=`<div class="dv-op-modal-card"><div class="dv-op-modal-head"><div><p class="text-[10px] uppercase tracking-widest text-slate-400 font-bold">Solicitud de movimiento</p><h3 class="text-lg font-extrabold text-slate-800 mt-1" id="dvMoveTitle">Mover elemento</h3><p class="text-xs text-slate-500 mt-1">Navega por Google Drive por niveles y selecciona la carpeta destino.</p></div><button type="button" class="icon-btn" onclick="dvCloseMoveModal()"><i class="fa-solid fa-xmark"></i></button></div><div class="dv-op-modal-body space-y-4"><div><label class="field-label">Buscar en esta carpeta</label><div class="dv-folder-search"><i class="fa-solid fa-magnifying-glass"></i><input id="dvMoveSearch" class="input-modern w-full" placeholder="Buscar en esta carpeta..." autocomplete="off" oninput="dvFilterMoveFolders()"></div></div><div id="dvMoveFolderList" class="dv-folder-tree"><div class="dv-browse-loading"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Cargando carpetas...</div></div><div id="dvMoveSelection" class="dv-move-selection">Navega hasta la carpeta destino y pulsa <b>Seleccionar esta carpeta</b>.</div><div id="dvMoveMessage" class="text-xs text-slate-500"></div><div class="flex justify-end gap-2"><button type="button" class="secondary-btn" onclick="dvCloseMoveModal()">Cancelar</button><button type="button" class="primary-btn" id="dvMoveSubmit" onclick="dvSubmitMoveRequest()" disabled><i class="fa-solid fa-paper-plane"></i>Solicitar movimiento</button></div></div></div>`;
+    modal.addEventListener('click',event=>{if(event.target===modal)window.dvCloseMoveModal();});
+    document.body.appendChild(modal);
+  }
+
+  window.dvBrowseUploadFolder=function(folderId){
+    const search=document.getElementById('dvUploadDestinationSearch');if(search)search.value='';
+    return load('upload',folderId||'root');
+  };
+  window.dvRetryUploadDriveFolder=function(){return load('upload',contexts.upload.folderId||'root',true);};
+  window.dvFilterUploadDestinations=function(){render('upload');};
+  window.dvSelectUploadCurrentFolder=function(){
+    const current=contexts.upload.data?.current;if(!current?.id)return;
+    dvUploadDestinationSelectedId=String(current.id);
+    dvUploadDestinationSelectedPath=visualPath(contexts.upload.data);
+    const selection=document.getElementById('dvUploadDestinationSelection');
+    if(selection)selection.innerHTML=`Destino seleccionado:<br><strong><i class="fa-solid fa-folder mr-1 text-amber-500"></i>${esc(dvUploadDestinationSelectedPath)}</strong>`;
+    if(typeof dvRefreshUploadButtonState==='function')dvRefreshUploadButtonState();
+    render('upload');
+  };
+  // Compatibilidad: el selector nuevo selecciona la carpeta actual; no construye jerarquías en frontend.
+  window.dvSelectUploadDestination=function(folderId){return window.dvBrowseUploadFolder(folderId);};
+
+  window.dvEnsureUploadDestinationFolders=async function(force=false){
+    const panel=document.getElementById('dvUploadDestinationPanel');
+    if(typeof dvSelectedEntries!=='undefined' && !dvSelectedEntries.length){if(panel)panel.classList.add('hidden');return;}
+    if(panel)panel.classList.remove('hidden');
+    const currentId=contexts.upload.folderId||'root';
+    if(!contexts.upload.data || force)return load('upload',currentId,force);
+    render('upload');
+  };
+  // Rebind global identifier used by existing code/onclick handlers.
+  try{dvEnsureUploadDestinationFolders=window.dvEnsureUploadDestinationFolders;}catch(_){}
+  try{dvFilterUploadDestinations=window.dvFilterUploadDestinations;}catch(_){}
+  try{dvSelectUploadDestination=window.dvSelectUploadDestination;}catch(_){}
+
+  const oldReset=typeof dvResetUploadDestination==='function'?dvResetUploadDestination:null;
+  window.dvResetUploadDestination=function(){
+    dvUploadDestinationSelectedId='';dvUploadDestinationSelectedPath='';
+    contexts.upload={folderId:'root',data:null,error:null,loading:false,seq:contexts.upload.seq+1};
+    const search=document.getElementById('dvUploadDestinationSearch');if(search)search.value='';
+    const selection=document.getElementById('dvUploadDestinationSelection');
+    if(selection)selection.innerHTML='Navega por Drive y selecciona explícitamente la carpeta destino.';
+    if(typeof dvRefreshUploadButtonState==='function')dvRefreshUploadButtonState();
+  };
+  try{dvResetUploadDestination=window.dvResetUploadDestination;}catch(_){}
+
+  window.dvBrowseMoveFolder=function(folderId){
+    const search=document.getElementById('dvMoveSearch');if(search)search.value='';
+    return load('move',folderId||'root');
+  };
+  window.dvRetryMoveDriveFolder=function(){return load('move',contexts.move.folderId||'root',true);};
+  window.dvFilterMoveFolders=function(){render('move');};
+  window.dvSelectMoveCurrentFolder=function(){
+    const data=contexts.move.data;const current=data?.current;if(!current?.id)return;
+    const restriction=moveRestriction(current);
+    if(restriction){if(typeof dvShowMessageModal==='function')dvShowMessageModal({type:'error',title:'Destino no válido',message:restriction});return;}
+    moveSelected={id:String(current.id),path:visualPath(data),name:current.name||'Carpeta'};
+    const selection=document.getElementById('dvMoveSelection');
+    if(selection)selection.innerHTML=`Destino seleccionado:<br><strong><i class="fa-solid fa-folder mr-1 text-amber-500"></i>${esc(moveSelected.path)}</strong>`;
+    const btn=document.getElementById('dvMoveSubmit');if(btn)btn.disabled=false;
+    render('move');
+  };
+
+  window.dvCloseMoveModal=function(){
+    document.getElementById('dvOperationModal')?.classList.add('dv-hidden');
+    moveSource=null;moveSelected=null;
+    contexts.move={folderId:'root',data:null,error:null,loading:false,seq:contexts.move.seq+1};
+  };
+
+  window.dvRequestMove=async function(kind,id){
+    ensureMoveModal();
+    moveSource=sourceForMove(kind,id);moveSelected=null;
+    const modal=document.getElementById('dvOperationModal');if(!modal)return;
+    modal.classList.remove('dv-hidden');
+    const title=document.getElementById('dvMoveTitle');if(title)title.textContent=`Mover ${kind==='CARPETA'?'carpeta':'archivo'}: ${moveSource.name}`;
+    const selection=document.getElementById('dvMoveSelection');if(selection)selection.innerHTML='Navega hasta la carpeta destino y pulsa <b>Seleccionar esta carpeta</b>.';
+    const submit=document.getElementById('dvMoveSubmit');if(submit){submit.disabled=true;submit.innerHTML='<i class="fa-solid fa-paper-plane"></i>Solicitar movimiento';}
+    const msg=document.getElementById('dvMoveMessage');if(msg)msg.textContent='Solo se registra la solicitud. El backend ejecutará el movimiento después de la aprobación del custodio.';
+    await load('move','root');
+  };
+
+  window.dvSubmitMoveRequest=async function(){
+    if(!moveSource||!moveSelected?.id)return;
+    const btn=document.getElementById('dvMoveSubmit');
+    try{
+      if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Enviando...';}
+      const payload={tipo_operacion:'MOVER',objeto_tipo:moveSource.kind,carpeta_destino_id:String(moveSelected.id)};
+      if(moveSource.kind==='CARPETA')payload.lote_id=moveSource.id;else payload.auditoria_id=moveSource.id;
+      const response=await fetch(`${API_URL}/operations/request`,{method:'POST',headers:await authHeaders(true),body:JSON.stringify(payload)});
+      const data=await response.json().catch(()=>({}));
+      if(!response.ok)throw new Error(dvHttpErrorMessage(response,data,'No se pudo solicitar el movimiento.'));
+      const selectedPath=moveSelected?.path||'';
+      window.dvCloseMoveModal();
+      if(typeof dvShowMessageModal==='function')await dvShowMessageModal({type:'success',title:'Solicitud enviada',message:'La solicitud de movimiento fue enviada al custodio.',detail:`Destino: ${selectedPath}`});
+      if(typeof loadCola==='function')await loadCola();
+      if(typeof loadFilesView==='function')await loadFilesView();
+    }catch(error){
+      if(typeof dvShowMessageModal==='function')await dvShowMessageModal({type:'error',title:'No se pudo solicitar el movimiento',message:error?.message||String(error)});
+      else alert(error?.message||String(error));
+    }finally{
+      if(btn){btn.disabled=!moveSelected?.id;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i>Solicitar movimiento';}
+    }
+  };
+
+  // API pública para drag & drop y futuras vistas. No expone ni maneja la caché interna.
+  window.DVDriveBrowser={
+    fetchFolder,
+    loadUpload:(folderId='root')=>load('upload',folderId),
+    loadMove:(folderId='root')=>load('move',folderId),
+    refreshUpload:()=>load('upload',contexts.upload.folderId||'root',true),
+    refreshMove:()=>load('move',contexts.move.folderId||'root',true),
+    getUploadState:()=>contexts.upload,
+    getMoveState:()=>contexts.move
+  };
+
+  // El botón Actualizar del selector recarga únicamente el nivel visible.
+  document.addEventListener('DOMContentLoaded',()=>{
+    const refresh=document.querySelector('#dvUploadDestinationPanel .dv-upload-destination-head .icon-btn');
+    if(refresh){
+      refresh.setAttribute('title','Actualizar esta carpeta');
+      refresh.setAttribute('onclick','dvEnsureUploadDestinationFolders(true)');
+    }
+  });
 })();
 </script>
 
