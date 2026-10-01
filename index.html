@@ -3404,6 +3404,86 @@ function requestActionHtml(lote,canResolve,archivos){
 }
 function formatShortDate(v){return v?new Date(v).toLocaleString('es-PE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}):'—';}
 
+/* Gráfico real de actividad: usa transferencias de auditoría y operaciones aprobadas. */
+function dvActivityDayKey(value){
+  if(!value) return '';
+  const d=value instanceof Date?value:new Date(value);
+  if(Number.isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function renderRealFileActivityChart(auditRows,operationRows){
+  const audit=Array.isArray(auditRows)?auditRows:[];
+  const ops=Array.isArray(operationRows)?operationRows:[];
+  const bars=document.getElementById('dashBars');
+  if(!bars)return;
+
+  // Últimos 7 días reales, usando la zona horaria local del navegador.
+  const today=new Date();
+  today.setHours(12,0,0,0);
+  const days=[];
+  for(let offset=6;offset>=0;offset--){
+    const d=new Date(today);
+    d.setDate(today.getDate()-offset);
+    days.push({
+      key:dvActivityDayKey(d),
+      label:d.toLocaleDateString('es-PE',{day:'2-digit',month:'short'}).replace('.','')
+    });
+  }
+
+  const dayIndex=new Map(days.map((d,i)=>[d.key,i]));
+  const uploaded=Array(days.length).fill(0);
+  const moved=Array(days.length).fill(0);
+  const deleted=Array(days.length).fill(0);
+
+  // SUBIDOS: cada archivo que realmente llegó a Drive. Para registros antiguos
+  // sin fecha_transferencia se usa la fecha de solicitud, pero solo si fue aprobado.
+  audit.forEach(row=>{
+    if(String(row?.estado||'').toUpperCase()==='APROBADO'){
+      const uploadDate=row?.fecha_transferencia||row?.fecha_solicitud;
+      const idx=dayIndex.get(dvActivityDayKey(uploadDate));
+      if(idx!==undefined)uploaded[idx]++;
+    }
+
+    // ELIMINADOS: fecha_eliminacion se escribe cuando Drive envía el elemento a papelera.
+    const deleteIdx=dayIndex.get(dvActivityDayKey(row?.fecha_eliminacion));
+    if(deleteIdx!==undefined)deleted[deleteIdx]++;
+  });
+
+  // MOVIDOS: solo solicitudes MOVER realmente APROBADAS/ejecutadas.
+  // Si fue una carpeta, contamos los archivos del lote afectados por ese movimiento.
+  ops.forEach(op=>{
+    if(String(op?.estado||'').toUpperCase()!=='APROBADO')return;
+    if(String(op?.tipo_operacion||'').toUpperCase()!=='MOVER')return;
+    const idx=dayIndex.get(dvActivityDayKey(op?.fecha_resolucion||op?.fecha_solicitud));
+    if(idx===undefined)return;
+
+    let affected=1;
+    if(String(op?.objeto_tipo||'').toUpperCase()==='CARPETA' && op?.lote_id){
+      const loteId=String(op.lote_id);
+      const count=audit.filter(r=>String(r?.lote_id||'')===loteId).length;
+      if(count>0)affected=count;
+    }
+    moved[idx]+=affected;
+  });
+
+  const width=680,height=190,pad={l:38,r:12,t:12,b:30};
+  const rawMax=Math.max(0,...uploaded,...moved,...deleted);
+  const maxY=rawMax<=4?4:rawMax<=10?10:Math.ceil(rawMax/5)*5;
+  const sx=i=>pad.l+i*((width-pad.l-pad.r)/(days.length-1));
+  const sy=v=>pad.t+(height-pad.t-pad.b)*(1-v/maxY);
+  const path=arr=>arr.map((v,i)=>`${i?'L':'M'} ${sx(i).toFixed(1)} ${sy(v).toFixed(1)}`).join(' ');
+  const dots=(arr,cls,serie)=>arr.map((v,i)=>`<circle cx="${sx(i).toFixed(1)}" cy="${sy(v).toFixed(1)}" r="3.2" class="${cls}"><title>${serie} · ${days[i].label}: ${v}</title></circle>`).join('');
+  const grid=[0,.25,.5,.75,1].map(t=>{
+    const y=pad.t+(height-pad.t-pad.b)*t;
+    const val=Math.round(maxY*(1-t));
+    return `<line x1="${pad.l}" y1="${y}" x2="${width-pad.r}" y2="${y}" class="chart-grid"/><text x="${pad.l-8}" y="${y+3}" text-anchor="end" class="chart-axis">${val}</text>`;
+  }).join('');
+  const xlabels=days.map((d,i)=>`<text x="${sx(i)}" y="${height-8}" text-anchor="middle" class="chart-axis">${d.label}</text>`).join('');
+
+  bars.innerHTML=`<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" class="activity-chart" aria-label="Actividad real de archivos de los últimos 7 días">${grid}<path d="${path(uploaded)}" class="chart-line uploaded-line"/><path d="${path(moved)}" class="chart-line moved-line"/><path d="${path(deleted)}" class="chart-line deleted-line"/>${dots(uploaded,'uploaded-dot','Subidos')}${dots(moved,'moved-dot','Movidos')}${dots(deleted,'deleted-dot','Eliminados')}${xlabels}</svg>`;
+}
+
 function updateDashboardVisuals(){
   const sol = Array.isArray(colaCache) ? colaCache : [];
   const aud = Array.isArray(auditCache) ? auditCache : [];
@@ -3426,29 +3506,9 @@ function updateDashboardVisuals(){
   set('dashBloqueadas',users);
   set('dashDonutTotal',aud.length || sol.length);
 
-  const groups = { SUBIDA_MASIVA:[], MOVIMIENTO_MASIVO:[], ELIMINACION_MASIVA:[] };
-  sol.forEach(x=>{ if(groups[x.tipo_operacion]) groups[x.tipo_operacion].push(x); });
-  const width=680, height=190, pad={l:38,r:12,t:12,b:30};
-  const labels=['11 sep','12 sep','13 sep','14 sep','15 sep','16 sep','17 sep'];
-  const buildSeries=(offset)=>labels.map((_,i)=>{
-    const idx=(i+offset)%Math.max(1,sol.length||1);
-    const base=sol.length ? (idx < sol.length ? 1 : 0) : 0;
-    return Math.max(0, Math.round((aud.length||1)*(0.45 + ((i*17+offset*11)%38)/100) * base));
-  });
-  const uploaded=buildSeries(0), moved=buildSeries(1), deleted=buildSeries(2);
-  const maxY=Math.max(10,...uploaded,...moved,...deleted);
-  const sx=(i)=>pad.l+i*((width-pad.l-pad.r)/(labels.length-1));
-  const sy=(v)=>pad.t+(height-pad.t-pad.b)*(1-v/maxY);
-  const path=(arr)=>arr.map((v,i)=>`${i?'L':'M'} ${sx(i).toFixed(1)} ${sy(v).toFixed(1)}`).join(' ');
-  const dots=(arr,cls)=>arr.map((v,i)=>`<circle cx="${sx(i).toFixed(1)}" cy="${sy(v).toFixed(1)}" r="3.2" class="${cls}"/>`).join('');
-  const grid=[0,.25,.5,.75,1].map(t=>{
-    const y=pad.t+(height-pad.t-pad.b)*t;
-    const val=Math.round(maxY*(1-t));
-    return `<line x1="${pad.l}" y1="${y}" x2="${width-pad.r}" y2="${y}" class="chart-grid"/><text x="${pad.l-8}" y="${y+3}" text-anchor="end" class="chart-axis">${val}</text>`;
-  }).join('');
-  const xlabels=labels.map((l,i)=>`<text x="${sx(i)}" y="${height-8}" text-anchor="middle" class="chart-axis">${l}</text>`).join('');
-  const bars=document.getElementById('dashBars');
-  if(bars) bars.innerHTML=`<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" class="activity-chart" aria-label="Actividad de archivos">${grid}<path d="${path(uploaded)}" class="chart-line uploaded-line"/><path d="${path(moved)}" class="chart-line moved-line"/><path d="${path(deleted)}" class="chart-line deleted-line"/>${dots(uploaded,'uploaded-dot')}${dots(moved,'moved-dot')}${dots(deleted,'deleted-dot')}${xlabels}</svg>`;
+  // Gráfico con datos reales. En esta capa legacy, sol puede contener una cola parcial;
+  // el dashboard V3 vuelve a dibujarlo después con el historial completo de operaciones.
+  renderRealFileActivityChart(aud,sol);
 
   const approved=sol.filter(x=>x.estado==='APROBADO').length;
   const rejected=sol.filter(x=>x.estado==='RECHAZADO').length;
@@ -6867,6 +6927,9 @@ window.addEventListener('DOMContentLoaded',()=>{
 
     // Actividad reciente sigue siendo HISTÓRICA, no inventario.
     renderRecent(audit);
+
+    // Gráfico de los últimos 7 días con datos reales de Drive/auditoría y operaciones.
+    renderRealFileActivityChart(audit, ops);
 
     const welcome = document.getElementById('dashWelcome');
     if(welcome){
