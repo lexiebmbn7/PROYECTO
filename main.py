@@ -17,13 +17,48 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 from supabase import create_client, Client
 
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
-
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
+
+from datavault.config import settings
+from datavault.outbox import (
+    encolar_evento as outbox_encolar_evento,
+    listar_pendientes as outbox_listar_pendientes,
+    marcar_enviado as outbox_marcar_enviado,
+    marcar_error as outbox_marcar_error,
+    marcar_procesando as outbox_marcar_procesando,
+)
+from datavault.processing import (
+    marcar_aprobado as procesamiento_marcar_aprobado,
+    marcar_error as procesamiento_marcar_error,
+    marcar_pendiente as procesamiento_marcar_pendiente,
+    marcar_procesando as procesamiento_marcar_procesando,
+    marcar_rechazado as procesamiento_marcar_rechazado,
+)
+from datavault.reports import generar_reporte_excel_datavault
+from datavault.resilience import (
+    build_http_client,
+    http_request_with_retry,
+)
+from datavault.states import (
+    ESTADO_APROBADO,
+    ESTADO_ARCHIVO_ACTIVO,
+    ESTADO_ARCHIVO_ELIMINADO,
+    ESTADO_ARCHIVO_ELIMINADO_EXTERNAMENTE,
+    ESTADO_ERROR,
+    ESTADO_PENDIENTE,
+    ESTADO_RECHAZADO,
+    PROCESAMIENTO_APROBADO,
+    PROCESAMIENTO_ERROR,
+    PROCESAMIENTO_PENDIENTE,
+    PROCESAMIENTO_PROCESANDO,
+    PROCESAMIENTO_RECHAZADO,
+    detalle_error,
+    error_api,
+    normalizar_estado,
+    normalizar_estado_archivo,
+)
 
 
 # ============================================================
@@ -37,7 +72,7 @@ app = FastAPI(
 # Exponer la carpeta física "images" para archivos estáticos
 app.mount("/images", StaticFiles(directory="images"), name="images")
 
-_cors_public_base = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
+_cors_public_base = settings.public_base_url
 CORS_ALLOWED_ORIGINS = [
     origin
     for origin in (
@@ -58,189 +93,45 @@ app.add_middleware(
 
 
 # ============================================================
-# CONFIGURACIÓN DESDE RAILWAY Y GOOGLE DRIVE
+# CONFIGURACIÓN MODULAR (PUNTOS 39-44)
 # ============================================================
 
-TELEGRAM_TOKEN = os.getenv(
-    "TELEGRAM_TOKEN",
-    ""
-).strip()
+TELEGRAM_TOKEN = settings.telegram_token
+TELEGRAM_WEBHOOK_SECRET = settings.telegram_webhook_secret
+AUTHORIZED_CHAT_IDS_RAW = settings.authorized_chat_ids_raw
+AUTHORIZED_CHAT_IDS = list(settings.authorized_chat_ids)
 
+SUPABASE_URL = settings.supabase_url
+SUPABASE_KEY = settings.supabase_key
+SUPABASE_SERVICE_ROLE_KEY = settings.supabase_service_role_key
+SUPABASE_TEMP_BUCKET = settings.supabase_temp_bucket
 
-TELEGRAM_WEBHOOK_SECRET = os.getenv(
-    "TELEGRAM_WEBHOOK_SECRET",
-    ""
-).strip()
+PUBLIC_BASE_URL = settings.public_base_url
 
+GOOGLE_CLIENT_ID = settings.google_client_id
+GOOGLE_CLIENT_SECRET = settings.google_client_secret
+GOOGLE_REFRESH_TOKEN = settings.google_refresh_token
+GOOGLE_FOLDER_ID = settings.google_folder_id
+GOOGLE_DRIVE_ROOT_ID = settings.google_drive_root_id
+GOOGLE_API_RETRIES = settings.google_api_retries
 
-AUTHORIZED_CHAT_IDS_RAW = os.getenv(
-    "AUTHORIZED_CHAT_IDS",
-    ""
-).strip()
+DRIVE_CACHE_TTL_SECONDS = settings.drive_cache_ttl_seconds
+MAX_BATCH_FILES = settings.max_batch_files
+MAX_FILE_SIZE_MB = settings.max_file_size_mb
+HTTP_TIMEOUT_SECONDS = settings.http_timeout_seconds
+EXTERNAL_RETRY_ATTEMPTS = settings.external_retry_attempts
+EXTERNAL_RETRY_BACKOFF_SECONDS = settings.external_retry_backoff_seconds
 
-
-SUPABASE_URL = os.getenv(
-    "SUPABASE_URL",
-    "https://crujlbbhtkcithullgfs.supabase.co"
-).strip()
-
-
-SUPABASE_KEY = os.getenv(
-    "SUPABASE_KEY",
-    ""
-).strip()
-
-
-SUPABASE_SERVICE_ROLE_KEY = os.getenv(
-    "SUPABASE_SERVICE_ROLE_KEY",
-    ""
-).strip()
-
-
-PUBLIC_BASE_URL = os.getenv(
-    "PUBLIC_BASE_URL",
-    ""
-).strip().rstrip("/")
-
-
-RAILWAY_PUBLIC_DOMAIN = os.getenv(
-    "RAILWAY_PUBLIC_DOMAIN",
-    ""
-).strip()
-
-
-GOOGLE_CLIENT_ID = os.getenv(
-    "GOOGLE_CLIENT_ID",
-    ""
-).strip()
-
-
-GOOGLE_CLIENT_SECRET = os.getenv(
-    "GOOGLE_CLIENT_SECRET",
-    ""
-).strip()
-
-
-GOOGLE_REFRESH_TOKEN = os.getenv(
-    "GOOGLE_REFRESH_TOKEN",
-    ""
-).strip()
-
-
-GOOGLE_FOLDER_ID = os.getenv(
-    "GOOGLE_FOLDER_ID",
-    ""
-).strip()
-
-
-# Raíz autorizada para la nueva navegación. "root" permite trabajar con toda
-# Mi unidad usando únicamente las credenciales del backend.
-GOOGLE_DRIVE_ROOT_ID = os.getenv(
-    "GOOGLE_DRIVE_ROOT_ID",
-    "root"
-).strip() or "root"
-
-
-DRIVE_CACHE_TTL_SECONDS = max(
-    10,
-    int(os.getenv("DRIVE_CACHE_TTL_SECONDS", "60"))
-)
-
-
-SUPABASE_TEMP_BUCKET = os.getenv(
-    "SUPABASE_TEMP_BUCKET",
-    "custodia-pendiente"
-).strip() or "custodia-pendiente"
-
-
-if not PUBLIC_BASE_URL and RAILWAY_PUBLIC_DOMAIN:
-
-    PUBLIC_BASE_URL = (
-        f"https://{RAILWAY_PUBLIC_DOMAIN}"
-    ).rstrip("/")
-
+OUTBOX_WORKER_ENABLED = settings.outbox_worker_enabled
+OUTBOX_POLL_SECONDS = settings.outbox_poll_seconds
+OUTBOX_BATCH_SIZE = settings.outbox_batch_size
+OUTBOX_MAX_ATTEMPTS = settings.outbox_max_attempts
 
 DECISION_LOCK = threading.Lock()
+OUTBOX_STOP_EVENT = threading.Event()
+OUTBOX_WORKER_THREAD = None
 
-# Límites de prueba para carga por lotes. Se pueden cambiar en Railway.
-MAX_BATCH_FILES = int(os.getenv("MAX_BATCH_FILES", "100"))
-MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "25"))
-MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
-
-# Cliente HTTP reutilizable para Supabase Auth / Telegram.
-# Evita abrir una conexión nueva en cada llamada externa.
-HTTP_TIMEOUT_SECONDS = float(os.getenv("HTTP_TIMEOUT_SECONDS", "20"))
-HTTP_CLIENT = httpx.Client(
-    timeout=httpx.Timeout(HTTP_TIMEOUT_SECONDS),
-    limits=httpx.Limits(
-        max_connections=40,
-        max_keepalive_connections=20,
-    ),
-    follow_redirects=True,
-)
-
-
-# ============================================================
-# ESTADOS / ERRORES NORMALIZADOS (PUNTOS 27-28)
-# ============================================================
-
-ESTADO_PENDIENTE = "PENDIENTE"
-ESTADO_APROBADO = "APROBADO"
-ESTADO_RECHAZADO = "RECHAZADO"
-ESTADO_ERROR = "ERROR"
-
-ESTADO_ARCHIVO_ACTIVO = "ACTIVO"
-ESTADO_ARCHIVO_ELIMINADO = "ELIMINADO"
-ESTADO_ARCHIVO_ELIMINADO_EXTERNAMENTE = "ELIMINADO_EXTERNAMENTE"
-
-
-def normalizar_estado(valor, predeterminado=ESTADO_PENDIENTE) -> str:
-    texto = str(valor or "").strip().upper().replace(" ", "_")
-    alias = {
-        "PENDING": ESTADO_PENDIENTE,
-        "EN_COLA": ESTADO_PENDIENTE,
-        "PENDIENTE": ESTADO_PENDIENTE,
-        "APPROVED": ESTADO_APROBADO,
-        "APROBADA": ESTADO_APROBADO,
-        "APROBADO": ESTADO_APROBADO,
-        "REJECTED": ESTADO_RECHAZADO,
-        "RECHAZADA": ESTADO_RECHAZADO,
-        "RECHAZADO": ESTADO_RECHAZADO,
-        "FAILED": ESTADO_ERROR,
-        "FALLO": ESTADO_ERROR,
-        "ERROR": ESTADO_ERROR,
-    }
-    return alias.get(texto, texto or predeterminado)
-
-
-def normalizar_estado_archivo(valor, predeterminado=ESTADO_ARCHIVO_ACTIVO) -> str:
-    texto = str(valor or "").strip().upper().replace(" ", "_")
-    alias = {
-        "ACTIVE": ESTADO_ARCHIVO_ACTIVO,
-        "ACTIVO": ESTADO_ARCHIVO_ACTIVO,
-        "DELETED": ESTADO_ARCHIVO_ELIMINADO,
-        "ELIMINADO": ESTADO_ARCHIVO_ELIMINADO,
-        "TRASHED": ESTADO_ARCHIVO_ELIMINADO,
-        "ELIMINADO_EXTERNAMENTE": ESTADO_ARCHIVO_ELIMINADO_EXTERNAMENTE,
-    }
-    return alias.get(texto, texto or predeterminado)
-
-
-def detalle_error(codigo: str, mensaje: str, contexto=None) -> dict:
-    detalle = {
-        "code": str(codigo or "ERROR").strip().upper(),
-        "message": str(mensaje or "Error no especificado."),
-    }
-    if contexto not in (None, {}, []):
-        detalle["context"] = contexto
-    return detalle
-
-
-def error_api(status_code: int, codigo: str, mensaje: str, contexto=None):
-    return HTTPException(
-        status_code=status_code,
-        detail=detalle_error(codigo, mensaje, contexto),
-    )
+HTTP_CLIENT = build_http_client(HTTP_TIMEOUT_SECONDS)
 
 
 # ============================================================
@@ -297,7 +188,7 @@ def crear_carpeta_google_drive(
             fields="id,name",
             supportsAllDrives=True,
         )
-        .execute()
+        .execute(num_retries=GOOGLE_API_RETRIES)
     )
 
     carpeta_id = respuesta.get("id")
@@ -346,7 +237,7 @@ def subir_archivo_google_drive_en_carpeta(
             fields="id,name",
             supportsAllDrives=True,
         )
-        .execute()
+        .execute(num_retries=GOOGLE_API_RETRIES)
     )
 
     archivo_id = respuesta.get("id")
@@ -561,47 +452,13 @@ def subir_lote_carpeta_a_drive(
                         fileId=carpeta_raiz_id,
                         supportsAllDrives=True,
                     )
-                    .execute()
+                    .execute(num_retries=GOOGLE_API_RETRIES)
                 )
                 print(f"[DRIVE LOTE ROLLBACK] carpeta eliminada {carpeta_raiz_id}")
             except Exception as rollback_error:
                 print(f"[DRIVE LOTE ROLLBACK ERROR] {rollback_error}")
 
         return None
-
-
-# ============================================================
-# CARGAR IDS DE TELEGRAM
-# ============================================================
-
-def cargar_ids_autorizados():
-
-    ids = []
-
-    for valor in AUTHORIZED_CHAT_IDS_RAW.split(","):
-
-        valor = valor.strip()
-
-        if not valor:
-            continue
-
-        try:
-
-            ids.append(
-                int(valor)
-            )
-
-        except ValueError:
-
-            print(
-                f"[CONFIG] Telegram ID inválido "
-                f"ignorado: {valor}"
-            )
-
-    return ids
-
-
-AUTHORIZED_CHAT_IDS = cargar_ids_autorizados()
 
 
 # ============================================================
@@ -641,6 +498,46 @@ supabase_admin: Client = create_client(
     SUPABASE_URL,
     SUPABASE_SERVICE_ROLE_KEY
 )
+
+
+def marcar_procesamiento_seguro(
+    tabla: str,
+    filtros: dict,
+    estado: str,
+    *,
+    error: str | None = None,
+):
+    """Actualiza el estado técnico sin romper el flujo principal si la BD falla."""
+
+    try:
+        if estado == PROCESAMIENTO_PROCESANDO:
+            return procesamiento_marcar_procesando(
+                supabase_admin, tabla, filtros
+            )
+        if estado == PROCESAMIENTO_APROBADO:
+            return procesamiento_marcar_aprobado(
+                supabase_admin, tabla, filtros
+            )
+        if estado == PROCESAMIENTO_RECHAZADO:
+            return procesamiento_marcar_rechazado(
+                supabase_admin, tabla, filtros
+            )
+        if estado == PROCESAMIENTO_ERROR:
+            return procesamiento_marcar_error(
+                supabase_admin, tabla, filtros, str(error or "Error no especificado")
+            )
+        return procesamiento_marcar_pendiente(
+            supabase_admin, tabla, filtros
+        )
+    except Exception as estado_error:
+        print(
+            "[PROCESSING STATE ERROR]",
+            tabla,
+            filtros,
+            estado,
+            estado_error,
+        )
+        return []
 
 
 # ============================================================
@@ -1569,8 +1466,12 @@ def obtener_usuario_supabase_desde_request(request: Request) -> dict:
         )
 
     try:
-        respuesta = HTTP_CLIENT.get(
+        respuesta = http_request_with_retry(
+            HTTP_CLIENT,
+            "GET",
             f"{SUPABASE_URL}/auth/v1/user",
+            attempts=EXTERNAL_RETRY_ATTEMPTS,
+            backoff_seconds=EXTERNAL_RETRY_BACKOFF_SECONDS,
             headers={
                 "apikey": SUPABASE_KEY,
                 "Authorization": f"Bearer {access_token}"
@@ -1673,7 +1574,7 @@ def obtener_archivo_drive(service, file_id: str):
             fields="id,name,mimeType,parents,trashed",
             supportsAllDrives=True,
         )
-        .execute()
+        .execute(num_retries=GOOGLE_API_RETRIES)
     )
 
 
@@ -1766,7 +1667,7 @@ def obtener_raiz_drive_autorizada(service=None) -> dict:
             fields="id,name,mimeType,parents,trashed",
             supportsAllDrives=True,
         )
-        .execute()
+        .execute(num_retries=GOOGLE_API_RETRIES)
     )
 
     raiz = {
@@ -1829,7 +1730,7 @@ def resolver_ruta_drive(folder_id: str) -> dict:
                 fields="id,name,mimeType,parents,trashed",
                 supportsAllDrives=True,
             )
-            .execute()
+            .execute(num_retries=GOOGLE_API_RETRIES)
         )
 
         if meta.get("trashed"):
@@ -1951,7 +1852,7 @@ def listar_hijos_drive(
                 supportsAllDrives=True,
                 includeItemsFromAllDrives=True,
             )
-            .execute()
+            .execute(num_retries=GOOGLE_API_RETRIES)
         )
 
         elementos.extend(respuesta.get("files") or [])
@@ -2124,7 +2025,7 @@ def mover_objeto_google_drive(
         service
         .files()
         .update(**kwargs)
-        .execute()
+        .execute(num_retries=GOOGLE_API_RETRIES)
     )
 
     invalidar_cache_drive()
@@ -2144,7 +2045,7 @@ def enviar_a_papelera_google_drive(file_id: str):
             fields="id,name,trashed",
             supportsAllDrives=True,
         )
-        .execute()
+        .execute(num_retries=GOOGLE_API_RETRIES)
     )
 
     invalidar_cache_drive()
@@ -2895,6 +2796,12 @@ def procesar_solicitud_operacion(
 
             solicitud_final = (actualizado.data or [solicitud])[0]
 
+            marcar_procesamiento_seguro(
+                "solicitudes_operacion",
+                {"id": solicitud_id},
+                PROCESAMIENTO_RECHAZADO,
+            )
+
             registrar_evento_auditoria(
                 evento="OPERACION_RECHAZADA",
                 categoria="OPERACIONES",
@@ -2914,6 +2821,12 @@ def procesar_solicitud_operacion(
             )
 
             return solicitud_final, True
+
+        marcar_procesamiento_seguro(
+            "solicitudes_operacion",
+            {"id": solicitud_id},
+            PROCESAMIENTO_PROCESANDO,
+        )
 
         objeto = obtener_objeto_operable(
             str(solicitud.get("solicitante_id") or ""),
@@ -3031,6 +2944,12 @@ def procesar_solicitud_operacion(
 
         solicitud_final = (actualizado.data or [solicitud])[0]
 
+        marcar_procesamiento_seguro(
+            "solicitudes_operacion",
+            {"id": solicitud_id},
+            PROCESAMIENTO_APROBADO,
+        )
+
         registrar_evento_auditoria(
             evento="OPERACION_APROBADA",
             categoria="OPERACIONES",
@@ -3079,6 +2998,13 @@ def procesar_operacion_telegram_background(
 
     except Exception as error:
         print("[OPERACION BACKGROUND ERROR]", error)
+
+        marcar_procesamiento_seguro(
+            "solicitudes_operacion",
+            {"id": solicitud_id},
+            PROCESAMIENTO_ERROR,
+            error=str(error),
+        )
 
         solicitud = {"id": solicitud_id}
         try:
@@ -3141,93 +3067,255 @@ def notificar_resultado_custodia_web_telegram(
 # TELEGRAM
 # ============================================================
 
-def telegram_request(
+def _encolar_fallo_telegram(
     metodo: str,
-    payload: dict
+    payload: dict,
+    *,
+    contexto: dict | None = None,
+    error: str | None = None,
 ):
+    """Guarda una notificación fallida para reintentarla sin perder la solicitud."""
 
-    if not TELEGRAM_TOKEN:
+    if metodo not in {"sendMessage", "editMessageText"}:
+        return None
 
-        return {
-            "ok": False,
-            "description":
-                "TELEGRAM_TOKEN no configurado"
-        }
-
-
-    url = (
-        f"https://api.telegram.org/"
-        f"bot{TELEGRAM_TOKEN}/{metodo}"
-    )
-
+    db = globals().get("supabase_admin")
+    if db is None:
+        return None
 
     try:
-
-        response = HTTP_CLIENT.post(
-            url,
-            json=payload,
-            timeout=15
+        return outbox_encolar_evento(
+            db,
+            servicio="TELEGRAM",
+            tipo=metodo,
+            payload=payload or {},
+            contexto=contexto or {},
+            error=error,
+            max_intentos=OUTBOX_MAX_ATTEMPTS,
         )
+    except Exception as outbox_error:
+        print("[TELEGRAM OUTBOX ERROR]", outbox_error)
+        return None
 
+
+def telegram_request(
+    metodo: str,
+    payload: dict,
+    *,
+    outbox_context: dict | None = None,
+    encolar_si_falla: bool = True,
+):
+    """Llama a Telegram sin convertir un fallo externo en pérdida de datos.
+
+    Las solicitudes ya se guardan en Supabase antes de llegar aquí. Si Telegram
+    no responde, los mensajes ``sendMessage`` y ``editMessageText`` se colocan
+    en un outbox persistente para reintento posterior.
+    """
+
+    if not TELEGRAM_TOKEN:
+        fila = None
+        if encolar_si_falla:
+            fila = _encolar_fallo_telegram(
+                metodo,
+                payload,
+                contexto=outbox_context,
+                error="TELEGRAM_TOKEN no configurado",
+            )
+        return {
+            "ok": False,
+            "queued": bool(fila),
+            "description": "TELEGRAM_TOKEN no configurado",
+        }
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/{metodo}"
+
+    try:
+        # Las operaciones de configuración son seguras para reintentar.
+        # Los mensajes se envían una sola vez y, si fallan, pasan al outbox
+        # durable para evitar duplicados por timeouts ambiguos.
+        if metodo in {"getWebhookInfo", "setWebhook"}:
+            response = http_request_with_retry(
+                HTTP_CLIENT,
+                "POST",
+                url,
+                attempts=EXTERNAL_RETRY_ATTEMPTS,
+                backoff_seconds=EXTERNAL_RETRY_BACKOFF_SECONDS,
+                json=payload,
+                timeout=15,
+            )
+        else:
+            response = HTTP_CLIENT.post(
+                url,
+                json=payload,
+                timeout=15,
+            )
 
         try:
-
             data = response.json()
-
         except Exception:
-
             data = {
                 "ok": False,
-                "description": response.text
+                "description": response.text,
             }
-
 
         if (
             metodo == "editMessageText"
             and response.status_code == 400
             and "message is not modified"
-            in str(
-                data.get(
-                    "description",
-                    ""
-                )
-            ).lower()
+            in str(data.get("description", "")).lower()
         ):
-
-            print(
-                "[TELEGRAM] editMessageText "
-                "sin cambios; se considera OK"
-            )
-
+            print("[TELEGRAM] editMessageText sin cambios; se considera OK")
             return {
                 "ok": True,
                 "unchanged": True,
                 "description": "Sin cambios",
             }
 
-
         print(
             f"[TELEGRAM] {metodo} "
             f"HTTP={response.status_code} "
-            f"respuesta={data}"
+            f"ok={bool(data.get('ok'))}"
         )
 
+        transitorio = response.status_code == 429 or response.status_code >= 500
+        if transitorio and encolar_si_falla:
+            fila = _encolar_fallo_telegram(
+                metodo,
+                payload,
+                contexto=outbox_context,
+                error=(data or {}).get("description") or f"HTTP {response.status_code}",
+            )
+            data["queued"] = bool(fila)
 
         return data
 
-
     except Exception as error:
+        print(f"[TELEGRAM ERROR] {metodo}: {error}")
 
-        print(
-            f"[TELEGRAM ERROR] "
-            f"{metodo}: {error}"
-        )
-
+        fila = None
+        if encolar_si_falla:
+            fila = _encolar_fallo_telegram(
+                metodo,
+                payload,
+                contexto=outbox_context,
+                error=str(error),
+            )
 
         return {
             "ok": False,
-            "description": str(error)
+            "queued": bool(fila),
+            "description": str(error),
         }
+
+
+def procesar_outbox_telegram_una_vez() -> dict:
+    """Procesa un lote de notificaciones Telegram pendientes."""
+
+    pendientes = outbox_listar_pendientes(
+        supabase_admin,
+        servicio="TELEGRAM",
+        limit=OUTBOX_BATCH_SIZE,
+    )
+
+    enviados = 0
+    fallidos = 0
+
+    for item in pendientes:
+        outbox_id = str(item.get("id") or "")
+        if not outbox_id:
+            continue
+
+        intento = outbox_marcar_procesando(supabase_admin, outbox_id)
+        metodo = str(item.get("tipo") or "").strip()
+        payload = item.get("payload") or {}
+        contexto = item.get("contexto") or {}
+
+        resultado = telegram_request(
+            metodo,
+            payload,
+            outbox_context=contexto,
+            encolar_si_falla=False,
+        )
+
+        if (resultado or {}).get("ok"):
+            # Si el aviso original necesitaba quedar enlazado con una solicitud,
+            # registramos aquí el message_id que no existía cuando Telegram cayó.
+            if contexto.get("registrar_notificacion"):
+                try:
+                    message_id = extraer_message_id_telegram(resultado)
+                    if message_id:
+                        registrar_notificacion_telegram(
+                            contexto.get("chat_id") or payload.get("chat_id"),
+                            message_id,
+                            contexto.get("tipo_solicitud") or "SOLICITUD",
+                            solicitud_id=contexto.get("solicitud_id"),
+                            auditoria_id=contexto.get("auditoria_id"),
+                            lote_id=contexto.get("lote_id"),
+                        )
+                except Exception as error_contexto:
+                    print("[OUTBOX TELEGRAM CONTEXTO ERROR]", error_contexto)
+
+            outbox_marcar_enviado(
+                supabase_admin,
+                outbox_id,
+                resultado=resultado,
+            )
+            enviados += 1
+        else:
+            outbox_marcar_error(
+                supabase_admin,
+                outbox_id,
+                intento=intento,
+                error=(resultado or {}).get("description") or "Telegram sin respuesta",
+            )
+            fallidos += 1
+
+    return {
+        "procesados": len(pendientes),
+        "enviados": enviados,
+        "fallidos": fallidos,
+    }
+
+
+def _outbox_worker_loop():
+    print(
+        "[OUTBOX] Worker iniciado",
+        f"intervalo={OUTBOX_POLL_SECONDS}s",
+        f"lote={OUTBOX_BATCH_SIZE}",
+    )
+
+    while not OUTBOX_STOP_EVENT.is_set():
+        try:
+            resultado = procesar_outbox_telegram_una_vez()
+            if resultado.get("procesados"):
+                print("[OUTBOX]", resultado)
+        except Exception as error:
+            print("[OUTBOX WORKER ERROR]", error)
+
+        OUTBOX_STOP_EVENT.wait(OUTBOX_POLL_SECONDS)
+
+    print("[OUTBOX] Worker detenido")
+
+
+def iniciar_outbox_worker():
+    global OUTBOX_WORKER_THREAD
+
+    if not OUTBOX_WORKER_ENABLED:
+        print("[OUTBOX] Worker deshabilitado por configuración")
+        return False
+
+    if OUTBOX_WORKER_THREAD and OUTBOX_WORKER_THREAD.is_alive():
+        return True
+
+    OUTBOX_STOP_EVENT.clear()
+    OUTBOX_WORKER_THREAD = threading.Thread(
+        target=_outbox_worker_loop,
+        name="datavault-outbox",
+        daemon=True,
+    )
+    OUTBOX_WORKER_THREAD.start()
+    return True
+
 
 
 def formatear_bytes_telegram(valor) -> str:
@@ -3457,6 +3545,13 @@ def enviar_alerta_subida_telegram(documentos: list):
                 "text": texto,
                 "reply_markup": _boton_bandeja_para_usuario(solicitante_id),
             },
+            outbox_context={
+                "registrar_notificacion": True,
+                "chat_id": chat_id,
+                "tipo_solicitud": "SUBIDA",
+                "auditoria_id": auditoria_id,
+                "lote_id": lote_id,
+            },
         )
         message_id = extraer_message_id_telegram(resultado)
         if (resultado or {}).get("ok") and message_id:
@@ -3500,6 +3595,14 @@ def enviar_alerta_operacion_telegram(solicitud: dict):
                 "chat_id": chat_id,
                 "text": texto,
                 "reply_markup": _boton_bandeja_para_usuario(solicitud.get("solicitante_id")),
+            },
+            outbox_context={
+                "registrar_notificacion": True,
+                "chat_id": chat_id,
+                "tipo_solicitud": str(
+                    solicitud.get("tipo_operacion") or "OPERACION"
+                ).upper(),
+                "solicitud_id": solicitud_id,
             },
         )
         message_id = extraer_message_id_telegram(resultado)
@@ -5076,6 +5179,22 @@ def startup_event():
 
         )
 
+    # El outbox se inicia después de configurar clientes y webhook.
+    iniciar_outbox_worker()
+
+
+@app.on_event("shutdown")
+def shutdown_event():
+    OUTBOX_STOP_EVENT.set()
+
+    if OUTBOX_WORKER_THREAD and OUTBOX_WORKER_THREAD.is_alive():
+        OUTBOX_WORKER_THREAD.join(timeout=2)
+
+    try:
+        HTTP_CLIENT.close()
+    except Exception:
+        pass
+
 
 # ============================================================
 # WEB
@@ -5149,7 +5268,77 @@ def health_check():
 
         "public_url":
             PUBLIC_BASE_URL
-            or None
+            or None,
+
+        "backend_modular":
+            True,
+
+        "outbox_worker_enabled":
+            bool(OUTBOX_WORKER_ENABLED),
+
+        "outbox_worker_alive":
+            bool(
+                OUTBOX_WORKER_THREAD
+                and OUTBOX_WORKER_THREAD.is_alive()
+            ),
+
+        "processing_states_enabled":
+            True
+    }
+
+
+# ============================================================
+# OUTBOX / RESILIENCIA DE INTEGRACIONES (PUNTOS 42-43)
+# ============================================================
+
+@app.get("/admin/integrations/outbox")
+def listar_outbox_integraciones(request: Request):
+    obtener_admin_desde_request(request)
+
+    try:
+        respuesta = (
+            supabase_admin
+            .table("integracion_outbox")
+            .select("*")
+            .order("created_at", desc=True)
+            .limit(200)
+            .execute()
+        )
+        filas = respuesta.data or []
+    except Exception as error:
+        print("[OUTBOX API LIST ERROR]", error)
+        raise error_api(
+            503,
+            "OUTBOX_UNAVAILABLE",
+            "No se pudo consultar el outbox de integraciones.",
+        )
+
+    return {
+        "status": "ok",
+        "total": len(filas),
+        "items": filas,
+    }
+
+
+@app.post("/admin/integrations/outbox/retry")
+def reintentar_outbox_integraciones(request: Request):
+    admin = obtener_admin_desde_request(request)
+    resultado = procesar_outbox_telegram_una_vez()
+
+    registrar_evento_auditoria(
+        evento="OUTBOX_REINTENTO_MANUAL",
+        categoria="INTEGRACIONES",
+        actor=admin,
+        accion="REINTENTAR_OUTBOX",
+        objeto_tipo="OUTBOX",
+        estado=ESTADO_APROBADO,
+        detalle=resultado,
+        request=request,
+    )
+
+    return {
+        "status": "ok",
+        **resultado,
     }
 
 
@@ -5430,7 +5619,10 @@ async def registrar_y_solicitar_custodia(
             len(contenido),
 
         "estado":
-            "PENDIENTE",
+            ESTADO_PENDIENTE,
+
+        "estado_procesamiento":
+            PROCESAMIENTO_PENDIENTE,
 
         "usuario_solicitante":
             solicitante_nombre,
@@ -6054,7 +6246,10 @@ async def registrar_lote_custodia(
                     tamano_archivo,
 
                 "estado":
-                    "PENDIENTE",
+                    ESTADO_PENDIENTE,
+
+                "estado_procesamiento":
+                    PROCESAMIENTO_PENDIENTE,
 
                 "usuario_solicitante":
                     solicitante_nombre,
@@ -6944,7 +7139,7 @@ async def eliminar_usuario_desde_web(
 
     try:
 
-        respuesta = requests.delete(
+        respuesta = HTTP_CLIENT.delete(
 
             f"{SUPABASE_URL}"
             f"/auth/v1/admin/users/"
@@ -7124,16 +7319,29 @@ def resolver_custodia_archivo(
 
         if aprobar:
 
+            marcar_procesamiento_seguro(
+                "auditoria_custodia",
+                {"id": auditoria_id},
+                PROCESAMIENTO_PROCESANDO,
+            )
+
             temp_path = str(
                 registro.get("temp_storage_path")
                 or ""
             ).strip()
 
             if not temp_path:
-                raise RuntimeError(
+                mensaje_error = (
                     "El archivo pendiente no tiene almacenamiento temporal persistente. "
                     "No se modificó el estado en Supabase."
                 )
+                marcar_procesamiento_seguro(
+                    "auditoria_custodia",
+                    {"id": auditoria_id},
+                    PROCESAMIENTO_ERROR,
+                    error=mensaje_error,
+                )
+                raise RuntimeError(mensaje_error)
 
             contenido_temporal = leer_archivo_temporal(
                 temp_path,
@@ -7165,11 +7373,18 @@ def resolver_custodia_archivo(
 
             if not drive_id:
 
-                raise RuntimeError(
+                mensaje_error = (
                     "Google Drive no pudo completar "
                     "la transferencia. "
                     "El documento sigue PENDIENTE."
                 )
+                marcar_procesamiento_seguro(
+                    "auditoria_custodia",
+                    {"id": auditoria_id},
+                    PROCESAMIENTO_ERROR,
+                    error=mensaje_error,
+                )
+                raise RuntimeError(mensaje_error)
 
 
             resultado_update = (
@@ -7258,7 +7473,7 @@ def resolver_custodia_archivo(
                             fileId=drive_id,
                             supportsAllDrives=True
                         )
-                        .execute()
+                        .execute(num_retries=GOOGLE_API_RETRIES)
                     )
 
 
@@ -7271,13 +7486,26 @@ def resolver_custodia_archivo(
                     )
 
 
-                raise RuntimeError(
+                mensaje_error = (
                     "El archivo llegó a Drive, "
                     "pero Supabase no pudo confirmar "
                     "el estado APROBADO. "
                     "Se intentó revertir la transferencia."
                 )
+                marcar_procesamiento_seguro(
+                    "auditoria_custodia",
+                    {"id": auditoria_id},
+                    PROCESAMIENTO_ERROR,
+                    error=mensaje_error,
+                )
+                raise RuntimeError(mensaje_error)
 
+
+            marcar_procesamiento_seguro(
+                "auditoria_custodia",
+                {"id": auditoria_id},
+                PROCESAMIENTO_APROBADO,
+            )
 
             nuevo_estado = (
                 "APROBADO"
@@ -7321,6 +7549,12 @@ def resolver_custodia_archivo(
                     "el documento a RECHAZADO."
                 )
 
+
+            marcar_procesamiento_seguro(
+                "auditoria_custodia",
+                {"id": auditoria_id},
+                PROCESAMIENTO_RECHAZADO,
+            )
 
             nuevo_estado = (
                 "RECHAZADO"
@@ -7451,6 +7685,12 @@ def resolver_custodia_carpeta(
 
         if aprobar:
 
+            marcar_procesamiento_seguro(
+                "auditoria_custodia",
+                {"lote_id": lote_id},
+                PROCESAMIENTO_PROCESANDO,
+            )
+
             faltantes_temporales = [
                 str(doc.get("id"))
                 for doc in documentos
@@ -7458,11 +7698,18 @@ def resolver_custodia_carpeta(
             ]
 
             if faltantes_temporales:
-                raise RuntimeError(
+                mensaje_error = (
                     f"{len(faltantes_temporales)} archivo(s) no tienen "
                     "almacenamiento temporal persistente. "
                     "La carpeta no fue transferida."
                 )
+                marcar_procesamiento_seguro(
+                    "auditoria_custodia",
+                    {"lote_id": lote_id},
+                    PROCESAMIENTO_ERROR,
+                    error=mensaje_error,
+                )
+                raise RuntimeError(mensaje_error)
 
 
             drive_lote = (
@@ -7478,11 +7725,18 @@ def resolver_custodia_carpeta(
 
             if not drive_lote:
 
-                raise RuntimeError(
+                mensaje_error = (
                     "Google Drive no pudo completar "
                     "toda la carpeta. "
                     "Los documentos siguen PENDIENTES."
                 )
+                marcar_procesamiento_seguro(
+                    "auditoria_custodia",
+                    {"lote_id": lote_id},
+                    PROCESAMIENTO_ERROR,
+                    error=mensaje_error,
+                )
+                raise RuntimeError(mensaje_error)
 
 
             resultado_update = (
@@ -7576,7 +7830,7 @@ def resolver_custodia_carpeta(
                                 ],
                             supportsAllDrives=True,
                         )
-                        .execute()
+                        .execute(num_retries=GOOGLE_API_RETRIES)
                     )
 
 
@@ -7589,12 +7843,25 @@ def resolver_custodia_carpeta(
                     )
 
 
-                raise RuntimeError(
+                mensaje_error = (
                     "La carpeta llegó a Drive, "
                     "pero Supabase no pudo "
                     "confirmar APROBADO."
                 )
+                marcar_procesamiento_seguro(
+                    "auditoria_custodia",
+                    {"lote_id": lote_id},
+                    PROCESAMIENTO_ERROR,
+                    error=mensaje_error,
+                )
+                raise RuntimeError(mensaje_error)
 
+
+            marcar_procesamiento_seguro(
+                "auditoria_custodia",
+                {"lote_id": lote_id},
+                PROCESAMIENTO_APROBADO,
+            )
 
             nuevo_estado = (
                 "APROBADO"
@@ -7638,6 +7905,12 @@ def resolver_custodia_carpeta(
                     "la carpeta a RECHAZADO."
                 )
 
+
+            marcar_procesamiento_seguro(
+                "auditoria_custodia",
+                {"lote_id": lote_id},
+                PROCESAMIENTO_RECHAZADO,
+            )
 
             nuevo_estado = (
                 "RECHAZADO"
@@ -7864,6 +8137,19 @@ def resolver_payload_custodia_web(
 
     except RuntimeError as error:
 
+        filtro = (
+            {"lote_id": str(payload.get("lote_id") or "").strip()}
+            if objeto_tipo == "CARPETA"
+            else {"id": str(payload.get("auditoria_id") or "").strip()}
+        )
+        if next(iter(filtro.values()), ""):
+            marcar_procesamiento_seguro(
+                "auditoria_custodia",
+                filtro,
+                PROCESAMIENTO_ERROR,
+                error=str(error),
+            )
+
         raise HTTPException(
             status_code=409,
             detail=str(error)
@@ -7925,15 +8211,33 @@ async def decidir_custodia_desde_web(
         )
 
 
-    resultado = (
-        resolver_payload_custodia_web(
+    try:
+        resultado = resolver_payload_custodia_web(
             payload,
-            aprobar=(
-                decision
-                == "APROBAR"
-            )
+            aprobar=(decision == "APROBAR")
         )
-    )
+    except HTTPException:
+        raise
+    except Exception as error:
+        objeto_tipo = str(payload.get("objeto_tipo") or "").upper()
+        filtro = (
+            {"lote_id": str(payload.get("lote_id") or "").strip()}
+            if objeto_tipo == "CARPETA"
+            else {"id": str(payload.get("auditoria_id") or "").strip()}
+        )
+        if next(iter(filtro.values()), ""):
+            marcar_procesamiento_seguro(
+                "auditoria_custodia",
+                filtro,
+                PROCESAMIENTO_ERROR,
+                error=str(error),
+            )
+        print("[CUSTODY WEB DECISION ERROR]", error)
+        raise error_api(
+            500,
+            "CUSTODY_DECISION_FAILED",
+            "No se pudo completar la decisión de custodia.",
+        )
 
     background_tasks.add_task(
         notificar_resultado_custodia_web_telegram,
@@ -7994,247 +8298,8 @@ async def cancelar_custodia_desde_web(
 
 
 # ============================================================
-# REPORTES EXCEL XLSX (PUNTOS 25-26)
+# REPORTES EXCEL XLSX (MÓDULO datavault.reports)
 # ============================================================
-
-def _safe_select_tabla(tabla: str, columnas: str = "*") -> list:
-    try:
-        respuesta = (
-            supabase_admin
-            .table(tabla)
-            .select(columnas)
-            .execute()
-        )
-        return respuesta.data or []
-    except Exception as error:
-        print(f"[REPORT TABLE ERROR] {tabla}", error)
-        return []
-
-
-def _valor_excel(valor):
-    if valor is None:
-        return ""
-    if isinstance(valor, (dict, list, tuple, set)):
-        return json.dumps(
-            valor,
-            ensure_ascii=False,
-            default=str,
-        )
-    return valor
-
-
-def _formatear_hoja_excel(ws):
-    if ws.max_row < 1:
-        return
-
-    header_fill = PatternFill(
-        fill_type="solid",
-        fgColor="1F4E78",
-    )
-    header_font = Font(
-        bold=True,
-        color="FFFFFF",
-    )
-    borde = Border(
-        bottom=Side(
-            style="thin",
-            color="B7B7B7",
-        )
-    )
-
-    for celda in ws[1]:
-        celda.fill = header_fill
-        celda.font = header_font
-        celda.alignment = Alignment(
-            horizontal="center",
-            vertical="center",
-        )
-        celda.border = borde
-
-    ws.freeze_panes = "A2"
-    ws.auto_filter.ref = ws.dimensions
-
-    for columna in ws.columns:
-        letra = get_column_letter(columna[0].column)
-        max_len = 0
-
-        for celda in columna:
-            texto = str(celda.value or "")
-            max_len = max(
-                max_len,
-                min(len(texto), 60),
-            )
-
-            if isinstance(celda.value, datetime):
-                celda.number_format = "yyyy-mm-dd hh:mm:ss"
-
-            celda.alignment = Alignment(
-                vertical="top",
-                wrap_text=True,
-            )
-
-        ws.column_dimensions[letra].width = max(
-            12,
-            min(max_len + 2, 55),
-        )
-
-
-def _crear_hoja_datos(
-    wb: Workbook,
-    titulo: str,
-    columnas: list,
-    filas: list,
-):
-    ws = wb.create_sheet(title=titulo[:31])
-    ws.append([col[0] for col in columnas])
-
-    for fila in filas:
-        ws.append([
-            _valor_excel(fila.get(col[1]))
-            for col in columnas
-        ])
-
-    _formatear_hoja_excel(ws)
-    return ws
-
-
-def generar_reporte_excel_datavault() -> bytes:
-    auditoria = _safe_select_tabla("auditoria_custodia")
-    operaciones = _safe_select_tabla("solicitudes_operacion")
-    eliminados = _safe_select_tabla("elementos_eliminados")
-    eventos = _safe_select_tabla("auditoria_eventos_v2")
-    dlp = _safe_select_tabla("dlp_auditoria")
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Resumen"
-
-    total = len(auditoria)
-    aprobados = sum(
-        1 for x in auditoria
-        if normalizar_estado(x.get("estado")) == ESTADO_APROBADO
-    )
-    pendientes = sum(
-        1 for x in auditoria
-        if normalizar_estado(x.get("estado")) == ESTADO_PENDIENTE
-    )
-    rechazados = sum(
-        1 for x in auditoria
-        if normalizar_estado(x.get("estado")) == ESTADO_RECHAZADO
-    )
-
-    ws.append(["INDICADOR", "VALOR"])
-    ws.append(["Generado UTC", ahora_iso()])
-    ws.append(["Documentos auditados", total])
-    ws.append(["Aprobados", aprobados])
-    ws.append(["Pendientes", pendientes])
-    ws.append(["Rechazados", rechazados])
-    ws.append(["Operaciones registradas", len(operaciones)])
-    ws.append(["Elementos eliminados", len(eliminados)])
-    ws.append(["Eventos de auditoría", len(eventos)])
-    ws.append(["Cambios DLP", len(dlp)])
-    _formatear_hoja_excel(ws)
-
-    _crear_hoja_datos(
-        wb,
-        "Custodia",
-        [
-            ("ID", "id"),
-            ("Archivo", "nombre_archivo"),
-            ("Usuario", "solicitante_nombre"),
-            ("Correo", "solicitante_correo"),
-            ("Estado", "estado"),
-            ("Estado archivo", "estado_archivo"),
-            ("Tamaño bytes", "tamano_bytes"),
-            ("SHA256", "hash_sha256"),
-            ("Ruta relativa", "ruta_relativa"),
-            ("Destino solicitado", "destino_solicitado_ruta"),
-            ("Destino final", "destino_final_ruta"),
-            ("Ubicación Drive", "ubicacion_drive"),
-            ("Fecha solicitud", "fecha_solicitud"),
-            ("Fecha transferencia", "fecha_transferencia"),
-            ("Fecha eliminación", "fecha_eliminacion"),
-        ],
-        auditoria,
-    )
-
-    _crear_hoja_datos(
-        wb,
-        "Operaciones",
-        [
-            ("ID", "id"),
-            ("Tipo", "tipo_operacion"),
-            ("Objeto", "objeto_tipo"),
-            ("Nombre", "nombre_objeto"),
-            ("Usuario", "solicitante_nombre"),
-            ("Origen", "carpeta_origen"),
-            ("Destino solicitado", "destino_solicitado_ruta"),
-            ("Destino final", "destino_final_ruta"),
-            ("Estado", "estado"),
-            ("Fecha solicitud", "fecha_solicitud"),
-            ("Fecha resolución", "fecha_resolucion"),
-            ("Resultado", "resultado"),
-        ],
-        operaciones,
-    )
-
-    _crear_hoja_datos(
-        wb,
-        "Eliminaciones",
-        [
-            ("ID", "id"),
-            ("Tipo", "objeto_tipo"),
-            ("Nombre", "nombre_objeto"),
-            ("Usuario", "solicitante_nombre"),
-            ("Correo", "solicitante_correo"),
-            ("Ruta anterior", "ubicacion_anterior"),
-            ("Estado", "estado"),
-            ("Fecha eliminación", "fecha_eliminacion"),
-            ("Detalle", "detalle"),
-        ],
-        eliminados,
-    )
-
-    _crear_hoja_datos(
-        wb,
-        "Auditoria",
-        [
-            ("Evento", "evento"),
-            ("Categoría", "categoria"),
-            ("Acción", "accion"),
-            ("Actor", "actor_nombre"),
-            ("Correo", "actor_correo"),
-            ("Rol", "actor_rol"),
-            ("Objeto", "objeto_tipo"),
-            ("Objeto ID", "objeto_id"),
-            ("Estado", "estado"),
-            ("IP", "ip"),
-            ("Fecha", "created_at"),
-            ("Detalle", "detalle"),
-        ],
-        eventos,
-    )
-
-    _crear_hoja_datos(
-        wb,
-        "Cambios DLP",
-        [
-            ("Política", "politica_codigo"),
-            ("Acción", "accion"),
-            ("Valor anterior", "valor_anterior"),
-            ("Valor nuevo", "valor_nuevo"),
-            ("Actor", "actor_nombre"),
-            ("Correo", "actor_correo"),
-            ("Fecha", "fecha"),
-        ],
-        dlp,
-    )
-
-    salida = io.BytesIO()
-    wb.save(salida)
-    salida.seek(0)
-    return salida.getvalue()
-
 
 @app.get("/reports/audit.xlsx")
 def descargar_reporte_excel(
@@ -8242,7 +8307,10 @@ def descargar_reporte_excel(
 ):
     admin = obtener_admin_desde_request(request)
 
-    contenido = generar_reporte_excel_datavault()
+    contenido = generar_reporte_excel_datavault(
+        supabase_admin,
+        generado_en=ahora_iso(),
+    )
 
     registrar_evento_auditoria(
         evento="REPORTE_EXCEL_GENERADO",
@@ -8777,6 +8845,9 @@ async def solicitar_operacion(
         "estado":
             ESTADO_PENDIENTE,
 
+        "estado_procesamiento":
+            PROCESAMIENTO_PENDIENTE,
+
     }
 
 
@@ -8898,11 +8969,23 @@ async def decidir_operacion_desde_web(
             f"WEB:{usuario.get('id')}",
         )
     except RuntimeError as error:
+        marcar_procesamiento_seguro(
+            "solicitudes_operacion",
+            {"id": solicitud_id},
+            PROCESAMIENTO_ERROR,
+            error=str(error),
+        )
         raise HTTPException(status_code=409, detail=str(error))
     except HTTPException:
         raise
     except Exception as error:
         print("[OPERATIONS WEB DECISION ERROR]", error)
+        marcar_procesamiento_seguro(
+            "solicitudes_operacion",
+            {"id": solicitud_id},
+            PROCESAMIENTO_ERROR,
+            error=str(error),
+        )
         raise HTTPException(
             status_code=500,
             detail=f"No se pudo procesar la operación: {error}"
@@ -9111,7 +9194,7 @@ def vincular_drive_legacy(
                 supportsAllDrives=True,
                 includeItemsFromAllDrives=True,
             )
-            .execute()
+            .execute(num_retries=GOOGLE_API_RETRIES)
             .get(
                 "files"
             )
@@ -9241,7 +9324,7 @@ def vincular_drive_legacy(
                 supportsAllDrives=True,
                 includeItemsFromAllDrives=True,
             )
-            .execute()
+            .execute(num_retries=GOOGLE_API_RETRIES)
             .get(
                 "files"
             )
@@ -10914,6 +10997,13 @@ async def recibir_respuesta_telegram(
                     error
                 )
 
+                marcar_procesamiento_seguro(
+                    "auditoria_custodia",
+                    {"lote_id": lote_id},
+                    PROCESAMIENTO_ERROR,
+                    error=str(error),
+                )
+
 
                 telegram_request(
 
@@ -11350,6 +11440,13 @@ async def recibir_respuesta_telegram(
             print(
                 "[CALLBACK ERROR]",
                 error
+            )
+
+            marcar_procesamiento_seguro(
+                "auditoria_custodia",
+                {"id": auditoria_id},
+                PROCESAMIENTO_ERROR,
+                error=str(error),
             )
 
 
