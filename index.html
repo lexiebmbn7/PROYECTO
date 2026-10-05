@@ -19,7 +19,27 @@
 
 
 
-<link rel="stylesheet" href="images/ui/utilities.css?v=20261005-1"><link rel="stylesheet" href="images/ui/base.css?v=20261005-1"><link rel="stylesheet" href="images/ui/dashboard.css?v=20261005-1"><link rel="stylesheet" href="images/ui/subordinate.css?v=20261005-1"></head>
+<link rel="stylesheet" href="images/ui/utilities.css?v=20261005-1"><link rel="stylesheet" href="images/ui/base.css?v=20261005-1"><link rel="stylesheet" href="images/ui/dashboard.css?v=20261005-1"><link rel="stylesheet" href="images/ui/subordinate.css?v=20261005-1"><style>
+/* Logo completo, sin recortes. */
+body #sidebar .dv-app-brand{height:auto!important;min-height:126px!important;padding:10px!important;display:flex!important;align-items:center!important;justify-content:center!important;flex-shrink:0}
+.dv-logo-final{display:flex;align-items:center;justify-content:center;background:white;border-radius:9px;padding:7px;width:142px;height:106px;flex-shrink:0}
+body .dv-logo-final img{display:block!important;position:static!important;width:100%!important;height:100%!important;max-width:100%!important;object-fit:contain!important;transform:none!important;filter:none!important;opacity:1!important}
+body #mainArea .dv-hero-mark{display:flex!important;opacity:1!important;padding:0!important;margin-left:18px;flex-shrink:0}
+body .dv-hero-mark .dv-logo-final{width:116px;height:94px}
+body #loginSection :is(.login-logo-box,.mobile-logo){display:flex!important;align-items:center;justify-content:center;width:104px!important;min-width:104px!important;height:88px!important;padding:7px!important;background:white!important;border-radius:9px;overflow:hidden}
+body #loginSection :is(.login-logo-box,.mobile-logo) img{position:static!important;width:100%!important;height:100%!important;max-width:100%!important;object-fit:contain!important;transform:none!important;opacity:1!important;filter:none!important}
+body #sidebar .dv-storage-box{display:none!important}
+#dvQuotaFinal{color:#e5ebf2;font-size:13px;line-height:1.5}
+#dvQuotaFinal header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+#dvQuotaFinal button{background:#ffffff12;border:1px solid #ffffff30;color:white;border-radius:6px;width:30px;height:30px;cursor:pointer}
+#dvQuotaFinal button:disabled{opacity:.5;cursor:wait}
+#dvQuotaFinal [data-detail]{font-size:12px;color:#bac7d5;overflow-wrap:anywhere}
+#dvQuotaFinal .quota-track{height:6px;background:#ffffff20;margin:9px 0;border-radius:6px;overflow:hidden}
+#dvQuotaFinal [data-bar]{display:block;height:100%;width:0;background:#3696ef}
+@media(max-width:650px){body #mainArea .dv-hero-mark{display:none!important}}
+
+</style>
+</head>
 <body class="bg-slate-50 text-slate-800" data-dv-role="subordinado">
 
 <div id="loginSection" class="min-h-screen flex items-center justify-center p-4 sm:p-6 login-shell">
@@ -28,7 +48,7 @@
       <div class="login-architecture"></div>
       <div class="relative z-10">
         <div class="flex items-center gap-3">
-          <div class="login-logo-box"><img src="images/gm_logo.jpg" alt="GM Ingenieros y Consultores"></div>
+          <div class="login-logo-box"><img src="images/gm_logo_nuevo.png" alt="GM Ingenieros y Consultores"></div>
           <div><p class="text-base font-extrabold text-white tracking-tight">DataVault DLP</p><p class="text-[9px] text-white/55">GM Ingenieros y Consultores</p></div>
         </div>
         <div class="mt-20 max-w-sm">
@@ -42,7 +62,7 @@
     </div>
     <div class="login-form-panel p-7 sm:p-10 lg:p-12 flex items-center">
       <div class="w-full max-w-md mx-auto">
-        <div class="lg:hidden flex items-center gap-3 mb-8"><div class="mobile-logo"><img src="images/gm_logo.jpg" alt="GM Ingenieros y Consultores"></div><div><p class="font-extrabold text-[#1f2b31]">DataVault DLP</p><p class="text-[9px] text-slate-400">GM Ingenieros y Consultores</p></div></div>
+        <div class="lg:hidden flex items-center gap-3 mb-8"><div class="mobile-logo"><img src="images/gm_logo_nuevo.png" alt="GM Ingenieros y Consultores"></div><div><p class="font-extrabold text-[#1f2b31]">DataVault DLP</p><p class="text-[9px] text-slate-400">GM Ingenieros y Consultores</p></div></div>
         <span class="login-kicker">Acceso seguro</span>
         <h2 class="text-3xl font-extrabold text-[#1f2b31] mt-3 tracking-tight">Iniciar sesión</h2>
         <p class="text-sm text-slate-500 mt-2 mb-8">Accede a tu cuenta de DataVault DLP.</p>
@@ -90,7 +110,7 @@
   <nav class="dv-logic-nav" hidden aria-hidden="true"><button id="topNavUsuarios" class="hidden" data-nav="usuarios"></button><span id="topBellBadge" class="hidden">0</span></nav>
 </header><div id="appBody" class="dv-app-body"><div class="sidebar-overlay" id="sidebarOverlay" onclick="closeMobileSidebar()"></div>
 <aside id="sidebar" class="dv-app-sidebar" aria-label="Menú principal">
-  <a href="#inicio" class="dv-app-brand" onclick="dvOpenHome();return false" aria-label="GM Ingenieros y Consultores, Inicio"><span class="dv-brand-symbol"><img src="images/gm_logo_sidebar.png" alt="" aria-hidden="true"></span><span class="dv-brand-copy">GM INGENIEROS<br>Y CONSULTORES</span></a>
+  <a href="#inicio" class="dv-app-brand" onclick="dvOpenHome();return false" aria-label="GM Ingenieros y Consultores, Inicio"><span class="dv-logo-final"><img src="images/gm_logo_nuevo.png" alt="GM Ingenieros y Consultores"></span></a>
   <nav class="dv-side-nav">
     <button type="button" onclick="dvOpenHome()" data-nav="inicio" class="nav-item active"><i class="fa-solid fa-house"></i><span>Inicio</span></button>
     <button type="button" onclick="dvOpenFiles()" data-nav="gestor" class="nav-item"><i class="fa-regular fa-folder"></i><span id="dvFileNavLabel">Mis archivos</span></button>
@@ -104,12 +124,12 @@
     <button type="button" onclick="dvOpenHistory()" id="navHistoryDirect" class="nav-item"><i class="fa-solid fa-clock-rotate-left"></i><span>Historial</span></button>
     <span id="adminLabel" hidden></span>
   </nav>
-  <div class="dv-sidebar-bottom"><div class="dv-storage-box"><span>Google Drive</span><div class="dv-storage-track"><i id="dvStorageBar"></i></div><div><b id="dvStorageUsed">—</b><small id="dvStorageFree">Libre: —</small></div></div><button onclick="handleLogout()" class="dv-side-logout"><i class="fa-solid fa-right-from-bracket"></i><span>Cerrar sesión</span></button></div>
+  <div class="dv-sidebar-bottom"><div class="dv-storage-box"><span>Google Drive</span><div class="dv-storage-track"><i id="dvStorageBar"></i></div><div><b id="dvStorageUsed">—</b><small id="dvStorageFree">Libre: —</small></div></div><section id="dvQuotaFinal" aria-label="Almacenamiento de Google Drive"><header><strong>Google Drive</strong><button type="button" aria-label="Actualizar espacio">↻</button></header><div data-used aria-live="polite">Espacio pendiente de consulta</div><div class="quota-track"><span data-bar></span></div><div data-detail></div></section><button onclick="handleLogout()" class="dv-side-logout"><i class="fa-solid fa-right-from-bracket"></i><span>Cerrar sesión</span></button></div>
 </aside><div id="mainArea" class="dv-main-area"><main class="dv-main-content">
 <!-- INICIO -->
 <section id="view-inicio" class="view active dv-home-view" aria-label="Inicio">
   <div class="dv-home-layout">
-    <div class="dashboard-hero dv-home-hero"><div class="dv-hero-copy"><h2>¡Bienvenido, <span id="dashWelcome">Usuario</span>!</h2><p id="dvHeroSubtitle">Aquí puedes gestionar y subir tus archivos de forma segura.</p></div><div class="dv-hero-mark" aria-hidden="true"><span class="dv-brand-symbol"><img src="images/gm_logo_sidebar.png" alt=""></span><span>GM INGENIEROS<br>Y CONSULTORES</span></div><span id="dashDate" hidden></span></div>
+    <div class="dashboard-hero dv-home-hero"><div class="dv-hero-copy"><h2>¡Bienvenido, <span id="dashWelcome">Usuario</span>!</h2><p id="dvHeroSubtitle">Aquí puedes gestionar y subir tus archivos de forma segura.</p></div><div class="dv-hero-mark"><span class="dv-logo-final"><img src="images/gm_logo_nuevo.png" alt="GM Ingenieros y Consultores"></span></div><span id="dashDate" hidden></span></div>
     <div class="grid grid-cols-2 xl:grid-cols-4 dv-kpi-grid">
       <div class="dashboard-card dv-metric"><span class="metric-icon blue"><i class="fa-regular fa-file-lines"></i></span><div><p class="metric-label">Mis archivos</p><p id="dashTotalSolicitudes" class="metric-value">—</p><p class="metric-trend">Archivos en mi unidad</p></div></div>
       <div class="dashboard-card dv-metric"><span class="metric-icon orange"><i class="fa-solid fa-folder"></i></span><div><p class="metric-label">Mis carpetas</p><p id="dashEnCola" class="metric-value">—</p><p class="metric-trend">Carpetas con archivos</p></div></div>
@@ -312,5 +332,41 @@
 
 
 
-<script src="images/ui/subordinate.js?v=20261005-1"></script><script src="images/ui/app.js?v=20261005-1"></script><script src="images/ui/dashboard.js?v=20261005-1"></script></body>
+<script src="images/ui/subordinate.js?v=20261005-1"></script><script src="images/ui/app.js?v=20261005-1"></script><script src="images/ui/dashboard.js?v=20261005-1"></script>
+<script>
+(() => {
+  let busy=false, last=0, identity='', generation=0;
+  const panel=document.getElementById('dvQuotaFinal');
+  const used=panel.querySelector('[data-used]'), detail=panel.querySelector('[data-detail]'), bar=panel.querySelector('[data-bar]'), button=panel.querySelector('button');
+  const fmt=n=>{if(n===0)return '0 B';const k=Math.min(5,Math.floor(Math.log(n)/Math.log(1024)));return (n/1024**k).toLocaleString('es-PE',{maximumFractionDigits:1})+' '+['B','KB','MB','GB','TB','PB'][k];};
+  async function refresh(force=false){
+    const id=typeof currentUser!=='undefined'?String(currentUser?.id||''):'';
+    if(id!==identity){identity=id;generation++;last=0;used.textContent='Espacio pendiente de consulta';detail.textContent='';bar.style.width='0%';}
+    if(!id||!document.getElementById('appSection')?.getClientRects().length||busy||(!force&&Date.now()-last<60000))return;
+    busy=true;last=Date.now();button.disabled=true;used.textContent='Consultando espacio…';detail.textContent='';
+    const version=generation, controller=new AbortController();let timer;
+    try{
+      const request=async()=>{
+        if(typeof window.authHeaders!=='function')throw Error('No se pudo obtener la sesión.');
+        const headers=await window.authHeaders(false);
+        const response=await fetch('/drive/storage',{headers,signal:controller.signal,cache:'no-store'});
+        if(!response.ok)throw Error(response.status===404?'Falta habilitar la consulta de espacio en el servidor.':response.status===401||response.status===403?'La sesión no autoriza esta consulta.':'Google Drive no está disponible (HTTP '+response.status+').');
+        return response.json();
+      };
+      const q=await Promise.race([request(),new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(Error('La consulta tardó demasiado. Pulsa ↻.'));},15000);})]);
+      if(version!==generation)return;
+      const n=q.used_bytes, limit=q.limit_bytes, free=q.free_bytes;
+      if(typeof n!=='number'||!Number.isFinite(n)||n<0)throw Error('El servidor no devolvió una cuota válida.');
+      used.textContent=fmt(n)+' usados';
+      detail.textContent=typeof free==='number'&&free>=0?fmt(free)+' libres'+(typeof limit==='number'?' de '+fmt(limit):''):'Google no informa un límite de almacenamiento.';
+      bar.style.width=typeof limit==='number'&&limit>0?Math.min(100,n/limit*100)+'%':'0%';
+    }catch(e){if(version===generation){used.textContent='Espacio no disponible';detail.textContent=e.name==='AbortError'?'La consulta tardó demasiado. Pulsa ↻.':e.message;bar.style.width='0%';}}
+    finally{clearTimeout(timer);busy=false;button.disabled=false;}
+  }
+  button.addEventListener('click',()=>void refresh(true));
+  void refresh();setInterval(()=>void refresh(),5000);
+})();
+
+</script>
+</body>
 </html>
