@@ -113,6 +113,26 @@ body[data-dv-role="subordinado"] #mainArea .file-manager-shell{grid-template-col
 body[data-dv-role="subordinado"].dv-upload-mode #mainArea .file-manager-shell,body[data-dv-role="subordinado"].dv-trash-mode #mainArea .file-manager-shell{grid-template-columns:minmax(0,1fr)!important}
 .dv-build-label{display:none}body[data-dv-role="subordinado"] .dv-build-label{display:block;font-size:11px;color:#b3cee0;margin-top:8px}
 @media(max-width:700px){body[data-dv-role="subordinado"] #mainArea .file-manager-shell{grid-template-columns:minmax(0,1fr)!important}}
+</style><style>
+body[data-dv-role="subordinado"] #mainArea .data-table{width:100%!important;min-width:0!important;table-layout:fixed!important}
+body[data-dv-role="subordinado"] #mainArea .data-table :is(th,td){white-space:normal!important;overflow-wrap:anywhere!important;word-break:normal;min-width:0!important;max-width:none!important;width:auto}
+body[data-dv-role="subordinado"] #mainArea .data-table :is(p,span,b,button,div){white-space:normal!important;overflow-wrap:anywhere!important;min-width:0;max-width:100%;text-overflow:clip!important}
+body[data-dv-role="subordinado"] #mainArea :is(.file-table-wrap,.dv-table-scroll,.overflow-x-auto){min-width:0!important;width:100%;overflow-x:visible!important}
+body[data-dv-role="subordinado"] #mainArea .dv-op-actions{flex-wrap:wrap;gap:6px}
+body[data-dv-role="subordinado"] #mainArea .dv-folder-toggle{flex-wrap:wrap;text-align:left}
+body[data-dv-role="subordinado"] #mainArea .data-table th:first-child{width:24%}
+body[data-dv-role="subordinado"] #view-cola .data-table th:first-child{width:9%}
+body[data-dv-role="subordinado"] .tree-item[data-folder="__TRASH__"]{display:flex!important}
+body[data-dv-role="subordinado"].dv-trash-mode .file-explorer-panel{display:block!important}
+body[data-dv-role="subordinado"].dv-trash-mode #mainArea .file-manager-shell{grid-template-columns:210px minmax(0,1fr)!important}
+body[data-dv-role="subordinado"].dv-trash-mode .file-content-panel{grid-column:auto}
+body[data-dv-role="subordinado"] .dv-sub-pagination{justify-content:center;gap:7px}
+body[data-dv-role="subordinado"] .dv-sub-pagination>span{flex-basis:100%;text-align:center}
+body[data-dv-role="subordinado"] .dv-sub-pagination button[aria-current="page"]{background:#0878ed;color:white;border-color:#0878ed}
+body[data-dv-role="subordinado"] .dv-storage-box>div{display:block}
+body[data-dv-role="subordinado"] .dv-storage-box small{display:block;margin-top:6px;font-size:12px;line-height:1.5}
+body[data-dv-role="subordinado"] .dv-storage-track{display:block}
+@media(max-width:700px){body[data-dv-role="subordinado"].dv-trash-mode #mainArea .file-manager-shell{grid-template-columns:minmax(0,1fr)!important}body[data-dv-role="subordinado"] #mainArea .data-table :is(thead){display:none}body[data-dv-role="subordinado"] #mainArea .data-table :is(tbody,tr,td){display:block;width:100%!important}body[data-dv-role="subordinado"] #mainArea .data-table td::before{content:attr(data-column);display:block;font-weight:700;color:#53728a;font-size:13px}}
 </style></head>
 <body class="bg-slate-50 text-slate-800" data-dv-role="subordinado">
 
@@ -198,7 +218,7 @@ body[data-dv-role="subordinado"].dv-upload-mode #mainArea .file-manager-shell,bo
     <button type="button" onclick="dvOpenHistory()" id="navHistoryDirect" class="nav-item"><i class="fa-solid fa-clock-rotate-left"></i><span>Historial</span></button>
     <span id="adminLabel" hidden></span>
   </nav>
-  <div class="dv-sidebar-bottom"><span class="dv-build-label">Interfaz · 05/10 · revisión 2</span><div class="dv-storage-box"><span>Espacio utilizado</span><div class="dv-storage-track"><i id="dvStorageBar"></i></div><div><b id="dvStorageUsed">—</b><small>En custodia</small></div></div><button onclick="handleLogout()" class="dv-side-logout"><i class="fa-solid fa-right-from-bracket"></i><span>Cerrar sesión</span></button></div>
+  <div class="dv-sidebar-bottom"><span class="dv-build-label">Interfaz · 05/10 · revisión 3</span><div class="dv-storage-box"><span>Espacio utilizado</span><div class="dv-storage-track"><i id="dvStorageBar"></i></div><div><b id="dvStorageUsed">—</b><small>En custodia</small></div></div><button onclick="handleLogout()" class="dv-side-logout"><i class="fa-solid fa-right-from-bracket"></i><span>Cerrar sesión</span></button></div>
 </aside><div id="mainArea" class="dv-main-area"><main class="dv-main-content">
 <!-- INICIO -->
 <section id="view-inicio" class="view active dv-home-view" aria-label="Inicio">
@@ -430,10 +450,10 @@ body[data-dv-role="subordinado"].dv-upload-mode #mainArea .file-manager-shell,bo
     label.setAttribute('aria-live', 'polite');
     label.textContent = `${rows.length ? (state.page - 1) * 10 + 1 : 0}–${Math.min(state.page * 10, rows.length)} de ${rows.length} · Página ${state.page} de ${total}`;
     nav.append(label);
-    for (const [text, delta, disabled] of [['Anterior', -1, state.page === 1], ['Siguiente', 1, state.page === total]]) {
+    for (let pageNumber = 1; pageNumber <= total; pageNumber++) {
       const button = document.createElement('button');
-      button.type = 'button'; button.textContent = text; button.disabled = disabled;
-      button.onclick = () => { state.page += delta; render(); };
+      button.type = 'button'; button.textContent = String(pageNumber); button.setAttribute('aria-label', 'Página ' + pageNumber); if(pageNumber === state.page) button.setAttribute('aria-current','page');
+      button.onclick = () => { state.page = pageNumber; render(); };
       nav.append(button);
     }
     return rows.slice((state.page - 1) * 10, state.page * 10);
@@ -448,6 +468,15 @@ body[data-dv-role="subordinado"].dv-upload-mode #mainArea .file-manager-shell,bo
 // =======================================================
 // CONFIG
 // =======================================================
+async function dvFetchAllAudit(){
+  const result=[];let offset=0;
+  try {for(;;){
+    const {data,error}=await supabaseClient.from('auditoria_custodia').select('*').order('fecha_solicitud',{ascending:false}).order('id',{ascending:false}).range(offset,offset+499);
+    if(error)return {data:null,error};
+    const batch=data||[];result.push(...batch);offset+=batch.length;if(batch.length<500)break;
+  }return {data:result,error:null};}catch(error){return {data:null,error};}
+}
+
 const API_URL = window.location.origin;
 
 const SUPABASE_URL = "https://crujlbbhtkcithullgfs.supabase.co";
@@ -2346,7 +2375,8 @@ function dvRenderDynamicFolders(){
 renderFilesTable = function(rows){
   const body=document.getElementById('filesTableBody');if(!body)return;
   const units=dvGroupedUnits(rows||[]);const count=document.getElementById('fileCountLabel');if(count)count.textContent=`${units.length} unidad${units.length===1?'':'es'} visuales · ${(rows||[]).length} archivo(s) auditados`;
-  if(!units.length){body.innerHTML='<tr><td colspan="5" class="p-8 text-center text-slate-400">No hay archivos registrados.</td></tr>';return;}
+  const visibleUnits=isAdmin()?units:window.dvSubPage(units,'files',String(dvExplorerFolder)+'|'+(document.getElementById('fileSearch')?.value||''),body,filterFiles);
+    if(!units.length){body.innerHTML='<tr><td colspan="5" class="p-8 text-center text-slate-400">No hay archivos registrados.</td></tr>';return;}
   body.innerHTML=units.map(u=>u.type==='folder'?dvFolderRows(u.rows,u.id):dvLooseRow(u.row)).join('');
 };
 
@@ -2408,7 +2438,7 @@ listenRealtime = function(){
 };
 
 loadReports = async function(){
-  const {data,error}=await supabaseClient.from('auditoria_custodia').select('*').order('fecha_solicitud',{ascending:false}).limit(1000);if(error){console.error('REPORTES ACTUAL ERROR',error);return;}
+  const {data,error}=await dvFetchAllAudit();if(error){console.error('REPORTES ACTUAL ERROR',error);return;}
   auditCache=Array.isArray(data)?data:[];const total=auditCache.length,ap=auditCache.filter(x=>x.estado==='APROBADO').length,re=auditCache.filter(x=>x.estado==='RECHAZADO').length,pe=auditCache.filter(x=>x.estado==='PENDIENTE').length,ha=auditCache.filter(x=>x.hash_sha256).length;
   const set=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v};set('repTotalArchivos',total);set('repAprobados',ap);set('repRechazados',re);set('repPendientes',pe);set('repHash',ha);
   const states=[['Aprobados',ap,'bg-green-500'],['Pendientes',pe,'bg-amber-500'],['Rechazados',re,'bg-red-500']];const max=Math.max(1,ap,pe,re);const bars=document.getElementById('repBars');if(bars)bars.innerHTML=states.map(([n,v,c])=>`<div><div class="flex justify-between text-xs mb-1"><span>${n}</span><b>${v}</b></div><div class="h-2.5 bg-slate-100 rounded-full overflow-hidden"><div class="h-full ${c}" style="width:${Math.round(v/max*100)}%"></div></div></div>`).join('');
@@ -2630,7 +2660,7 @@ window.addEventListener('DOMContentLoaded',()=>{
   loadFilesView=async function(){
     const body=document.getElementById('filesTableBody');if(!body)return;
     body.innerHTML='<tr><td colspan="5" class="p-6 text-center text-slate-400"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Cargando archivos...</td></tr>';
-    const {data,error}=await supabaseClient.from('auditoria_custodia').select('*').order('fecha_solicitud',{ascending:false}).limit(1000);
+    const {data,error}=await dvFetchAllAudit();
     if(error){body.innerHTML='<tr><td colspan="5" class="p-6 text-center text-red-400">No se pudo cargar el inventario.</td></tr>';return;}
     roleAllAudit=Array.isArray(data)?data:[];
     populateAdminFileFilter();
@@ -2682,7 +2712,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     updateKpis({pendientes:pending});
   }
   loadCola=async function(){
-    const {data,error}=await supabaseClient.from('auditoria_custodia').select('*').order('fecha_solicitud',{ascending:false}).limit(1000);
+    const {data,error}=await dvFetchAllAudit();
     if(error){console.error('COLA DESDE AUDITORÍA:',error);return;}
     roleAllAudit=Array.isArray(data)?data:[];
     renderAuditRequests();
@@ -2691,7 +2721,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 
   // Auditoría: exclusiva del admin.
   loadAudit=async function(){
-    const {data,error}=await supabaseClient.from('auditoria_custodia').select('*').order('fecha_solicitud',{ascending:false}).limit(1000);
+    const {data,error}=await dvFetchAllAudit();
     if(error){console.error('AUDITORIA:',error);return;}
     roleAllAudit=Array.isArray(data)?data:[];
     const rows=isAdmin()?roleAllAudit:roleAllAudit.filter(belongsToMe);
@@ -2710,7 +2740,7 @@ window.addEventListener('DOMContentLoaded',()=>{
   }
 
   async function loadRoleHome(){if(typeof window.dvRefreshDashboardInventory==='function'){window.dvRefreshDashboardInventory('legacy-role-home');return;}
-    if(!roleAllAudit.length){const {data}=await supabaseClient.from('auditoria_custodia').select('*').order('fecha_solicitud',{ascending:false}).limit(1000);roleAllAudit=Array.isArray(data)?data:[];}
+    if(!roleAllAudit.length){const {data}=await dvFetchAllAudit();roleAllAudit=Array.isArray(data)?data:[];}
     const rows=isAdmin()?roleAllAudit:roleAllAudit.filter(belongsToMe);
     const approved=rows.filter(r=>r.estado==='APROBADO').length;
     const pending=rows.filter(r=>r.estado==='PENDIENTE').length;
@@ -3405,7 +3435,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     const body=document.getElementById('filesTableBody');if(!body)return;
     const units=dvGroupedUnits(rows||[]);const count=document.getElementById('fileCountLabel');if(count)count.textContent=`${units.length} unidad${units.length===1?'':'es'} visuales · ${(rows||[]).length} archivo(s)`;
     if(!units.length){body.innerHTML='<tr><td colspan="6" class="p-8 text-center text-slate-400">No hay archivos registrados.</td></tr>';return;}
-    body.innerHTML=units.map(u=>u.type==='folder'?opsFolderRows(u.rows,u.id):opsLooseRow(u.row)).join('');
+    body.innerHTML=visibleUnits.map(u=>u.type==='folder'?opsFolderRows(u.rows,u.id):opsLooseRow(u.row)).join('');
   };
 
   // Papelera muestra eliminados. El resto del explorador oculta eliminados.
@@ -4139,7 +4169,7 @@ window.addEventListener('DOMContentLoaded',()=>{
   }
 
   loadCola=async function(){
-    const [{data,error}]=await Promise.all([supabaseClient.from('auditoria_custodia').select('*').order('fecha_solicitud',{ascending:false}).limit(1000),queryRequests()]);
+    const [{data,error}]=await Promise.all([dvFetchAllAudit(),queryRequests()]);
     if(error){console.error('[DATAVAULT SOLICITUDES] auditoria:',error);return;}
     const rows=Array.isArray(data)?data:[];dvOpsUploadUnits=dvGroupedUnits(rows);renderUnifiedRequests();
   };
@@ -4356,11 +4386,7 @@ window.addEventListener('DOMContentLoaded',()=>{
       setSessionFromUser(user);
     }
 
-    const { data, error } = await supabaseClient
-      .from('auditoria_custodia')
-      .select('*')
-      .order('fecha_solicitud', { ascending:false })
-      .limit(1000);
+    const { data, error } = await dvFetchAllAudit();
 
     if(error) throw error;
     const all = Array.isArray(data) ? data : [];
@@ -5500,7 +5526,7 @@ window.addEventListener('DOMContentLoaded',()=>{
       const el=$(id); if(!el)continue;
       el.textContent=pending>99?'99+':String(pending);el.classList.toggle('hidden',pending===0);
     }
-    if (ready) {
+    if (ready && admin()) {
       const bytes=inventory.reduce((sum,r)=>sum+Math.max(0,Number(r.tamano_bytes)||0),0);
       setText('dvStorageUsed',typeof formatBytes==='function'?formatBytes(bytes):`${bytes} B`);
       // Drive's quota is not exposed by the backend; avoid inventing 50 GB.
@@ -5592,6 +5618,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     setText('dvHeroSubtitle',isAdmin?'Supervisa los archivos y las solicitudes de todo el equipo.':'Aquí puedes gestionar y subir tus archivos de forma segura.');
     setText('dvHistoryDescription',isAdmin?'Consulta la actividad de los archivos y las solicitudes del equipo.':'Consulta la actividad de tus archivos y solicitudes.');
     renderProtection();
+    if(!isAdmin)void window.dvLoadDriveQuota?.();
     updateActiveNav();
   }
   function updateActiveNav() {
@@ -5730,5 +5757,23 @@ window.addEventListener('DOMContentLoaded',()=>{
   window.DVUI={applyRole,renderHome,renderHistory,refreshMeta};
 })();
 
-</script></body>
+</script><script>
+(()=>{let busy=false,loaded=0;
+window.dvLoadDriveQuota=async function(){
+ if(busy||Date.now()-loaded<60000)return;busy=true;
+ const box=document.querySelector('.dv-storage-box');if(!box){busy=false;return;}
+ box.querySelector(':scope > span').textContent='Almacenamiento de Google';
+ const value=document.getElementById('dvStorageUsed'),bar=document.getElementById('dvStorageBar'),detail=box.querySelector('small');
+ value.textContent='Consultando…';
+ try{const response=await fetch('/drive/storage',{headers:await authHeaders(false)});if(!response.ok)throw Error('quota');const q=await response.json();
+ if(document.body.dataset.dvRole!=='subordinado')return;
+ value.textContent=q.limit_bytes===null?'Capacidad sin límite informado':formatBytes(q.free_bytes)+' libres de '+formatBytes(q.limit_bytes);
+ detail.textContent='Uso total: '+formatBytes(q.used_bytes)+' · En Drive: '+formatBytes(q.drive_bytes);
+ bar.style.width=q.limit_bytes>0?Math.min(100,q.used_bytes/q.limit_bytes*100)+'%':'0%';bar.parentElement.title='Cuota de la cuenta u organización conectada. Uso total de los servicios de Google.';loaded=Date.now();
+ }catch(error){value.textContent='Espacio no disponible';detail.textContent='No se pudo consultar la cuota de Google.';bar.style.width='0%';}finally{busy=false;}
+};
+window.addEventListener('dv:dashboard-data',()=>{if(document.body.dataset.dvRole==='subordinado')void dvLoadDriveQuota()});
+function labels(){document.querySelectorAll('.data-table').forEach(table=>{const heads=[...table.querySelectorAll('thead th')].map(x=>x.textContent.trim());table.querySelectorAll('tbody tr').forEach(row=>[...row.children].forEach((cell,i)=>{const label=heads[i]||'';if(cell.dataset.column!==label)cell.dataset.column=label;}));});}
+new MutationObserver(labels).observe(document.getElementById('mainArea'),{childList:true,subtree:true});labels();
+})();</script></body>
 </html>
