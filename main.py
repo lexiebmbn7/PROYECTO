@@ -8345,6 +8345,22 @@ def descargar_reporte_excel(
     )
 
 
+@app.get("/drive/storage")
+def almacenamiento_drive(request: Request):
+    obtener_usuario_supabase_desde_request(request)
+    if not google_drive_configurado():
+        raise HTTPException(status_code=503, detail="Google Drive no está configurado.")
+    try:
+        quota = obtener_servicio_google_drive().about().get(fields="storageQuota").execute(num_retries=GOOGLE_API_RETRIES).get("storageQuota", {})
+        limit = int(quota["limit"]) if quota.get("limit") is not None else None
+        used = int(quota.get("usage", 0))
+        return {"limit_bytes": limit, "used_bytes": used,
+                "free_bytes": max(0, limit-used) if limit is not None else None,
+                "drive_bytes": int(quota.get("usageInDrive", 0))}
+    except Exception:
+        raise HTTPException(status_code=502, detail="No se pudo consultar el almacenamiento de Google.")
+
+
 @app.get("/drive/browse")
 def navegar_drive(
     request: Request,
@@ -9023,14 +9039,22 @@ def listar_solicitudes_operacion_web(request: Request):
         .table("solicitudes_operacion")
         .select("*")
         .order("fecha_solicitud", desc=True)
-        .limit(1000)
+        .order("id", desc=True)
     )
 
     if usuario.get("rol") != "jefe":
         query = query.eq("solicitante_id", usuario["id"])
 
     try:
-        respuesta = query.execute()
+        registros = []
+        offset = 0
+        while True:
+            respuesta = query.range(offset, offset + 499).execute()
+            lote = respuesta.data or []
+            registros.extend(lote)
+            offset += len(lote)
+            if len(lote) < 500:
+                break
     except Exception as error:
         print("[OPERATIONS LIST ERROR]", error)
         raise HTTPException(
@@ -9040,7 +9064,7 @@ def listar_solicitudes_operacion_web(request: Request):
 
     return {
         "status": "ok",
-        "solicitudes": respuesta.data or [],
+        "solicitudes": registros,
     }
 
 
