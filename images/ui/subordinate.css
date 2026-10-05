@@ -1,71 +1,463 @@
-/* Only the subordinate interface. Administrator styles remain unchanged. */
-.dv-sub-upload-start{display:none}
-body[data-dv-role="subordinado"]{font-size:15px;line-height:1.5}
-body[data-dv-role="subordinado"] #mainArea>main{max-width:none;width:100%;padding:22px 24px}
-body[data-dv-role="subordinado"] #sidebar .nav-item{font-size:15px;min-height:48px;font-weight:600}
-body[data-dv-role="subordinado"] :is(.data-table td,.data-table td p,.data-table td span,.data-table td div,.data-table td b,.data-table th,.tree-item,.tree-subitem,.tree-folder,.breadcrumb,.dv-rail-copy b,.metric-label){font-size:14px!important;line-height:1.5}
-body[data-dv-role="subordinado"] :is(.data-table th,.data-table td:first-child,.section-head h3,.metric-label,.dv-rail-copy b){font-weight:600}
-body[data-dv-role="subordinado"] :is(.data-table td,.data-table th){padding:15px 12px}
-body[data-dv-role="subordinado"] :is(.data-table td .status-pill,.dv-state-pill,.dv-unit-sub,.metric-trend,.dv-rail-copy span,.section-head p,.file-content-footer,.dv-op-legacy,.dv-op-pending){font-size:13px!important}
-body[data-dv-role="subordinado"] :is(.input-modern,.filter-bar input,.explorer-search input,.dv-top-search input,.page-title p,.dv-home-hero p){font-size:15px!important}
-body[data-dv-role="subordinado"] :is(.primary-btn,.secondary-btn,.dv-drive-toolbar-btn,.dv-op-btn,.dv-request-tabs button){font-size:14px!important;min-height:40px;padding:9px 14px!important;border-radius:7px!important;font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:8px}
-body[data-dv-role="subordinado"] :is(.dv-drive-toolbar-btn i,.dv-op-btn i){font-size:14px!important}
-body[data-dv-role="subordinado"] .section-head h3{font-size:18px}
-body[data-dv-role="subordinado"] .dv-home-layout{min-height:calc(100dvh - 110px);grid-template-rows:auto auto 1fr;align-items:stretch}
-body[data-dv-role="subordinado"] .dv-home-recent{align-self:stretch}
-body[data-dv-role="subordinado"] .dv-home-rail>div{flex:1}
-body[data-dv-role="subordinado"] .dv-storage-track{display:none}
-body[data-dv-role="subordinado"] .dv-storage-box :is(span,b){font-size:14px}
-body[data-dv-role="subordinado"] .tree-item[data-folder="__TRASH__"],body[data-dv-role="subordinado"] .tree-item[data-folder="__SHARED__"]{display:none!important}
-body[data-dv-role="subordinado"] .dv-sub-pagination{display:flex;align-items:center;justify-content:flex-end;gap:12px;padding:16px;flex-wrap:wrap;border-top:1px solid #e2ebf3}
-body[data-dv-role="subordinado"] .dv-sub-pagination span{margin-right:auto;font-size:14px}
-body[data-dv-role="subordinado"] .dv-sub-pagination button{padding:9px 16px;border:1px solid #c8d9e7;border-radius:7px;background:#fff;color:#163b57;font-weight:600}
-body[data-dv-role="subordinado"] .dv-sub-pagination button:disabled{opacity:.45}
+/* =========================================================
+   ESTILOS COMPARTIDOS: ADMINISTRADOR Y SUBORDINADO
+   ========================================================= */
 
-/* Administrator uses the same visual scale as the subordinate interface. */
-body[data-dv-role="jefe"]{font-size:15px;line-height:1.5}
-body[data-dv-role="jefe"] #mainArea>main{max-width:none;width:100%;padding:22px 24px}
-body[data-dv-role="jefe"] #sidebar .nav-item{font-size:15px;min-height:48px;font-weight:600}
-body[data-dv-role="jefe"] .page-title p,
-body[data-dv-role="jefe"] .section-head p{font-size:15px!important}
-body[data-dv-role="jefe"] :is(.data-table td,.data-table td p,.data-table td span,.data-table td div,.data-table td b,.data-table th,.tree-item,.tree-subitem,.tree-folder,.breadcrumb,.dv-rail-copy b,.metric-label){font-size:14px!important;line-height:1.5}
-body[data-dv-role="jefe"] :is(.data-table th,.data-table td:first-child,.section-head h3,.metric-label,.dv-rail-copy b){font-weight:600}
-body[data-dv-role="jefe"] :is(.data-table td,.data-table th){padding:15px 12px}
-body[data-dv-role="jefe"] :is(.data-table td .status-pill,.dv-state-pill,.dv-unit-sub,.metric-trend,.dv-rail-copy span,.section-head p,.file-content-footer,.dv-op-legacy,.dv-op-pending){font-size:13px!important}
-body[data-dv-role="jefe"] :is(.input-modern,.filter-bar input,.explorer-search input,.dv-top-search input){font-size:15px!important}
-body[data-dv-role="jefe"] :is(.primary-btn,.secondary-btn,.dv-drive-toolbar-btn,.dv-op-btn,.dv-request-tabs button){font-size:14px!important;min-height:40px;padding:9px 14px!important;border-radius:7px!important;font-weight:600}
-body[data-dv-role="jefe"] .dv-approval-user-main strong{font-size:14px!important;font-weight:700}
-body[data-dv-role="jefe"] .dv-approval-user-main small{font-size:12px!important}
-body[data-dv-role="jefe"] .dv-approval-chip,
-body[data-dv-role="jefe"] .dv-approval-user-pending{font-size:12px!important;font-weight:700}
-body[data-dv-role="jefe"] .dv-approval-user-summary td{padding:12px!important}
-/* Administrative tables use the same readable scale as Reportes. */
-body[data-dv-role="jefe"] .data-table th,
-body[data-dv-role="jefe"] .data-table td,
-body[data-dv-role="jefe"] .section-head p,
-body[data-dv-role="jefe"] .filter-bar input,
-body[data-dv-role="jefe"] .input-modern { font-size: 13px !important; }
-body.dv-role-admin .data-table th,
-body.dv-role-admin .data-table td,
-body.dv-role-admin .section-head p,
-body.dv-role-admin .filter-bar input,
-body.dv-role-admin .input-modern { font-size: 13px !important; }
-body[data-dv-role="jefe"] .data-table th { font-weight: 800; }
-body[data-dv-role="jefe"] .data-table td:first-child,
-body[data-dv-role="jefe"] .data-table td b,
-body[data-dv-role="jefe"] .section-head h3 { font-weight: 700; }
-body[data-dv-role="jefe"] .dv-sub-pagination { display:flex; align-items:center; justify-content:flex-end; gap:6px; padding:16px; flex-wrap:wrap; border-top:1px solid #e2ebf3; }
-body[data-dv-role="jefe"] .dv-sub-pagination span { margin-right:auto; font-size:13px; color:#71869b; }
-body[data-dv-role="jefe"] .dv-sub-pagination button { min-width:34px; height:34px; padding:0 10px; border:1px solid #c8d9e7; border-radius:7px; background:#fff; color:#163b57; font-weight:700; }
-body[data-dv-role="jefe"] .dv-sub-pagination button:hover,
-body[data-dv-role="jefe"] .dv-sub-pagination button.is-active { background:#0878ed; border-color:#0878ed; color:#fff; }
-body[data-dv-role="jefe"] .dv-sub-pagination button:disabled { opacity:.45; }
-body.dv-role-admin .dv-sub-pagination { display:flex !important; }
-body[data-dv-role="subordinado"].dv-upload-mode :is(.file-explorer-panel,.file-content-head,#dropZone,.file-content-footer){display:none!important}
-body[data-dv-role="subordinado"].dv-upload-mode .file-content-panel{width:100%;grid-column:1/-1;padding:24px;min-height:calc(100dvh - 230px)}
-body[data-dv-role="subordinado"].dv-upload-mode .dv-sub-upload-start{display:block;padding:28px;border:2px dashed #b6d5ef;border-radius:12px;background:#f5faff;margin-bottom:20px}
-.dv-sub-upload-start h3{font-size:21px;margin:0 0 8px}.dv-sub-upload-start p{margin:0 0 20px}.dv-sub-upload-start>div{display:flex;gap:12px;flex-wrap:wrap}
-body[data-dv-role="subordinado"].dv-trash-mode .file-explorer-panel{display:none!important}
-body[data-dv-role="subordinado"].dv-trash-mode .file-content-panel{grid-column:1/-1}
-@media(max-width:1100px){body[data-dv-role="subordinado"] #view-inicio .dv-home-layout{grid-template-columns:minmax(0,1fr);grid-template-areas:"hero" "metrics" "recent" "rail";min-height:0}body[data-dv-role="subordinado"] .dv-home-rail{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:650px){body[data-dv-role="subordinado"] #mainArea>main{padding:16px 12px}body[data-dv-role="subordinado"] .dv-home-rail{grid-template-columns:1fr}body[data-dv-role="subordinado"] .dv-file-operation-bar{flex-wrap:wrap}body[data-dv-role="subordinado"].dv-upload-mode .file-content-panel{padding:12px}}
+.dv-sub-upload-start {
+  display: none;
+}
+
+body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) {
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) #mainArea > main {
+  max-width: none;
+  width: 100%;
+  padding: 22px 24px;
+}
+
+/* Menú lateral */
+body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) #sidebar .nav-item {
+  font-size: 15px !important;
+  min-height: 48px;
+  font-weight: 600 !important;
+}
+
+/* Texto de tablas y explorador */
+body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) :is(
+  .data-table td,
+  .data-table td p,
+  .data-table td span,
+  .data-table td div,
+  .data-table td b,
+  .data-table td strong,
+  .data-table th,
+  .tree-item,
+  .tree-subitem,
+  .tree-folder,
+  .breadcrumb,
+  .dv-rail-copy b,
+  .metric-label
+) {
+  font-size: 14px !important;
+  line-height: 1.5 !important;
+}
+
+/* Negritas */
+body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) :is(
+  .data-table th,
+  .data-table td:first-child,
+  .metric-label,
+  .dv-rail-copy b
+) {
+  font-weight: 600 !important;
+}
+
+body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) :is(
+  .data-table td b,
+  .data-table td strong
+) {
+  font-weight: 700 !important;
+}
+
+/* Espaciado de filas */
+body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) :is(
+  .data-table td,
+  .data-table th
+) {
+  padding: 15px 12px !important;
+}
+
+/* Texto secundario */
+body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) :is(
+  .data-table td .status-pill,
+  .dv-state-pill,
+  .dv-unit-sub,
+  .metric-trend,
+  .dv-rail-copy span,
+  .section-head p,
+  .file-content-footer,
+  .dv-op-legacy,
+  .dv-op-pending
+) {
+  font-size: 13px !important;
+  line-height: 1.5 !important;
+}
+
+/* Buscadores, campos y descripciones */
+body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) :is(
+  .input-modern,
+  .filter-bar input,
+  .filter-bar select,
+  .explorer-search input,
+  .dv-top-search input,
+  .page-title p,
+  .dv-home-hero p
+) {
+  font-size: 15px !important;
+  line-height: 1.5 !important;
+}
+
+/* Títulos de paneles */
+body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) .section-head h3 {
+  font-size: 18px !important;
+  font-weight: 700 !important;
+  line-height: 1.4 !important;
+}
+
+/* Botones */
+body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) :is(
+  .primary-btn,
+  .secondary-btn,
+  .dv-drive-toolbar-btn,
+  .dv-op-btn,
+  .dv-request-tabs button
+) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 9px 14px !important;
+  border-radius: 7px !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+}
+
+body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) :is(
+  .dv-drive-toolbar-btn i,
+  .dv-op-btn i
+) {
+  font-size: 14px !important;
+}
+
+/* Almacenamiento */
+body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) .dv-storage-box :is(
+  span,
+  b
+) {
+  font-size: 14px !important;
+}
+
+body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) .dv-storage-box small {
+  font-size: 12px !important;
+}
+
+
+/* =========================================================
+   APROBACIONES DEL ADMINISTRADOR
+   ========================================================= */
+
+body[data-dv-role="jefe"] .dv-approval-user-main strong {
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  line-height: 1.5 !important;
+}
+
+body[data-dv-role="jefe"] .dv-approval-user-main small {
+  font-size: 13px !important;
+  line-height: 1.5 !important;
+}
+
+body[data-dv-role="jefe"] :is(
+  .dv-approval-chip,
+  .dv-approval-user-pending
+) {
+  padding: 5px 9px !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  line-height: 1.5 !important;
+}
+
+body[data-dv-role="jefe"] .dv-approval-user-summary td {
+  padding: 15px 12px !important;
+}
+
+body[data-dv-role="jefe"] .dv-approval-user-toggle {
+  gap: 10px;
+  font-size: 14px !important;
+}
+
+
+/* =========================================================
+   REGLAS DLP
+   Esta sección tiene estilos propios.
+   ========================================================= */
+
+body[data-dv-role="jefe"] #view-reglas {
+  font-size: 14px !important;
+  line-height: 1.5 !important;
+}
+
+body[data-dv-role="jefe"] #view-reglas .page-title h2 {
+  font-size: 24px !important;
+  font-weight: 800 !important;
+  line-height: 1.35 !important;
+}
+
+body[data-dv-role="jefe"] #view-reglas .page-title p {
+  font-size: 15px !important;
+  line-height: 1.5 !important;
+}
+
+body[data-dv-role="jefe"] #view-reglas .section-head h3 {
+  font-size: 18px !important;
+  font-weight: 700 !important;
+}
+
+body[data-dv-role="jefe"] #view-reglas .section-head p {
+  font-size: 13px !important;
+  line-height: 1.5 !important;
+}
+
+/* Incluye textos anidados con tamaños pequeños */
+body[data-dv-role="jefe"] #dlpRulesContainer,
+body[data-dv-role="jefe"] #dlpRulesContainer :is(
+  table,
+  th,
+  td,
+  p,
+  span,
+  div,
+  small,
+  strong,
+  b,
+  label
+) {
+  font-size: 14px !important;
+  line-height: 1.5 !important;
+}
+
+body[data-dv-role="jefe"] #dlpRulesContainer table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+body[data-dv-role="jefe"] #dlpRulesContainer :is(th, td) {
+  padding: 15px 12px !important;
+  vertical-align: middle;
+}
+
+body[data-dv-role="jefe"] #dlpRulesContainer th {
+  font-weight: 700 !important;
+}
+
+body[data-dv-role="jefe"] #dlpRulesContainer td:first-child {
+  font-weight: 600 !important;
+}
+
+body[data-dv-role="jefe"] #dlpRulesContainer :is(
+  strong,
+  b,
+  .status-pill,
+  .dv-state-pill
+) {
+  font-weight: 700 !important;
+}
+
+body[data-dv-role="jefe"] #view-reglas .info-strip,
+body[data-dv-role="jefe"] #view-reglas .info-strip :is(
+  span,
+  strong,
+  small,
+  b
+) {
+  font-size: 13px !important;
+  line-height: 1.6 !important;
+}
+
+body[data-dv-role="jefe"] #view-reglas .info-strip {
+  padding: 14px 16px !important;
+  gap: 12px;
+}
+
+body[data-dv-role="jefe"] #view-reglas .info-strip > span {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+body[data-dv-role="jefe"] #view-reglas .info-strip strong {
+  font-weight: 700 !important;
+}
+
+
+/* =========================================================
+   APARIENCIA DE LA PAGINACIÓN
+   La lógica de 10 registros está en JavaScript.
+   ========================================================= */
+
+body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) .dv-sub-pagination {
+  display: flex !important;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 16px;
+  border-top: 1px solid #e2ebf3;
+}
+
+body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) .dv-sub-pagination span {
+  margin-right: auto;
+  color: #71869b;
+  font-size: 14px !important;
+}
+
+body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) .dv-sub-pagination button {
+  min-width: 38px;
+  min-height: 38px;
+  padding: 8px 12px;
+  border: 1px solid #c8d9e7;
+  border-radius: 7px;
+  background: #fff;
+  color: #163b57;
+  font-size: 14px !important;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) .dv-sub-pagination button:not(:disabled):hover,
+body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) .dv-sub-pagination button.is-active,
+body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) .dv-sub-pagination button[aria-current="page"] {
+  border-color: #0878ed;
+  background: #0878ed;
+  color: #fff;
+}
+
+body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) .dv-sub-pagination button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+
+/* =========================================================
+   DISTRIBUCIÓN PROPIA DEL SUBORDINADO
+   ========================================================= */
+
+body[data-dv-role="subordinado"] .dv-home-layout {
+  min-height: calc(100dvh - 110px);
+  grid-template-rows: auto auto 1fr;
+  align-items: stretch;
+}
+
+body[data-dv-role="subordinado"] .dv-home-recent {
+  align-self: stretch;
+}
+
+body[data-dv-role="subordinado"] .dv-home-rail > div {
+  flex: 1;
+}
+
+body[data-dv-role="subordinado"] .dv-storage-track {
+  display: none;
+}
+
+body[data-dv-role="subordinado"] .tree-item[data-folder="__TRASH__"],
+body[data-dv-role="subordinado"] .tree-item[data-folder="__SHARED__"] {
+  display: none !important;
+}
+
+/* Vista de subida */
+body[data-dv-role="subordinado"].dv-upload-mode :is(
+  .file-explorer-panel,
+  .file-content-head,
+  #dropZone,
+  .file-content-footer
+) {
+  display: none !important;
+}
+
+body[data-dv-role="subordinado"].dv-upload-mode .file-content-panel {
+  width: 100%;
+  grid-column: 1 / -1;
+  padding: 24px;
+  min-height: calc(100dvh - 230px);
+}
+
+body[data-dv-role="subordinado"].dv-upload-mode .dv-sub-upload-start {
+  display: block;
+  padding: 28px;
+  margin-bottom: 20px;
+  border: 2px dashed #b6d5ef;
+  border-radius: 12px;
+  background: #f5faff;
+}
+
+.dv-sub-upload-start h3 {
+  margin: 0 0 8px;
+  font-size: 21px;
+}
+
+.dv-sub-upload-start p {
+  margin: 0 0 20px;
+}
+
+.dv-sub-upload-start > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+/* Vista de papelera */
+body[data-dv-role="subordinado"].dv-trash-mode .file-explorer-panel {
+  display: none !important;
+}
+
+body[data-dv-role="subordinado"].dv-trash-mode .file-content-panel {
+  grid-column: 1 / -1;
+}
+
+
+/* =========================================================
+   ADAPTACIÓN A PANTALLAS PEQUEÑAS
+   ========================================================= */
+
+@media (max-width: 1100px) {
+  body[data-dv-role="subordinado"] #view-inicio .dv-home-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "hero"
+      "metrics"
+      "recent"
+      "rail";
+    min-height: 0;
+  }
+
+  body[data-dv-role="subordinado"] .dv-home-rail {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 650px) {
+  body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) #mainArea > main {
+    padding: 16px 12px;
+  }
+
+  body[data-dv-role="subordinado"] .dv-home-rail {
+    grid-template-columns: 1fr;
+  }
+
+  body[data-dv-role="subordinado"] .dv-file-operation-bar {
+    flex-wrap: wrap;
+  }
+
+  body[data-dv-role="subordinado"].dv-upload-mode .file-content-panel {
+    padding: 12px;
+  }
+
+  body[data-dv-role="jefe"] #view-reglas .info-strip {
+    flex-wrap: wrap;
+  }
+
+  body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) .dv-sub-pagination {
+    justify-content: center;
+  }
+
+  body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) .dv-sub-pagination > span {
+    width: 100%;
+    margin-right: 0;
+    text-align: center;
+  }
+}
