@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DataVault DLP | GM Ingenieros y Consultores</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!-- ============================================================
+     ESTILOS COMPLEMENTARIOS DE LA INTERFAZ
+     (reubicados desde el body; contenido y orden preservados)
+============================================================ -->
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<link rel="stylesheet" href="images/ui/utilities.css?v=20261005-1"><link rel="stylesheet" href="images/ui/base.css?v=20261005-1"><link rel="stylesheet" href="images/ui/dashboard.css?v=20261005-1"><link rel="stylesheet" href="images/ui/subordinate.css?v=20261005-1"></head>
+<body class="bg-slate-50 text-slate-800" data-dv-role="subordinado">
+
+<div id="loginSection" class="min-h-screen flex items-center justify-center p-4 sm:p-6 login-shell">
+  <div class="login-card w-full max-w-5xl grid lg:grid-cols-[46%_54%] overflow-hidden">
+    <div class="login-visual hidden lg:flex flex-col justify-between p-10 xl:p-12 relative overflow-hidden">
+      <div class="login-architecture"></div>
+      <div class="relative z-10">
+        <div class="flex items-center gap-3">
+          <div class="login-logo-box"><img src="images/gm_logo.jpg" alt="GM Ingenieros y Consultores"></div>
+          <div><p class="text-base font-extrabold text-white tracking-tight">DataVault DLP</p><p class="text-[9px] text-white/55">GM Ingenieros y Consultores</p></div>
+        </div>
+        <div class="mt-20 max-w-sm">
+          <div class="login-lock"><i class="fa-solid fa-shield-halved"></i><span><i class="fa-solid fa-lock"></i></span></div>
+          <p class="text-[10px] uppercase tracking-[.2em] font-bold text-[#c2cfd8] mt-8">Prevención de fuga de información</p>
+          <h1 class="text-3xl xl:text-4xl font-extrabold text-white leading-tight mt-3">Protegemos lo que impulsa tu negocio</h1>
+          <p class="text-sm text-white/60 mt-4 leading-relaxed">Custodia, monitoreo, trazabilidad e integridad de los archivos corporativos en un solo centro de control.</p>
+        </div>
+      </div>
+      <div class="relative z-10 flex items-center gap-3 text-[9px] text-white/45"><span>SHA-256</span><i class="fa-solid fa-circle text-[3px]"></i><span>Auditoría</span><i class="fa-solid fa-circle text-[3px]"></i><span>Control DLP</span></div>
+    </div>
+    <div class="login-form-panel p-7 sm:p-10 lg:p-12 flex items-center">
+      <div class="w-full max-w-md mx-auto">
+        <div class="lg:hidden flex items-center gap-3 mb-8"><div class="mobile-logo"><img src="images/gm_logo.jpg" alt="GM Ingenieros y Consultores"></div><div><p class="font-extrabold text-[#1f2b31]">DataVault DLP</p><p class="text-[9px] text-slate-400">GM Ingenieros y Consultores</p></div></div>
+        <span class="login-kicker">Acceso seguro</span>
+        <h2 class="text-3xl font-extrabold text-[#1f2b31] mt-3 tracking-tight">Iniciar sesión</h2>
+        <p class="text-sm text-slate-500 mt-2 mb-8">Accede a tu cuenta de DataVault DLP.</p>
+        <form id="loginForm" onsubmit="handleLogin(event)" class="login-form space-y-5" novalidate>
+          <div class="login-field">
+            <label for="username" class="login-label">Usuario</label>
+            <div class="login-input-wrap">
+              <span class="login-input-icon" aria-hidden="true"><i class="fa-regular fa-user"></i></span>
+              <input type="email" id="username" required autocomplete="username" inputmode="email" placeholder="correo@empresa.com" aria-label="Correo electrónico">
+            </div>
+          </div>
+          <div class="login-field">
+            <div class="login-label-row"><label for="password" class="login-label">Contraseña</label><span>Credenciales corporativas</span></div>
+            <div class="login-input-wrap">
+              <span class="login-input-icon" aria-hidden="true"><i class="fa-solid fa-lock"></i></span>
+              <input type="password" id="password" required autocomplete="current-password" placeholder="Ingresa tu contraseña" aria-label="Contraseña">
+              <button type="button" id="togglePasswordBtn" class="login-password-toggle" onclick="togglePasswordVisibility()" aria-label="Mostrar contraseña" title="Mostrar contraseña"><i class="fa-regular fa-eye"></i></button>
+            </div>
+          </div>
+          <div class="login-options">
+            <label class="login-remember"><input id="rememberUser" type="checkbox"> <span>Recordar correo</span></label>
+            <span class="login-session-note"><i class="fa-solid fa-shield-halved"></i> Sesión no persistente</span>
+          </div>
+          <button type="submit" id="loginBtn" class="login-submit"><span>Ingresar</span><i class="fa-solid fa-arrow-right text-[10px]"></i></button>
+          <div id="loginError" class="hidden login-error" role="alert" aria-live="polite"></div>
+        </form>
+        <div class="mt-10 pt-5 border-t border-slate-100 flex items-center justify-between text-[9px] text-slate-400"><span>Acceso protegido</span><span>© 2026 GM Ingenieros y Consultores</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<div id="appSection" class="hidden min-h-screen">
+<header id="topbar" class="dv-app-topbar">
+  <span id="headerTitle" hidden>Inicio</span><span id="headerSubtitle" hidden>Resumen general</span>
+  <button type="button" class="mobile-menu-btn dv-menu-toggle" onclick="toggleSidebar()" aria-label="Abrir o contraer menú" aria-controls="sidebar" aria-expanded="true"><i class="fa-solid fa-bars"></i></button>
+  <div class="dv-top-search" role="search"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><input id="dvGlobalSearchInput" type="search" placeholder="Buscar archivos, carpetas o solicitudes..." autocomplete="off" onkeydown="dvExactGlobalSearch(event)" aria-label="Buscar archivos, carpetas o solicitudes"></div>
+  <div class="topbar-actions">
+    <button onclick="showView('cola')" class="top-icon-btn" title="Solicitudes" aria-label="Ver solicitudes"><i class="fa-regular fa-bell"></i><span id="bellBadge" class="hidden top-badge">0</span></button>
+    <div class="dv-profile-wrap"><button onclick="toggleProfileMenu()" class="profile-trigger" aria-label="Abrir perfil de usuario"><span class="top-avatar" id="userAvatar">?</span><span class="dv-profile-trigger-copy"><strong id="userBadge">—</strong><span id="userRoleBadge">—</span></span><i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button>
+      <div id="profileMenu" class="hidden"><div class="dv-profile-head"><span class="dv-profile-avatar" id="profileAvatarBig">?</span><div><p id="profileNombre">—</p><span id="profileRolBadge">—</span></div></div><dl class="dv-profile-meta"><div><dt>Correo</dt><dd id="profileCorreo">—</dd></div><div><dt>Rol</dt><dd id="profileRolTexto">—</dd></div><div><dt>Miembro desde</dt><dd id="profileMiembroDesde">—</dd></div><div><dt>Último acceso</dt><dd id="profileUltimoAcceso">—</dd></div></dl><button onclick="handleLogout()" class="dv-profile-logout"><i class="fa-solid fa-right-from-bracket"></i>Cerrar sesión</button></div>
+    </div>
+  </div>
+  <nav class="dv-logic-nav" hidden aria-hidden="true"><button id="topNavUsuarios" class="hidden" data-nav="usuarios"></button><span id="topBellBadge" class="hidden">0</span></nav>
+</header><div id="appBody" class="dv-app-body"><div class="sidebar-overlay" id="sidebarOverlay" onclick="closeMobileSidebar()"></div>
+<aside id="sidebar" class="dv-app-sidebar" aria-label="Menú principal">
+  <a href="#inicio" class="dv-app-brand" onclick="dvOpenHome();return false" aria-label="GM Ingenieros y Consultores, Inicio"><span class="dv-brand-symbol"><img src="images/gm_logo_sidebar.png" alt="" aria-hidden="true"></span><span class="dv-brand-copy">GM INGENIEROS<br>Y CONSULTORES</span></a>
+  <nav class="dv-side-nav">
+    <button type="button" onclick="dvOpenHome()" data-nav="inicio" class="nav-item active"><i class="fa-solid fa-house"></i><span>Inicio</span></button>
+    <button type="button" onclick="dvOpenFiles()" data-nav="gestor" class="nav-item"><i class="fa-regular fa-folder"></i><span id="dvFileNavLabel">Mis archivos</span></button>
+    <button type="button" onclick="dvOpenUpload()" id="navSubirDirect" class="nav-item dv-sub-only" data-ui-role="sub"><i class="fa-solid fa-upload"></i><span>Subir archivos</span></button>
+    <button type="button" onclick="dvOpenRequests()" data-nav="cola" class="nav-item"><i class="fa-regular fa-file-lines"></i><span id="dvRequestNavLabel">Mis solicitudes</span><span id="dvSideRequestBadge" class="dv-nav-badge hidden">0</span></button>
+    <button type="button" onclick="showView('reglas')" data-nav="reglas" class="nav-item dv-admin-only" data-ui-role="admin"><i class="fa-solid fa-shield-halved"></i><span>Reglas DLP</span></button>
+    <button type="button" onclick="showView('reportes')" data-nav="reportes" class="nav-item dv-admin-only" data-ui-role="admin"><i class="fa-solid fa-chart-column"></i><span>Reportes</span></button>
+    <button type="button" onclick="showView('auditoria')" data-nav="auditoria" class="nav-item dv-admin-only" data-ui-role="admin"><i class="fa-solid fa-clock-rotate-left"></i><span>Auditoría</span></button>
+    <button type="button" onclick="showView('usuarios')" data-nav="usuarios" class="nav-item dv-admin-only" id="navUsuarios" data-ui-role="admin"><i class="fa-solid fa-users"></i><span>Usuarios</span></button>
+    <button type="button" onclick="dvOpenTrash()" id="navTrashDirect" class="nav-item"><i class="fa-regular fa-trash-can"></i><span>Papelera</span></button>
+    <button type="button" onclick="dvOpenHistory()" id="navHistoryDirect" class="nav-item"><i class="fa-solid fa-clock-rotate-left"></i><span>Historial</span></button>
+    <span id="adminLabel" hidden></span>
+  </nav>
+  <div class="dv-sidebar-bottom"><div class="dv-storage-box"><span>Espacio utilizado</span><div class="dv-storage-track"><i id="dvStorageBar"></i></div><div><b id="dvStorageUsed">—</b><small>En custodia</small></div></div><button onclick="handleLogout()" class="dv-side-logout"><i class="fa-solid fa-right-from-bracket"></i><span>Cerrar sesión</span></button></div>
+</aside><div id="mainArea" class="dv-main-area"><main class="dv-main-content">
+<!-- INICIO -->
+<section id="view-inicio" class="view active dv-home-view" aria-label="Inicio">
+  <div class="dv-home-layout">
+    <div class="dashboard-hero dv-home-hero"><div class="dv-hero-copy"><h2>¡Bienvenido, <span id="dashWelcome">Usuario</span>!</h2><p id="dvHeroSubtitle">Aquí puedes gestionar y subir tus archivos de forma segura.</p></div><div class="dv-hero-mark" aria-hidden="true"><span class="dv-brand-symbol"><img src="images/gm_logo_sidebar.png" alt=""></span><span>GM INGENIEROS<br>Y CONSULTORES</span></div><span id="dashDate" hidden></span></div>
+    <div class="grid grid-cols-2 xl:grid-cols-4 dv-kpi-grid">
+      <div class="dashboard-card dv-metric"><span class="metric-icon blue"><i class="fa-regular fa-file-lines"></i></span><div><p class="metric-label">Mis archivos</p><p id="dashTotalSolicitudes" class="metric-value">—</p><p class="metric-trend">Archivos en mi unidad</p></div></div>
+      <div class="dashboard-card dv-metric"><span class="metric-icon orange"><i class="fa-solid fa-folder"></i></span><div><p class="metric-label">Mis carpetas</p><p id="dashEnCola" class="metric-value">—</p><p class="metric-trend">Carpetas con archivos</p></div></div>
+      <div class="dashboard-card dv-metric"><span class="metric-icon green"><i class="fa-regular fa-file-lines"></i></span><div><p class="metric-label">Mis solicitudes</p><p id="dashCompletadas" class="metric-value">—</p><p class="metric-trend">En total</p></div></div>
+      <div class="dashboard-card dv-metric"><span class="metric-icon green"><i class="fa-solid fa-circle-check"></i></span><div><p class="metric-label">Aprobadas</p><p id="dashBloqueadas" class="metric-value">—</p><p class="metric-trend">Historial aprobado</p></div></div>
+    </div>
+    <div class="dashboard-card dv-home-recent dv-sub-only" data-ui-role="sub"><div class="section-head"><div><h3>Actividad reciente</h3><p>Aquí encontrarás tus carpetas y archivos.</p></div></div><div class="dv-table-scroll"><table class="data-table dv-home-table"><thead><tr><th>Nombre</th><th>Tipo</th><th>Fecha</th><th>Estado</th><th class="dv-action-head">Acción</th></tr></thead><tbody id="inicioRecentFilesBody"><tr><td colspan="5" class="dv-empty-table">Cargando archivos...</td></tr></tbody></table></div></div>
+    <aside class="dv-home-rail dv-sub-only" data-ui-role="sub" aria-label="Solicitudes y actividad personal"><div class="dashboard-card dv-rail-card"><div class="section-head"><h3>Mis solicitudes</h3><button onclick="dvOpenRequests()" class="dv-text-link">Ver todas <i class="fa-solid fa-chevron-right"></i></button></div><div id="dvHomeRequests" class="dv-rail-list"><p class="dv-empty-mini">Cargando solicitudes...</p></div></div><div class="dashboard-card dv-rail-card"><div class="section-head"><h3>Actividad en el sistema</h3></div><div id="dvHomeEvents" class="dv-rail-list"><p class="dv-empty-mini">Cargando actividad...</p></div></div></aside>
+    <div class="dashboard-card dv-home-pending dv-admin-only" data-ui-role="admin"><div class="section-head"><div><h3>Solicitudes pendientes</h3><p>Revisa las solicitudes de tus usuarios.</p></div><button onclick="dvOpenRequests('PENDIENTE')" class="dv-text-link">Ver todas <i class="fa-solid fa-chevron-right"></i></button></div><div class="dv-table-scroll"><table class="data-table dv-pending-table"><thead><tr><th>Usuario</th><th>Archivo</th><th>Operación</th><th>Fecha</th><th>Acciones</th></tr></thead><tbody id="dvHomePendingBody"><tr><td colspan="5" class="dv-empty-table">Cargando solicitudes...</td></tr></tbody></table></div></div>
+    <aside class="dv-home-admin-rail dv-admin-only" data-ui-role="admin" aria-label="Actividad del equipo y protección"><div class="dashboard-card dv-rail-card"><div class="section-head"><h3>Actividad del equipo</h3></div><div id="dvHomeTeamEvents" class="dv-rail-list"><p class="dv-empty-mini">Cargando actividad...</p></div></div><div class="dashboard-card dv-rail-card"><div class="section-head"><h3>Estado de protección</h3><span class="dv-state-pill neutral" id="dvProtectionBadge">Consultando</span></div><dl class="dv-protection-list"><div><dt><i class="fa-solid fa-shield-halved"></i>Reglas DLP activas</dt><dd id="dvUiPolicyCount">—</dd></div><div><dt><i class="fa-solid fa-rotate"></i>Última actualización</dt><dd id="dvUiLastRefresh">—</dd></div></dl></div></aside>
+  </div>
+  <div hidden id="dvLegacyHomeState"><span id="kpiArchivos">—</span><span id="kpiPendientes">—</span><span id="kpiHash">—</span><span id="kpiCarpetas">—</span><div id="dashBars"></div><div id="dashDonut"><span id="dashDonutTotal"></span></div><div id="dashDonutLegend"></div><span id="homeDlpCount"></span><span id="homeDlpPercent"></span><tbody id="inicioAdminRecentFilesBody"></tbody></div>
+</section><!-- SOLICITUDES -->
+<section id="view-cola" class="view dv-list-view">
+  <div class="page-title dv-simple-title"><div><h2>Mis solicitudes</h2><p>Consulta el estado de tus cargas y operaciones solicitadas.</p></div><button onclick="dvOpenFiles()" class="primary-btn"><i class="fa-regular fa-folder-open"></i>Ir a archivos</button></div>
+  <div class="dv-request-tabs"><button class="active" type="button" data-request-state="" onclick="dvSelectRequestState('')" aria-pressed="true">Todas</button><button type="button" data-request-state="PENDIENTE" onclick="dvSelectRequestState('PENDIENTE')" aria-pressed="false">Pendientes</button><button type="button" data-request-state="APROBADO" onclick="dvSelectRequestState('APROBADO')" aria-pressed="false">Aprobadas</button><button type="button" data-request-state="RECHAZADO" onclick="dvSelectRequestState('RECHAZADO')" aria-pressed="false">Rechazadas</button></div>
+  <div class="filter-bar dv-list-filter"><div class="relative flex-1"><i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2"></i><input id="solSearch" oninput="filterSolicitudesUI()" placeholder="Buscar solicitudes..." class="input-modern pl-9"></div><select id="solStateFilter" onchange="filterSolicitudesUI()" class="input-modern"><option value="">Todos los estados</option><option value="PENDIENTE">Pendiente</option><option value="APROBADO">Aprobado</option><option value="RECHAZADO">Rechazado</option></select><button onclick="loadCola()" class="icon-btn" title="Actualizar"><i class="fa-solid fa-rotate"></i></button></div>
+  <div class="dashboard-card overflow-hidden dv-list-card"><div class="section-head"><div><h3>Solicitudes registradas</h3><p id="solSummary">Cargando solicitudes...</p></div><span class="live-badge"><i class="fa-solid fa-circle"></i>En vivo</span></div><div class="overflow-x-auto"><table class="data-table"><thead><tr><th>ID</th><th>Tipo</th><th>Origen</th><th>Destino</th><th>Usuario</th><th>Fecha y hora</th><th>Estado</th><th>Acciones</th></tr></thead><tbody id="colaContainer"><tr><td colspan="8" class="p-8 text-center text-slate-400">Cargando solicitudes...</td></tr></tbody></table></div></div>
+  <div class="dv-mini-footer"><div class="mini-stat"><span>Pendientes</span><b id="solPendingMini">—</b></div><div class="mini-stat"><span>Estado</span><b class="text-emerald-600">En vivo</b></div><div class="mini-stat"><span>Rol actual</span><b id="solRoleMini">—</b></div></div>
+</section>
+<!-- ARCHIVOS -->
+<section id="view-gestor" class="view space-y-4">
+  <div class="page-title"><div><span class="module-kicker">Custodia documental</span><h2>Explorador de archivos</h2><p>Gestiona los archivos corporativos bajo custodia y controla sus operaciones.</p></div><div class="flex gap-2"><span class="live-badge"><i class="fa-solid fa-circle text-[5px] mr-1"></i>Sincronizado</span><button onclick="loadFilesView()" class="secondary-btn"><i class="fa-solid fa-rotate"></i>Actualizar</button></div></div>
+  <div class="file-manager-shell">
+    <div class="file-explorer-panel">
+      <div class="explorer-head">
+        <details id="dvDriveNewWrap" class="dv-drive-new">
+          <summary><i class="fa-solid fa-plus"></i><span>Nuevo</span></summary>
+          <div class="dv-drive-new-menu">
+            <button type="button" onclick="this.closest('details').removeAttribute('open');document.getElementById('fileInput').click()"><i class="fa-solid fa-file-arrow-up"></i><span>Subir archivo</span></button>
+            <button type="button" onclick="this.closest('details').removeAttribute('open');document.getElementById('folderInput').click()"><i class="fa-solid fa-folder-arrow-up"></i><span>Subir carpeta</span></button>
+            <div class="dv-menu-separator"></div>
+            <button type="button" onclick="this.closest('details').removeAttribute('open');dvActivateFileOperation('MOVER')"><i class="fa-solid fa-folder-tree"></i><span>Mover</span></button>
+            <button type="button" onclick="this.closest('details').removeAttribute('open');dvActivateFileOperation('ELIMINAR')"><i class="fa-solid fa-trash-can"></i><span>Eliminar</span></button>
+          </div>
+        </details>
+        <div class="explorer-search"><i class="fa-solid fa-magnifying-glass"></i><input id="fileSearch" oninput="filterFiles()" placeholder="Buscar en Drive..."></div>
+      </div>
+      <div class="explorer-tree">
+        <button onclick="selectFileFolder('')" class="tree-item active" data-folder=""><i class="fa-solid fa-hard-drive"></i>Mi unidad</button>
+        <div class="tree-folder"><span>Carpetas</span></div>
+        <div id="dynamicFolderTree" class="pl-5 space-y-1"><p class="tree-subitem text-slate-400">Cargando carpetas...</p></div>
+        <button onclick="selectFileFolder('__SHARED__')" class="tree-item" data-folder="__SHARED__"><i class="fa-solid fa-user-group"></i>Compartidos conmigo</button>
+        <button onclick="selectFileFolder('__TRASH__')" class="tree-item" data-folder="__TRASH__"><i class="fa-solid fa-trash-can"></i>Papelera</button>
+      </div>
+      <div class="explorer-foot"><span><i class="fa-solid fa-shield-halved"></i> Custodia DLP activa</span></div>
+    </div>
+    <div class="file-content-panel">
+      <div class="file-content-head">
+        <div class="dv-drive-title-block"><span class="breadcrumb"><button type="button" class="dv-drive-home" onclick="selectFileFolder('')">Mi unidad</button><i class="fa-solid fa-chevron-right"></i><b id="currentFolderLabel">Todos los archivos</b></span><h3 id="filePanelTitle">Mi unidad</h3></div>
+        <select id="fileFolderFilter" class="hidden"><option value="">Todas las carpetas</option></select>
+        <div id="dvFileOperationBar" class="dv-file-operation-bar">
+          <button type="button" class="dv-drive-toolbar-btn" onclick="document.getElementById('fileInput').click()"><i class="fa-solid fa-file-arrow-up"></i>Subir archivo</button>
+          <button type="button" class="dv-drive-toolbar-btn" onclick="dvActivateFileOperation('MOVER')"><i class="fa-solid fa-folder-tree"></i>Mover</button>
+          <button type="button" class="dv-drive-toolbar-btn danger" onclick="dvActivateFileOperation('ELIMINAR')"><i class="fa-solid fa-trash-can"></i>Eliminar</button>
+        </div>
+      </div>
+      <div class="dv-sub-upload-start"><h3>Selecciona lo que deseas subir</h3><p>Agrega archivos o una carpeta, revisa el desglose y elige el destino antes de enviar.</p><div><button type="button" class="primary-btn" onclick="document.getElementById('fileInput').click()">Seleccionar archivos</button><button type="button" class="secondary-btn" onclick="document.getElementById('folderInput').click()">Seleccionar carpeta</button></div></div>
+      <!-- Inputs de carga ocultos: la selección se abre desde “Nuevo” o “Subir archivo”. -->
+      <input type="file" id="fileInput" class="hidden" multiple onchange="handleFilesSelected(this.files,false)">
+      <input type="file" id="folderInput" class="hidden" webkitdirectory directory multiple onchange="handleFilesSelected(this.files,true)">
+      <div id="selectedFilesList" class="mt-3 hidden rounded-lg border border-slate-200 bg-slate-50 p-3"></div>
+      <div id="dvUploadDestinationPanel" class="mt-3 hidden dv-upload-destination-panel">
+        <div class="dv-upload-destination-head">
+          <div><b><i class="fa-solid fa-folder-tree mr-2"></i>Destino en Google Drive</b><span>Elige dónde quedará el archivo o la carpeta cuando el custodio apruebe la subida.</span></div>
+          <div class="flex items-center gap-2"><button type="button" class="icon-btn" title="Actualizar carpetas de Drive" onclick="dvEnsureUploadDestinationFolders(true)"><i class="fa-solid fa-rotate"></i></button><span class="dv-upload-required">Obligatorio</span></div>
+        </div>
+        <div class="dv-folder-search"><i class="fa-solid fa-magnifying-glass"></i><input id="dvUploadDestinationSearch" class="input-modern w-full" placeholder="Buscar en esta carpeta..." autocomplete="off" oninput="dvFilterUploadDestinations()"></div>
+        <div id="dvUploadDestinationList" class="dv-folder-tree mt-2"><div class="p-4 text-center text-xs text-slate-400"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Cargando carpetas...</div></div>
+        <div id="dvUploadDestinationSelection" class="dv-move-selection mt-2">Selecciona una carpeta. Para dejar archivos sueltos, selecciona explícitamente <b>DRIVE PROYECTO</b>.</div>
+      </div>
+      <div id="batchActionBar" class="mt-3 hidden flex flex-wrap items-center gap-2"><button onclick="submitUploadBatch()" id="uploadBatchBtn" class="primary-btn" disabled><i class="fa-solid fa-paper-plane"></i>Enviar lote</button><button onclick="clearSelectedBatch()" id="clearSelectionBtn" class="secondary-btn"><i class="fa-solid fa-trash-can"></i>Limpiar</button><button onclick="cancelUploadBatch()" id="cancelUploadBtn" class="secondary-btn hidden" style="color:#dc2626;border-color:#fecaca"><i class="fa-solid fa-ban"></i>Cancelar carga</button><span id="batchSelectionMeta" class="text-[10px] text-slate-500 ml-auto"></span></div>
+      <div id="uploadStatus" class="mt-3 text-sm font-semibold hidden"></div>
+      <div id="dropZone" class="file-table-wrap dv-drive-drop-surface"><table class="data-table"><thead><tr><th>Nombre</th><th>Carpeta</th><th>Integridad</th><th>Estado</th><th>Modificado</th></tr></thead><tbody id="filesTableBody"><tr><td colspan="5" class="p-8 text-center text-slate-400">Cargando archivos...</td></tr></tbody></table></div>
+      <div class="file-content-footer"><span id="fileCountLabel">Inventario de custodia</span><div>Las operaciones requieren aprobación del custodio.</div></div>
+    </div>
+    <aside id="fileSecurityPanel" class="file-security-panel dv-admin-only" data-ui-role="admin"><div class="security-card"><div class="security-title"><span>Políticas de protección</span><i class="fa-solid fa-shield-halved"></i></div><p class="dv-security-description">Políticas DLP configuradas en el sistema.</p><div class="dv-security-count"><b id="gestorRuleCount">—</b><span>reglas activas</span></div><button onclick="showView('reglas')" class="security-link">Administrar reglas <i class="fa-solid fa-arrow-right"></i></button></div><div class="security-card"><div class="security-title"><span>Trazabilidad</span><i class="fa-solid fa-clock-rotate-left"></i></div><p class="dv-security-description">Consulta las decisiones, los archivos y sus hashes en el registro de auditoría.</p><button onclick="showView('auditoria')" class="security-link">Ver auditoría <i class="fa-solid fa-arrow-right"></i></button></div></aside></div>
+
+</section>
+
+<!-- OPERACIONES -->
+<section id="view-operaciones" class="view space-y-4">
+  <div class="page-title">
+    <div><span class="module-kicker">Gestión de operaciones</span><h2>Operaciones de archivo</h2><p>Sube, mueve o solicita la eliminación de archivos corporativos. Todas las acciones se procesan por lote y respetan las reglas de aprobación.</p></div>
+    <div class="flex items-center gap-2"><span class="live-badge"><i class="fa-solid fa-shield-halved"></i>Custodia DLP activa</span></div>
+  </div>
+    <div class="dashboard-card overflow-hidden operations-card"><div class="section-head"><div><h3>Operaciones de archivo</h3><p>Las acciones se procesan por lote y respetan las reglas de aprobación.</p></div></div><div class="p-4"><div class="flex gap-5 border-b border-slate-200"><button type="button" onclick="showView('gestor');setTimeout(()=&gt;dvActivateFileOperation('SUBIR'),0)" data-tab="subir" class="tab-btn active">Subir</button><button type="button" onclick="showView('gestor');setTimeout(()=&gt;dvActivateFileOperation('MOVER'),0)" data-tab="mover" class="tab-btn">Mover</button><button type="button" onclick="showView('gestor');setTimeout(()=&gt;dvActivateFileOperation('ELIMINAR'),0)" data-tab="eliminar" class="tab-btn">Eliminar</button></div>
+  <div id="tab-subir" class="tab-content space-y-4 pt-5"><div class="info-strip"><i class="fa-solid fa-folder-open"></i><span>La carga actual se realiza desde el Explorador de archivos para conservar <b>lote_id</b>, <b>ruta_relativa</b>, subcarpetas y aprobación agrupada en Telegram.</span><strong><button type="button" onclick="showView('gestor')" class="text-blue-700 font-bold">Abrir explorador →</button></strong></div></div>
+  <div id="tab-mover" class="tab-content hidden space-y-4 pt-5"><div class="flex flex-wrap gap-4"><div><label class="field-label">Carpeta origen</label><select id="moverOrigen" onchange="cargarArchivosCarpeta('mover')" class="input-modern w-56"></select></div><div><label class="field-label">Carpeta destino</label><select id="moverDestino" class="input-modern w-56"></select></div></div><div id="moverFilesList" class="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-80 overflow-y-auto"><p class="p-4 text-center text-slate-400 text-sm">Selecciona una carpeta origen.</p></div><button onclick="submitMoveBatch()" id="moverBatchBtn" class="primary-btn" disabled>Solicitar movimiento</button><div id="moverStatus" class="mt-3 text-sm font-semibold hidden"></div></div>
+  <div id="tab-eliminar" class="tab-content hidden space-y-4 pt-5"><label class="field-label">Carpeta origen</label><select id="eliminarOrigen" onchange="cargarArchivosCarpeta('eliminar')" class="input-modern w-56"></select><div id="eliminarFilesList" class="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-80 overflow-y-auto"><p class="p-4 text-center text-slate-400 text-sm">Selecciona una carpeta origen.</p></div><button onclick="submitDeleteBatch()" id="eliminarBatchBtn" class="danger-btn" disabled><i class="fa-solid fa-trash"></i>Solicitar eliminación</button><p class="text-xs text-slate-400">Toda eliminación requiere aprobación explícita del jefe / custodio.</p><div id="eliminarStatus" class="mt-3 text-sm font-semibold hidden"></div></div></div></div>
+</section>
+<!-- REGLAS -->
+<section id="view-reglas" class="view space-y-4"><div class="page-title"><div><h2>Reglas DLP</h2><p>Configura y administra las políticas de prevención de pérdida de datos.</p></div><button id="btnResetDlpRules" onclick="resetDlpRules()" class="secondary-btn">Restaurar</button></div><div class="dashboard-card overflow-hidden"><div class="section-head"><div><h3>Reglas</h3><p>Políticas activas para proteger la información corporativa.</p></div><button onclick="renderDlpRules()" class="icon-btn"><i class="fa-solid fa-rotate"></i></button></div><div class="table-responsive"><div id="dlpRulesContainer" class="p-3"></div></div></div><div class="info-strip"><i class="fa-solid fa-circle-info"></i><span>Las reglas del panel representan la configuración de protección. La aplicación efectiva de los controles sobre los archivos debe permanecer respaldada por la lógica del backend.</span><strong><span id="dlpActiveCount">6</span> activas</strong></div></section>
+<!-- REPORTES -->
+<section id="view-reportes" class="view space-y-4"><div class="page-title"><div><h2>Reportes</h2><p>Genera y consulta reportes del sistema.</p></div><button id="btnExportReport" onclick="exportSimpleReport()" class="primary-btn"><i class="fa-solid fa-file-export"></i>Generar reporte</button></div><div class="grid grid-cols-2 xl:grid-cols-5 gap-3"><div class="dashboard-card p-4"><p class="metric-label">Total solicitudes</p><b id="repTotalArchivos" class="text-2xl">—</b></div><div class="dashboard-card p-4"><p class="metric-label">Completadas</p><b id="repAprobados" class="text-2xl text-emerald-600">—</b></div><div class="dashboard-card p-4"><p class="metric-label">Bloqueadas</p><b id="repRechazados" class="text-2xl text-red-500">—</b></div><div class="dashboard-card p-4"><p class="metric-label">En cola</p><b id="repPendientes" class="text-2xl text-orange-500">—</b></div><div class="dashboard-card p-4"><p class="metric-label">Hashes</p><b id="repHash" class="text-2xl text-violet-600">—</b></div></div><div class="grid grid-cols-1 xl:grid-cols-[1.5fr_.8fr] gap-4"><div class="dashboard-card overflow-hidden"><div class="section-head"><div><h3>Solicitudes por día</h3><p>Actividad registrada</p></div><span class="text-[10px] text-slate-400">Últimos registros</span></div><div id="repBars" class="p-5 space-y-5"></div></div><div class="dashboard-card overflow-hidden"><div class="section-head"><div><h3>Tipos de archivo</h3><p>Distribución de actividad</p></div></div><div id="repStates" class="p-5 space-y-4"></div></div></div><div class="dashboard-card overflow-hidden"><div class="section-head"><div><h3>Archivos por carpeta</h3><p>Distribución de custodia</p></div></div><div id="repFolders" class="p-5 grid grid-cols-1 md:grid-cols-2 gap-5"></div></div></section>
+<!-- AUDITORIA -->
+<section id="view-auditoria" class="view space-y-4"><div class="page-title"><div><h2>Historial y Auditoría</h2><p>Consulta la trazabilidad de archivos, usuarios e integridad.</p></div><span class="live-badge">● En vivo</span></div><div class="dashboard-card overflow-hidden"><div class="section-head"><div><h3>Registro de auditoría</h3><p>Eventos de custodia e integridad documental.</p></div></div><div class="overflow-x-auto"><table class="data-table"><thead><tr><th>Archivo</th><th>Solicitante</th><th>Carpeta</th><th>Hash SHA-256</th><th>Estado</th></tr></thead><tbody id="auditTableBody"><tr><td colspan="5" class="p-6 text-center text-slate-400">Cargando registros...</td></tr></tbody></table></div></div></section>
+<!-- USUARIOS / SOLO ADMIN -->
+<section id="view-usuarios" class="view space-y-4">
+  <div class="page-title">
+    <div><span class="module-kicker">Administración</span><h2>Usuarios y actividad</h2><p>Consulta quién carga documentos, cuántos archivos tiene y el estado de sus solicitudes.</p></div>
+    <div class="flex items-center gap-2"><button onclick="openCreateUserModal()" class="primary-btn"><i class="fa-solid fa-user-plus"></i>Crear usuario</button><button onclick="loadAdminUsers()" class="secondary-btn"><i class="fa-solid fa-rotate"></i>Actualizar</button></div>
+  </div>
+  <div class="grid grid-cols-2 xl:grid-cols-4 gap-3">
+    <div class="dashboard-card p-4"><p class="metric-label">Usuarios con actividad</p><b id="admUsersTotal" class="text-2xl">—</b></div>
+    <div class="dashboard-card p-4"><p class="metric-label">Archivos registrados</p><b id="admFilesTotal" class="text-2xl text-blue-600">—</b></div>
+    <div class="dashboard-card p-4"><p class="metric-label">Pendientes</p><b id="admPendingTotal" class="text-2xl text-amber-600">—</b></div>
+    <div class="dashboard-card p-4"><p class="metric-label">Rechazados</p><b id="admRejectedTotal" class="text-2xl text-red-500">—</b></div>
+  </div>
+  <div class="filter-bar">
+    <div class="relative flex-1"><i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i><input id="adminUserSearch" oninput="renderAdminUsers()" placeholder="Buscar usuario o correo..." class="input-modern pl-9"></div>
+  </div>
+  <div class="dashboard-card overflow-hidden">
+    <div class="section-head"><div><h3>Usuarios registrados</h3><p>Aquí aparecen las cuentas creadas en el sistema, junto con su actividad de custodia.</p></div><span class="live-badge">● En vivo</span></div>
+    <div class="overflow-x-auto"><table class="data-table"><thead><tr><th>Usuario</th><th>Correo</th><th>Archivos</th><th>Aprobados</th><th>Pendientes</th><th>Rechazados</th><th>Última actividad</th><th>Acción</th></tr></thead><tbody id="adminUsersBody"><tr><td colspan="8" class="p-8 text-center text-slate-400">Cargando usuarios...</td></tr></tbody></table></div>
+  </div>
+  <div id="adminUserDetail" class="dashboard-card overflow-hidden hidden">
+    <div class="section-head"><div><h3 id="adminUserDetailName">Detalle de usuario</h3><p id="adminUserDetailEmail">—</p></div><button onclick="closeAdminUserDetail()" class="icon-btn"><i class="fa-solid fa-xmark"></i></button></div>
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 p-4 border-b border-slate-100">
+      <div class="mini-stat"><span>Total</span><b id="audUserTotal">—</b></div><div class="mini-stat"><span>Aprobados</span><b id="audUserApproved" class="text-emerald-600">—</b></div><div class="mini-stat"><span>Pendientes</span><b id="audUserPending" class="text-amber-600">—</b></div><div class="mini-stat"><span>Rechazados</span><b id="audUserRejected" class="text-red-500">—</b></div>
+    </div>
+    <div class="overflow-x-auto"><table class="data-table"><thead><tr><th>Archivo / carpeta</th><th>Ruta</th><th>Hash</th><th>Estado</th><th>Fecha</th></tr></thead><tbody id="adminUserFilesBody"></tbody></table></div>
+  </div>
+</section>
+<section id="view-historial" class="view dv-history-view"><div class="page-title"><div><h2>Historial</h2><p id="dvHistoryDescription">Consulta la actividad de tus archivos y solicitudes.</p></div><button onclick="dvRefreshDashboardInventory('history-manual')" class="secondary-btn"><i class="fa-solid fa-rotate"></i>Actualizar</button></div><div class="filter-bar"><div class="relative flex-1"><i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2"></i><input id="dvHistorySearch" type="search" class="input-modern pl-9 w-full" placeholder="Buscar archivo, usuario u operación..." oninput="DVUI.renderHistory()" aria-label="Buscar en historial"></div></div><div class="dashboard-card"><div class="section-head"><div><h3>Actividad registrada</h3><p>Cargas, movimientos y eliminaciones.</p></div></div><div class="dv-table-scroll"><table class="data-table"><thead><tr><th>Archivo / carpeta</th><th>Usuario</th><th>Operación</th><th>Fecha</th><th>Estado</th></tr></thead><tbody id="dvHistoryBody"><tr><td colspan="5" class="dv-empty-table">Cargando historial...</td></tr></tbody></table></div></div></section></main></div></div></div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div id="dvDecisionModal" class="dv-hidden" role="dialog" aria-modal="true" aria-labelledby="dvDecisionTitle" aria-describedby="dvDecisionMessage">
+  <div class="dv-decision-card" tabindex="-1">
+    <div class="dv-decision-top">
+      <div id="dvDecisionIcon" class="dv-decision-icon info">
+        <i class="fa-solid fa-circle-info"></i>
+      </div>
+      <div class="min-w-0">
+        <h3 id="dvDecisionTitle" class="dv-decision-title">Confirmar acción</h3>
+        <p id="dvDecisionSubtitle" class="dv-decision-subtitle">DataVault DLP</p>
+      </div>
+    </div>
+
+    <div class="dv-decision-body">
+      <div id="dvDecisionMessage" class="dv-decision-message">¿Deseas continuar?</div>
+      <div id="dvDecisionDetail" class="dv-decision-detail"></div>
+    </div>
+
+    <div class="dv-decision-actions">
+      <button type="button" id="dvDecisionCancel" class="dv-decision-btn cancel">
+        <i class="fa-solid fa-xmark"></i>
+        <span class="dv-decision-btn-label">Cancelar</span>
+      </button>
+      <button type="button" id="dvDecisionConfirm" class="dv-decision-btn confirm approve">
+        <i class="fa-solid fa-check"></i>
+        <span>Confirmar</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+
+
+
+
+
+
+
+
+<script src="images/ui/subordinate.js?v=20261005-1"></script><script src="images/ui/app.js?v=20261005-1"></script><script src="images/ui/dashboard.js?v=20261005-1"></script></body>
+</html>
