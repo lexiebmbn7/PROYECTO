@@ -146,9 +146,16 @@
     if (ready) {
       const bytes=inventory.reduce((sum,r)=>sum+Math.max(0,Number(r.tamano_bytes)||0),0);
       setText('dvStorageUsed',typeof formatBytes==='function'?formatBytes(bytes):`${bytes} B`);
-      // Drive's quota is not exposed by the backend; avoid inventing 50 GB.
       $('dvStorageBar').style.width=bytes>0?'100%':'0%';
-      $('dvStorageBar').parentElement.title='Tamaño de los archivos activos registrados; la cuota de Drive no está disponible.';
+      $('dvStorageBar').parentElement.title='Espacio utilizado en Google Drive';
+      setText('dvStorageFree','Libre: consultando…');
+      fetch('/drive/storage',{credentials:'include'}).then(r=>r.ok?r.json():null).then(q=>{
+        if(!q)return;
+        const used=Number(q.used_bytes||q.used||0), free=Number(q.free_bytes||q.free||0), limit=Number(q.limit_bytes||q.limit||0);
+        if(used)setText('dvStorageUsed',`${formatBytes(used)} usados`);
+        if(free)setText('dvStorageFree',`Libre: ${formatBytes(free)}`);
+        if(limit)$('dvStorageBar').style.width=`${Math.min(100,Math.max(0,used/limit*100))}%`;
+      }).catch(()=>setText('dvStorageFree','Libre: no disponible'));
     }
   }
 
@@ -211,7 +218,7 @@
     const q=norm($('dvHistorySearch')?.value);
     const rows=requestRows().filter(r=>!q||norm([r.origin,r.user,r.type,r.dest].join(' ')).includes(q));
     const target=$('dvHistoryBody');if(!target)return;
-    const pageRows=admin()?rows:window.dvSubPage(rows,'history',q,target,renderHistory);
+    const pageRows=window.dvSubPage(rows,'history',q,target,renderHistory);
     target.innerHTML=rows.length?pageRows.map(r=>`<tr><td><span class="dv-document">${fileIcon(r.origin,r.unit?.type==='folder')}<span class="dv-document-label">${esc(r.origin)}</span></span></td><td>${esc(r.user)}</td><td>${esc(r.type)}</td><td>${esc(dateText(r.date))}</td><td>${pill(r.state)}</td></tr>`).join(''):'<tr><td colspan="5" class="dv-empty-table">No hay actividad que coincida con la búsqueda.</td></tr>';
   }
   function renderHome() {

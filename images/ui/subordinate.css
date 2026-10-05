@@ -1,5 +1,5 @@
 /* Only the subordinate interface. Administrator styles remain unchanged. */
-.dv-sub-upload-start,.dv-sub-pagination{display:none}
+.dv-sub-upload-start{display:none}
 body[data-dv-role="subordinado"]{font-size:15px;line-height:1.5}
 body[data-dv-role="subordinado"] #mainArea>main{max-width:none;width:100%;padding:22px 24px}
 body[data-dv-role="subordinado"] #sidebar .nav-item{font-size:15px;min-height:48px;font-weight:600}
@@ -21,6 +21,23 @@ body[data-dv-role="subordinado"] .dv-sub-pagination{display:flex;align-items:cen
 body[data-dv-role="subordinado"] .dv-sub-pagination span{margin-right:auto;font-size:14px}
 body[data-dv-role="subordinado"] .dv-sub-pagination button{padding:9px 16px;border:1px solid #c8d9e7;border-radius:7px;background:#fff;color:#163b57;font-weight:600}
 body[data-dv-role="subordinado"] .dv-sub-pagination button:disabled{opacity:.45}
+
+/* Administrative tables use the same readable scale as Reportes. */
+body[data-dv-role="jefe"] .data-table th,
+body[data-dv-role="jefe"] .data-table td,
+body[data-dv-role="jefe"] .section-head p,
+body[data-dv-role="jefe"] .filter-bar input,
+body[data-dv-role="jefe"] .input-modern { font-size: 13px !important; }
+body[data-dv-role="jefe"] .data-table th { font-weight: 800; }
+body[data-dv-role="jefe"] .data-table td:first-child,
+body[data-dv-role="jefe"] .data-table td b,
+body[data-dv-role="jefe"] .section-head h3 { font-weight: 700; }
+body[data-dv-role="jefe"] .dv-sub-pagination { display:flex; align-items:center; justify-content:flex-end; gap:6px; padding:16px; flex-wrap:wrap; border-top:1px solid #e2ebf3; }
+body[data-dv-role="jefe"] .dv-sub-pagination span { margin-right:auto; font-size:13px; color:#71869b; }
+body[data-dv-role="jefe"] .dv-sub-pagination button { min-width:34px; height:34px; padding:0 10px; border:1px solid #c8d9e7; border-radius:7px; background:#fff; color:#163b57; font-weight:700; }
+body[data-dv-role="jefe"] .dv-sub-pagination button:hover,
+body[data-dv-role="jefe"] .dv-sub-pagination button.is-active { background:#0878ed; border-color:#0878ed; color:#fff; }
+body[data-dv-role="jefe"] .dv-sub-pagination button:disabled { opacity:.45; }
 body[data-dv-role="subordinado"].dv-upload-mode :is(.file-explorer-panel,.file-content-head,#dropZone,.file-content-footer){display:none!important}
 body[data-dv-role="subordinado"].dv-upload-mode .file-content-panel{width:100%;grid-column:1/-1;padding:24px;min-height:calc(100dvh - 230px)}
 body[data-dv-role="subordinado"].dv-upload-mode .dv-sub-upload-start{display:block;padding:28px;border:2px dashed #b6d5ef;border-radius:12px;background:#f5faff;margin-bottom:20px}

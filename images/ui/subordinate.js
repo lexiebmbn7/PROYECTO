@@ -1,4 +1,4 @@
-/* Pagination works on filtered data, never on the administrator's groups. */
+/* Pagination shared by administrator and subordinate tables. */
 (() => {
   const pages = new Map();
   window.dvSubPage = (rows, key, filter, tbody, render) => {
@@ -20,14 +20,26 @@
     nav.replaceChildren();
     const label = document.createElement('span');
     label.setAttribute('aria-live', 'polite');
-    label.textContent = `${rows.length ? (state.page - 1) * 10 + 1 : 0}–${Math.min(state.page * 10, rows.length)} de ${rows.length} · Página ${state.page} de ${total}`;
+    label.textContent = `Página ${state.page} de ${total}`;
     nav.append(label);
-    for (const [text, delta, disabled] of [['Anterior', -1, state.page === 1], ['Siguiente', 1, state.page === total]]) {
+    const previous = document.createElement('button');
+    previous.type = 'button'; previous.textContent = '‹'; previous.title = 'Página anterior';
+    previous.disabled = state.page === 1;
+    previous.onclick = () => { state.page -= 1; render(); };
+    nav.append(previous);
+    for (let number = 1; number <= total; number += 1) {
       const button = document.createElement('button');
-      button.type = 'button'; button.textContent = text; button.disabled = disabled;
-      button.onclick = () => { state.page += delta; render(); };
+      button.type = 'button'; button.textContent = String(number);
+      button.className = number === state.page ? 'is-active' : '';
+      button.setAttribute('aria-current', number === state.page ? 'page' : 'false');
+      button.onclick = () => { state.page = number; render(); };
       nav.append(button);
     }
+    const next = document.createElement('button');
+    next.type = 'button'; next.textContent = '›'; next.title = 'Página siguiente';
+    next.disabled = state.page === total;
+    next.onclick = () => { state.page += 1; render(); };
+    nav.append(next);
     return rows.slice((state.page - 1) * 10, state.page * 10);
   };
 })();
