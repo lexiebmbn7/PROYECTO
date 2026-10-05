@@ -218,7 +218,7 @@ body[data-dv-role="subordinado"] .dv-storage-track{display:block}
     <button type="button" onclick="dvOpenHistory()" id="navHistoryDirect" class="nav-item"><i class="fa-solid fa-clock-rotate-left"></i><span>Historial</span></button>
     <span id="adminLabel" hidden></span>
   </nav>
-  <div class="dv-sidebar-bottom"><span class="dv-build-label">Interfaz · 05/10 · revisión 3</span><div class="dv-storage-box"><span>Espacio utilizado</span><div class="dv-storage-track"><i id="dvStorageBar"></i></div><div><b id="dvStorageUsed">—</b><small>En custodia</small></div></div><button onclick="handleLogout()" class="dv-side-logout"><i class="fa-solid fa-right-from-bracket"></i><span>Cerrar sesión</span></button></div>
+  <div class="dv-sidebar-bottom"><span class="dv-build-label">Interfaz · 05/10 · revisión 4</span><div class="dv-storage-box"><span>Espacio utilizado</span><div class="dv-storage-track"><i id="dvStorageBar"></i></div><div><b id="dvStorageUsed">—</b><small>En custodia</small></div></div><button onclick="handleLogout()" class="dv-side-logout"><i class="fa-solid fa-right-from-bracket"></i><span>Cerrar sesión</span></button></div>
 </aside><div id="mainArea" class="dv-main-area"><main class="dv-main-content">
 <!-- INICIO -->
 <section id="view-inicio" class="view active dv-home-view" aria-label="Inicio">
@@ -448,8 +448,9 @@ body[data-dv-role="subordinado"] .dv-storage-track{display:block}
     nav.replaceChildren();
     const label = document.createElement('span');
     label.setAttribute('aria-live', 'polite');
-    label.textContent = `${rows.length ? (state.page - 1) * 10 + 1 : 0}–${Math.min(state.page * 10, rows.length)} de ${rows.length} · Página ${state.page} de ${total}`;
-    nav.append(label);
+    label.textContent = `${rows.length} registros`;
+    // Page buttons are the only visible pagination controls.
+    nav.setAttribute('aria-label', `${rows.length} registros, ${total} páginas`);
     for (let pageNumber = 1; pageNumber <= total; pageNumber++) {
       const button = document.createElement('button');
       button.type = 'button'; button.textContent = String(pageNumber); button.setAttribute('aria-label', 'Página ' + pageNumber); if(pageNumber === state.page) button.setAttribute('aria-current','page');
@@ -2375,7 +2376,7 @@ function dvRenderDynamicFolders(){
 renderFilesTable = function(rows){
   const body=document.getElementById('filesTableBody');if(!body)return;
   const units=dvGroupedUnits(rows||[]);const count=document.getElementById('fileCountLabel');if(count)count.textContent=`${units.length} unidad${units.length===1?'':'es'} visuales · ${(rows||[]).length} archivo(s) auditados`;
-  const visibleUnits=isAdmin()?units:window.dvSubPage(units,'files',String(dvExplorerFolder)+'|'+(document.getElementById('fileSearch')?.value||''),body,filterFiles);
+  
     if(!units.length){body.innerHTML='<tr><td colspan="5" class="p-8 text-center text-slate-400">No hay archivos registrados.</td></tr>';return;}
   body.innerHTML=units.map(u=>u.type==='folder'?dvFolderRows(u.rows,u.id):dvLooseRow(u.row)).join('');
 };
@@ -3434,6 +3435,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     ensureTableHeader();
     const body=document.getElementById('filesTableBody');if(!body)return;
     const units=dvGroupedUnits(rows||[]);const count=document.getElementById('fileCountLabel');if(count)count.textContent=`${units.length} unidad${units.length===1?'':'es'} visuales · ${(rows||[]).length} archivo(s)`;
+    const visibleUnits=isAdmin()?units:window.dvSubPage(units,'files',String(dvExplorerFolder)+'|'+(document.getElementById('fileSearch')?.value||''),body,filterFiles);
     if(!units.length){body.innerHTML='<tr><td colspan="6" class="p-8 text-center text-slate-400">No hay archivos registrados.</td></tr>';return;}
     body.innerHTML=visibleUnits.map(u=>u.type==='folder'?opsFolderRows(u.rows,u.id):opsLooseRow(u.row)).join('');
   };
@@ -4690,11 +4692,7 @@ window.addEventListener('DOMContentLoaded',()=>{
   }
 
   async function fetchDashboardData(){
-    const auditReq = supabaseClient
-      .from('auditoria_custodia')
-      .select('*')
-      .order('fecha_solicitud', {ascending:false})
-      .limit(2000);
+    const auditReq = dvFetchAllAudit();
 
     const opsReq = (async()=>{
       try{
@@ -5765,12 +5763,12 @@ window.dvLoadDriveQuota=async function(){
  box.querySelector(':scope > span').textContent='Almacenamiento de Google';
  const value=document.getElementById('dvStorageUsed'),bar=document.getElementById('dvStorageBar'),detail=box.querySelector('small');
  value.textContent='Consultando…';
- try{const response=await fetch('/drive/storage',{headers:await authHeaders(false)});if(!response.ok)throw Error('quota');const q=await response.json();
+ try{const response=await fetch('/drive/storage',{headers:await authHeaders(false)});const q=await response.json();if(!response.ok)throw Error(typeof q.detail==='string'?q.detail:(q.detail?.message||q.detail?.mensaje||'No se pudo consultar la cuota.'));
  if(document.body.dataset.dvRole!=='subordinado')return;
  value.textContent=q.limit_bytes===null?'Capacidad sin límite informado':formatBytes(q.free_bytes)+' libres de '+formatBytes(q.limit_bytes);
  detail.textContent='Uso total: '+formatBytes(q.used_bytes)+' · En Drive: '+formatBytes(q.drive_bytes);
  bar.style.width=q.limit_bytes>0?Math.min(100,q.used_bytes/q.limit_bytes*100)+'%':'0%';bar.parentElement.title='Cuota de la cuenta u organización conectada. Uso total de los servicios de Google.';loaded=Date.now();
- }catch(error){value.textContent='Espacio no disponible';detail.textContent='No se pudo consultar la cuota de Google.';bar.style.width='0%';}finally{busy=false;}
+ }catch(error){value.textContent='Espacio no disponible';detail.textContent=error.message;loaded=Date.now();bar.style.width='0%';}finally{busy=false;}
 };
 window.addEventListener('dv:dashboard-data',()=>{if(document.body.dataset.dvRole==='subordinado')void dvLoadDriveQuota()});
 function labels(){document.querySelectorAll('.data-table').forEach(table=>{const heads=[...table.querySelectorAll('thead th')].map(x=>x.textContent.trim());table.querySelectorAll('tbody tr').forEach(row=>[...row.children].forEach((cell,i)=>{const label=heads[i]||'';if(cell.dataset.column!==label)cell.dataset.column=label;}));});}
