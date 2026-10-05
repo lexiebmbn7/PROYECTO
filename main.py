@@ -8345,6 +8345,21 @@ def descargar_reporte_excel(
     )
 
 
+def mensaje_error_consulta_drive(error):
+    # Classify errors without returning tokens, raw responses or credentials.
+    text = str(error).lower()
+    status = getattr(getattr(error, "resp", None), "status", None)
+    if "invalid_grant" in text or "invalid_client" in text or status == 401:
+        return "La autorización de Google Drive venció o fue revocada. El administrador debe renovar la conexión de Google."
+    if status == 403:
+        return "Google Drive denegó la consulta. El administrador debe revisar permisos y cuota de la API."
+    if status == 404:
+        return "La carpeta configurada no existe o la cuenta conectada no tiene acceso."
+    if "timeout" in text or "timed out" in text:
+        return "Google Drive tardó demasiado en responder. Vuelve a intentar la consulta."
+    return "No se pudo consultar Google Drive. Revisa los registros del servidor para identificar la causa."
+
+
 @app.get("/drive/storage")
 def almacenamiento_drive(request: Request):
     obtener_usuario_supabase_desde_request(request)
@@ -8357,8 +8372,8 @@ def almacenamiento_drive(request: Request):
         return {"limit_bytes": limit, "used_bytes": used,
                 "free_bytes": max(0, limit-used) if limit is not None else None,
                 "drive_bytes": int(quota.get("usageInDrive", 0))}
-    except Exception:
-        raise HTTPException(status_code=502, detail="No se pudo consultar el almacenamiento de Google.")
+    except Exception as error:
+        raise HTTPException(status_code=502, detail=mensaje_error_consulta_drive(error))
 
 
 @app.get("/drive/browse")
@@ -8393,7 +8408,7 @@ def navegar_drive(
         raise error_api(
             502,
             "DRIVE_BROWSE_FAILED",
-            "No se pudo consultar la carpeta de Google Drive.",
+            mensaje_error_consulta_drive(error),
         )
 
 
