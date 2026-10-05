@@ -1,9 +1,48 @@
 /* =========================================================
-   ESTILOS COMPARTIDOS: ADMINISTRADOR Y SUBORDINADO
+   DATAVAULT DLP
+   Administrador + subordinado + login
+   Tema: gris grafito y azul
+   ========================================================= */
+
+:root {
+  --dv-theme-graphite: #252c34;
+  --dv-theme-graphite-dark: #1d252d;
+  --dv-theme-blue: #1677d2;
+  --dv-theme-blue-hover: #1065b7;
+  --dv-theme-background: #f2f3f5;
+  --dv-theme-card: #ffffff;
+  --dv-theme-border: #dfe5eb;
+  --dv-theme-text: #243447;
+  --dv-theme-muted: #718096;
+
+  --bg: #f2f3f5;
+  --navy: #252c34;
+  --navy2: #1d252d;
+  --line: #dfe5eb;
+  --muted: #718096;
+  --dv-blue: #1677d2;
+  --dv-text: #243447;
+  --dv-border: #dfe5eb;
+}
+
+/* =========================================================
+   BASE Y DISTRIBUCIÓN
    ========================================================= */
 
 .dv-sub-upload-start {
   display: none;
+}
+
+body {
+  background: var(--dv-theme-background);
+  color: var(--dv-theme-text);
+}
+
+body #appSection,
+body #appBody,
+body #mainArea {
+  background: var(--dv-theme-background) !important;
+  color: var(--dv-theme-text);
 }
 
 body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) {
@@ -17,14 +56,234 @@ body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) #mainArea > main {
   padding: 22px 24px;
 }
 
-/* Menú lateral */
-body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) #sidebar .nav-item {
-  font-size: 15px !important;
-  min-height: 48px;
-  font-weight: 600 !important;
+/* =========================================================
+   MENÚ LATERAL
+   ========================================================= */
+
+body #sidebar.dv-app-sidebar {
+  background: linear-gradient(
+    165deg,
+    var(--dv-theme-graphite),
+    var(--dv-theme-graphite-dark)
+  ) !important;
+
+  border-right: 1px solid rgba(255, 255, 255, 0.06) !important;
+  color: #f4f6f8 !important;
 }
 
-/* Tablas y explorador */
+body #sidebar .nav-item {
+  min-height: 48px;
+  background: transparent !important;
+  color: #dce3eb !important;
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  box-shadow: none !important;
+}
+
+body #sidebar .nav-item > i,
+body #sidebar .nav-item > .dv-svg-icon {
+  color: #dce3eb !important;
+}
+
+body #sidebar .nav-item:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #ffffff !important;
+}
+
+body #sidebar .nav-item.active {
+  background: linear-gradient(
+    100deg,
+    #1684ed,
+    #096bd7
+  ) !important;
+
+  color: #ffffff !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+}
+
+body #sidebar .nav-item.active > i,
+body #sidebar .nav-item.active > .dv-svg-icon {
+  color: #ffffff !important;
+}
+
+body #sidebar .dv-brand-copy {
+  color: #ffffff !important;
+}
+
+body #sidebar .dv-sidebar-bottom {
+  border-top: 1px solid rgba(255, 255, 255, 0.09) !important;
+}
+
+body #sidebar .dv-storage-box > span,
+body #sidebar .dv-storage-box b {
+  color: #e5ebf2 !important;
+  font-size: 14px !important;
+}
+
+body #sidebar .dv-storage-box small {
+  color: #b5c0cc !important;
+  font-size: 12px !important;
+}
+
+body #sidebar .dv-storage-track {
+  background: rgba(255, 255, 255, 0.13) !important;
+}
+
+body #sidebar .dv-storage-track i {
+  background: #3696ef !important;
+}
+
+body #sidebar .dv-side-logout {
+  color: #e0e7ef !important;
+}
+
+body #sidebar .dv-side-logout:hover {
+  color: #ffffff !important;
+}
+
+/* =========================================================
+   BARRA SUPERIOR
+   ========================================================= */
+
+body #topbar.dv-app-topbar {
+  background: linear-gradient(
+    100deg,
+    #303943,
+    #252c34
+  ) !important;
+
+  color: #ffffff !important;
+  box-shadow: 0 2px 10px rgba(25, 35, 45, 0.12) !important;
+}
+
+body #topbar .dv-menu-toggle,
+body #topbar .top-icon-btn {
+  color: #e4eaf1 !important;
+}
+
+body #topbar .dv-top-search {
+  background: #f7f9fb !important;
+  color: #718096 !important;
+}
+
+body #topbar .dv-top-search input {
+  background: transparent !important;
+  color: #243447 !important;
+  font-size: 15px !important;
+}
+
+body #topbar .dv-top-search input::placeholder {
+  color: #7e8da0 !important;
+}
+
+body #topbar .dv-top-search:focus-within {
+  outline: 3px solid rgba(54, 150, 239, 0.35) !important;
+}
+
+body #topbar .top-avatar {
+  background: #f2f5f8 !important;
+  color: #29415b !important;
+}
+
+body #topbar .dv-profile-trigger-copy strong {
+  color: #ffffff !important;
+}
+
+body #topbar .dv-profile-trigger-copy > span {
+  color: #c4ced9 !important;
+}
+
+/* =========================================================
+   TARJETAS Y TÍTULOS
+   ========================================================= */
+
+body #mainArea :is(
+  .dashboard-card,
+  .file-content-panel,
+  .dv-home-rail > div
+) {
+  background: var(--dv-theme-card) !important;
+  border-color: var(--dv-theme-border) !important;
+  box-shadow: 0 2px 7px rgba(36, 52, 71, 0.035) !important;
+}
+
+body #mainArea .file-explorer-panel {
+  background: #f7f8fa !important;
+  border-color: var(--dv-theme-border) !important;
+}
+
+body #mainArea :is(
+  .page-title h2,
+  .section-head h3,
+  .metric-value
+) {
+  color: #243447 !important;
+}
+
+body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) .section-head h3 {
+  font-size: 18px !important;
+  font-weight: 700 !important;
+  line-height: 1.4 !important;
+}
+
+body #mainArea .metric-label {
+  color: #354b63 !important;
+}
+
+body #mainArea :is(
+  .page-title p,
+  .section-head p,
+  .metric-trend
+) {
+  color: var(--dv-theme-muted) !important;
+}
+
+/* =========================================================
+   BANNER DE BIENVENIDA
+   Conserva la fotografía del estilo base.
+   ========================================================= */
+
+body #mainArea .dv-home-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background-color: #24445f !important;
+}
+
+body #mainArea .dv-home-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+
+  background: linear-gradient(
+    100deg,
+    rgba(29, 37, 45, 0.88) 0%,
+    rgba(35, 65, 93, 0.65) 48%,
+    rgba(22, 119, 210, 0.08) 100%
+  ) !important;
+}
+
+body #mainArea .dv-home-hero > * {
+  position: relative;
+  z-index: 1;
+}
+
+body #mainArea .dv-home-hero :is(h1, h2, h3) {
+  color: #ffffff !important;
+}
+
+body #mainArea .dv-home-hero p {
+  color: #edf3fa !important;
+  font-size: 15px !important;
+  line-height: 1.5 !important;
+}
+
+/* =========================================================
+   TIPOGRAFÍA DE TABLAS Y EXPLORADOR
+   ========================================================= */
+
 body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) :is(
   .data-table td,
   .data-table td p,
@@ -67,7 +326,6 @@ body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) :is(
   padding: 15px 12px !important;
 }
 
-/* Texto secundario */
 body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) :is(
   .data-table td .status-pill,
   .dv-state-pill,
@@ -83,27 +341,40 @@ body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) :is(
   line-height: 1.5 !important;
 }
 
-/* Buscadores, campos y descripciones */
+body #mainArea .data-table thead,
+body #mainArea .data-table th {
+  background: #f0f3f6 !important;
+  color: #52657b !important;
+}
+
+body #mainArea .data-table td {
+  color: #60738a;
+  border-color: #e9edf2 !important;
+}
+
+body #mainArea .data-table td:first-child {
+  color: #283e55 !important;
+}
+
+body #mainArea .data-table tbody tr:hover > td {
+  background-color: #f7f9fc !important;
+}
+
+/* =========================================================
+   CAMPOS Y BOTONES
+   ========================================================= */
+
 body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) :is(
   .input-modern,
   .filter-bar input,
   .filter-bar select,
   .explorer-search input,
-  .dv-top-search input,
-  .page-title p,
-  .dv-home-hero p
+  .page-title p
 ) {
   font-size: 15px !important;
   line-height: 1.5 !important;
 }
 
-body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) .section-head h3 {
-  font-size: 18px !important;
-  font-weight: 700 !important;
-  line-height: 1.4 !important;
-}
-
-/* Botones */
 body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) :is(
   .primary-btn,
   .secondary-btn,
@@ -129,30 +400,52 @@ body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) :is(
   font-size: 14px !important;
 }
 
-/* Almacenamiento */
-body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) .dv-storage-box :is(
-  span,
-  b
-) {
-  font-size: 14px !important;
+body #mainArea .primary-btn {
+  background: var(--dv-theme-blue) !important;
+  border-color: var(--dv-theme-blue) !important;
+  color: #ffffff !important;
 }
 
-body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) .dv-storage-box small {
-  font-size: 12px !important;
+body #mainArea .primary-btn:hover {
+  background: var(--dv-theme-blue-hover) !important;
+  border-color: var(--dv-theme-blue-hover) !important;
 }
 
+body #mainArea .secondary-btn {
+  background: #ffffff !important;
+  border-color: #d8e1e9 !important;
+  color: #36516c !important;
+}
+
+body #mainArea .secondary-btn:hover {
+  background: #edf4fb !important;
+  border-color: #b8d2eb !important;
+}
+
+body #mainArea .input-modern {
+  background: #ffffff !important;
+  border-color: #d8e1e9 !important;
+  color: #243447 !important;
+}
+
+body #mainArea .input-modern:focus {
+  border-color: var(--dv-theme-blue) !important;
+  box-shadow: 0 0 0 3px rgba(22, 119, 210, 0.12) !important;
+}
 
 /* =========================================================
    APROBACIONES DEL ADMINISTRADOR
    ========================================================= */
 
 body[data-dv-role="jefe"] .dv-approval-user-main strong {
+  color: #283e55 !important;
   font-size: 14px !important;
   font-weight: 700 !important;
   line-height: 1.5 !important;
 }
 
 body[data-dv-role="jefe"] .dv-approval-user-main small {
+  color: #718096 !important;
   font-size: 13px !important;
   line-height: 1.5 !important;
 }
@@ -169,13 +462,14 @@ body[data-dv-role="jefe"] :is(
 
 body[data-dv-role="jefe"] .dv-approval-user-summary td {
   padding: 15px 12px !important;
+  background: #f4f6f8 !important;
+  border-color: #dfe5eb !important;
 }
 
 body[data-dv-role="jefe"] .dv-approval-user-toggle {
   gap: 10px;
   font-size: 14px !important;
 }
-
 
 /* =========================================================
    REGLAS DLP
@@ -232,13 +526,17 @@ body[data-dv-role="jefe"] #dlpRulesContainer table {
 body[data-dv-role="jefe"] #dlpRulesContainer :is(th, td) {
   padding: 15px 12px !important;
   vertical-align: middle;
+  border-color: #e9edf2 !important;
 }
 
 body[data-dv-role="jefe"] #dlpRulesContainer th {
+  background: #f0f3f6 !important;
+  color: #52657b !important;
   font-weight: 700 !important;
 }
 
 body[data-dv-role="jefe"] #dlpRulesContainer td:first-child {
+  color: #283e55 !important;
   font-weight: 600 !important;
 }
 
@@ -277,10 +575,9 @@ body[data-dv-role="jefe"] #view-reglas .info-strip strong {
   font-weight: 700 !important;
 }
 
-
 /* =========================================================
-   APARIENCIA DE LA PAGINACIÓN
-   La lógica de 10 registros se conserva en JavaScript.
+   PAGINACIÓN: ESTILOS
+   La cantidad de registros depende del JavaScript.
    ========================================================= */
 
 body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) .dv-sub-pagination {
@@ -295,7 +592,7 @@ body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) .dv-sub-pagination 
 
 body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) .dv-sub-pagination span {
   margin-right: auto;
-  color: #71869b;
+  color: #718096;
   font-size: 14px !important;
 }
 
@@ -303,10 +600,10 @@ body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) .dv-sub-pagination 
   min-width: 38px;
   min-height: 38px;
   padding: 8px 12px;
-  border: 1px solid #c8d9e7;
+  border: 1px solid #d8e1e9;
   border-radius: 7px;
-  background: #fff;
-  color: #163b57;
+  background: #ffffff;
+  color: #36516c;
   font-size: 14px !important;
   font-weight: 600;
   cursor: pointer;
@@ -315,16 +612,15 @@ body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) .dv-sub-pagination 
 body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) .dv-sub-pagination button:not(:disabled):hover,
 body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) .dv-sub-pagination button.is-active,
 body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) .dv-sub-pagination button[aria-current="page"] {
-  border-color: #0878ed;
-  background: #0878ed;
-  color: #fff;
+  background: var(--dv-theme-blue) !important;
+  border-color: var(--dv-theme-blue) !important;
+  color: #ffffff !important;
 }
 
 body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) .dv-sub-pagination button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
-
 
 /* =========================================================
    DISTRIBUCIÓN PROPIA DEL SUBORDINADO
@@ -403,9 +699,8 @@ body[data-dv-role="subordinado"].dv-trash-mode .file-content-panel {
   grid-column: 1 / -1;
 }
 
-
 /* =========================================================
-   LOGIN: PANEL GRIS Y FORMULARIO
+   LOGIN: DISTRIBUCIÓN Y PALETA
    ========================================================= */
 
 #loginSection.login-shell {
@@ -413,11 +708,11 @@ body[data-dv-role="subordinado"].dv-trash-mode .file-content-panel {
   padding: 24px;
   background:
     radial-gradient(
-      circle at 15% 10%,
-      rgba(108, 134, 152, 0.18),
-      transparent 30%
+      circle at 15% 15%,
+      rgba(22, 119, 210, 0.07),
+      transparent 40%
     ),
-    linear-gradient(135deg, #eef3f6, #f8fafb);
+    linear-gradient(135deg, #eceff2, #f7f8fa) !important;
 }
 
 #loginSection .login-card {
@@ -428,13 +723,13 @@ body[data-dv-role="subordinado"].dv-trash-mode .file-content-panel {
   min-height: 620px !important;
   margin: auto;
   overflow: hidden;
-  border: 1px solid #dde5ea !important;
+  border: 1px solid #dfe5eb !important;
   border-radius: 20px !important;
-  background: #fff;
-  box-shadow: 0 28px 80px rgba(31, 43, 49, 0.14) !important;
+  background: #ffffff !important;
+  box-shadow: 0 24px 70px rgba(37, 44, 52, 0.14) !important;
 }
 
-/* Restaura el panel que estaba oculto por la clase hidden */
+/* Sobrescribe hidden solo en el panel visual del login */
 body #loginSection .login-card > .login-visual {
   display: flex !important;
   position: relative;
@@ -443,13 +738,13 @@ body #loginSection .login-card > .login-visual {
   min-width: 0;
   padding: 44px !important;
   overflow: hidden;
-  color: #fff;
+  color: #ffffff;
   background: linear-gradient(
     145deg,
-    #12212a 0%,
-    #1f2b31 55%,
-    #314854 100%
-  );
+    #252c34 0%,
+    #293642 55%,
+    #244d72 100%
+  ) !important;
 }
 
 #loginSection .login-visual > .relative {
@@ -493,22 +788,22 @@ body #loginSection .login-card > .login-visual {
   pointer-events: none;
   background:
     radial-gradient(
-      circle at 75% 30%,
-      rgba(194, 207, 216, 0.18),
-      transparent 25%
+      circle at 80% 25%,
+      rgba(54, 150, 239, 0.18),
+      transparent 40%
     ),
     linear-gradient(
       180deg,
       transparent 45%,
-      rgba(4, 12, 16, 0.55)
-    );
+      rgba(17, 24, 31, 0.45)
+    ) !important;
 }
 
 #loginSection .login-visual h1 {
+  color: #ffffff !important;
   font-size: clamp(28px, 3vw, 38px) !important;
   font-weight: 800 !important;
   line-height: 1.2 !important;
-  color: #fff !important;
 }
 
 #loginSection .login-visual p.text-sm {
@@ -521,7 +816,7 @@ body #loginSection .login-card > .login-visual {
   align-items: center;
   min-width: 0;
   padding: 44px !important;
-  background: #fff;
+  background: #ffffff !important;
 }
 
 #loginSection .login-form-panel > div {
@@ -530,18 +825,24 @@ body #loginSection .login-card > .login-visual {
   margin-inline: auto;
 }
 
-/* Logo compacto: solo para pantallas pequeñas */
+/* Logo compacto para móviles */
 #loginSection .login-form-panel > div > div:first-child {
   display: none !important;
 }
 
 #loginSection .login-form-panel h2 {
+  color: #252c34 !important;
   font-size: 30px !important;
   font-weight: 800 !important;
   line-height: 1.25 !important;
 }
 
+#loginSection .login-kicker {
+  color: #1677d2 !important;
+}
+
 #loginSection .login-label {
+  color: #34485d !important;
   font-size: 14px !important;
   font-weight: 700 !important;
 }
@@ -550,20 +851,40 @@ body #loginSection .login-card > .login-visual {
   display: flex;
   align-items: center;
   min-height: 50px;
+  border-color: #d8e1e9 !important;
+  background: #ffffff !important;
 }
 
 #loginSection .login-input-wrap input {
   flex: 1;
   width: 100%;
   min-width: 0;
+  color: #243447 !important;
   font-size: 15px !important;
+}
+
+#loginSection .login-input-wrap:focus-within {
+  border-color: #1677d2 !important;
+  box-shadow: 0 0 0 3px rgba(22, 119, 210, 0.12) !important;
 }
 
 #loginSection .login-submit {
   width: 100%;
   min-height: 50px;
+  background: linear-gradient(
+    100deg,
+    #1684ed,
+    #096bd7
+  ) !important;
+  border-color: #1677d2 !important;
+  color: #ffffff !important;
   font-size: 15px !important;
   font-weight: 700 !important;
+}
+
+#loginSection .login-submit:hover {
+  background: #1065b7 !important;
+  border-color: #1065b7 !important;
 }
 
 #loginSection .login-options {
@@ -574,6 +895,9 @@ body #loginSection .login-card > .login-visual {
   gap: 12px;
 }
 
+#loginSection .login-remember input {
+  accent-color: #1677d2;
+}
 
 /* =========================================================
    ADAPTACIÓN A PANTALLAS PEQUEÑAS
