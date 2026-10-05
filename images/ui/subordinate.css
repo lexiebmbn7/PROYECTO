@@ -22,6 +22,23 @@ body[data-dv-role="subordinado"] .dv-sub-pagination span{margin-right:auto;font-
 body[data-dv-role="subordinado"] .dv-sub-pagination button{padding:9px 16px;border:1px solid #c8d9e7;border-radius:7px;background:#fff;color:#163b57;font-weight:600}
 body[data-dv-role="subordinado"] .dv-sub-pagination button:disabled{opacity:.45}
 
+/* Administrator uses the same visual scale as the subordinate interface. */
+body[data-dv-role="jefe"]{font-size:15px;line-height:1.5}
+body[data-dv-role="jefe"] #mainArea>main{max-width:none;width:100%;padding:22px 24px}
+body[data-dv-role="jefe"] #sidebar .nav-item{font-size:15px;min-height:48px;font-weight:600}
+body[data-dv-role="jefe"] .page-title p,
+body[data-dv-role="jefe"] .section-head p{font-size:15px!important}
+body[data-dv-role="jefe"] :is(.data-table td,.data-table td p,.data-table td span,.data-table td div,.data-table td b,.data-table th,.tree-item,.tree-subitem,.tree-folder,.breadcrumb,.dv-rail-copy b,.metric-label){font-size:14px!important;line-height:1.5}
+body[data-dv-role="jefe"] :is(.data-table th,.data-table td:first-child,.section-head h3,.metric-label,.dv-rail-copy b){font-weight:600}
+body[data-dv-role="jefe"] :is(.data-table td,.data-table th){padding:15px 12px}
+body[data-dv-role="jefe"] :is(.data-table td .status-pill,.dv-state-pill,.dv-unit-sub,.metric-trend,.dv-rail-copy span,.section-head p,.file-content-footer,.dv-op-legacy,.dv-op-pending){font-size:13px!important}
+body[data-dv-role="jefe"] :is(.input-modern,.filter-bar input,.explorer-search input,.dv-top-search input){font-size:15px!important}
+body[data-dv-role="jefe"] :is(.primary-btn,.secondary-btn,.dv-drive-toolbar-btn,.dv-op-btn,.dv-request-tabs button){font-size:14px!important;min-height:40px;padding:9px 14px!important;border-radius:7px!important;font-weight:600}
+body[data-dv-role="jefe"] .dv-approval-user-main strong{font-size:14px!important;font-weight:700}
+body[data-dv-role="jefe"] .dv-approval-user-main small{font-size:12px!important}
+body[data-dv-role="jefe"] .dv-approval-chip,
+body[data-dv-role="jefe"] .dv-approval-user-pending{font-size:12px!important;font-weight:700}
+body[data-dv-role="jefe"] .dv-approval-user-summary td{padding:12px!important}
 /* Administrative tables use the same readable scale as Reportes. */
 body[data-dv-role="jefe"] .data-table th,
 body[data-dv-role="jefe"] .data-table td,
