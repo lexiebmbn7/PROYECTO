@@ -211,7 +211,8 @@
     const q=norm($('dvHistorySearch')?.value);
     const rows=requestRows().filter(r=>!q||norm([r.origin,r.user,r.type,r.dest].join(' ')).includes(q));
     const target=$('dvHistoryBody');if(!target)return;
-    target.innerHTML=rows.length?rows.map(r=>`<tr><td><span class="dv-document">${fileIcon(r.origin,r.unit?.type==='folder')}<span class="dv-document-label">${esc(r.origin)}</span></span></td><td>${esc(r.user)}</td><td>${esc(r.type)}</td><td>${esc(dateText(r.date))}</td><td>${pill(r.state)}</td></tr>`).join(''):'<tr><td colspan="5" class="dv-empty-table">No hay actividad que coincida con la búsqueda.</td></tr>';
+    const pageRows=admin()?rows:window.dvSubPage(rows,'history',q,target,renderHistory);
+    target.innerHTML=rows.length?pageRows.map(r=>`<tr><td><span class="dv-document">${fileIcon(r.origin,r.unit?.type==='folder')}<span class="dv-document-label">${esc(r.origin)}</span></span></td><td>${esc(r.user)}</td><td>${esc(r.type)}</td><td>${esc(dateText(r.date))}</td><td>${pill(r.state)}</td></tr>`).join(''):'<tr><td colspan="5" class="dv-empty-table">No hay actividad que coincida con la búsqueda.</td></tr>';
   }
   function renderHome() {
     const requests=requestRows();
@@ -282,6 +283,7 @@
 
   const previousShow=window.showView||showView;
   window.showView=showView=function(name){
+    document.body.classList.remove('dv-upload-mode');
     let target=name==='operaciones'?'gestor':name;
     const allowed=admin()?['inicio','gestor','cola','reglas','reportes','auditoria','usuarios','historial']:['inicio','gestor','cola','historial'];
     if(!allowed.includes(target))target='inicio';
@@ -301,7 +303,7 @@
 
   window.dvOpenHome=()=>showView('inicio');
   window.dvOpenFiles=function(){document.body.classList.remove('dv-trash-mode');showView('gestor');if(typeof selectFileFolder==='function')selectFileFolder('');fileViewTitle();};
-  window.dvOpenUpload=function(){if(admin())return;window.dvOpenFiles();if(typeof dvActivateFileOperation==='function')dvActivateFileOperation('SUBIR');state.activeNav='upload';updateActiveNav();fileViewTitle(false,true);};
+  window.dvOpenUpload=function(){if(admin())return;window.dvOpenFiles();document.body.classList.add('dv-upload-mode');document.getElementById('mainArea')?.scrollTo(0,0);window.scrollTo(0,0);state.activeNav='upload';updateActiveNav();fileViewTitle(false,true);};
   window.dvOpenTrash=function(){document.body.classList.add('dv-trash-mode');showView('gestor');if(typeof selectFileFolder==='function')selectFileFolder('__TRASH__');state.activeNav='trash';updateActiveNav();fileViewTitle(true);};
   window.dvOpenHistory=()=>showView('historial');
   window.dvExactApplyRole=applyRole;

@@ -2938,7 +2938,8 @@ window.addEventListener('DOMContentLoaded',()=>{
       const label=String(pending.tipo_operacion||'').toUpperCase()==='MOVER'?'Movimiento pendiente':'Eliminación pendiente';
       return `<span class="dv-op-pending"><i class="fa-solid fa-clock"></i>${escapeHtml(label)}</span>`;
     }
-    if(!approved) return '<span class="dv-op-legacy">Disponible al aprobar</span>';
+    if(rows.some(deleted)) return '<span class="dv-op-legacy">Eliminación aprobada</span>';
+    if(!approved) return '<span class="dv-op-legacy">'+(rows.some(r=>String(r.estado).toUpperCase()==='RECHAZADO')?'Solicitud rechazada':'Pendiente de aprobación')+'</span>';
     if(!linked) return '<span class="dv-op-legacy" title="Registro histórico sin ID de Drive">Sin vínculo Drive</span>';
     const safe=escapeHtml(String(id));
     return `<div class="dv-op-actions"><button type="button" class="dv-op-btn" title="Mover" aria-label="Mover" onclick="event.stopPropagation();dvRequestMove('${kind}','${safe}')"><i class="fa-solid fa-folder-tree"></i><span>Mover</span></button><button type="button" class="dv-op-btn delete" title="Eliminar" aria-label="Eliminar" onclick="event.stopPropagation();dvRequestDelete('${kind}','${safe}')"><i class="fa-solid fa-trash-can"></i><span>Eliminar</span></button></div>`;
@@ -3677,7 +3678,8 @@ window.addEventListener('DOMContentLoaded',()=>{
       }
       tbody.innerHTML=html.length?html.join(''):'<tr><td colspan="8" class="p-8 text-center text-slate-400">No se encontraron solicitudes.</td></tr>';
     }else{
-      tbody.innerHTML=filtered.length?filtered.map(r=>renderDetailRow(r)).join(''):'<tr><td colspan="8" class="p-8 text-center text-slate-400">No se encontraron solicitudes.</td></tr>';
+      const pageRows=window.dvSubPage(filtered,'requests',q+'|'+stateFilter,tbody,renderUnifiedRequests);
+      tbody.innerHTML=filtered.length?pageRows.map(r=>renderDetailRow(r)).join(''):'<tr><td colspan="8" class="p-8 text-center text-slate-400">No se encontraron solicitudes.</td></tr>';
     }
 
     window.dispatchEvent(new CustomEvent('dv:requests-data', {detail: {requests: rows}}));
