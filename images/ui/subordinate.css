@@ -24,7 +24,7 @@ body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) #sidebar .nav-item 
   font-weight: 600 !important;
 }
 
-/* Texto de tablas y explorador */
+/* Tablas y explorador */
 body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) :is(
   .data-table td,
   .data-table td p,
@@ -44,7 +44,6 @@ body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) :is(
   line-height: 1.5 !important;
 }
 
-/* Negritas */
 body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) :is(
   .data-table th,
   .data-table td:first-child,
@@ -61,7 +60,6 @@ body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) :is(
   font-weight: 700 !important;
 }
 
-/* Espaciado de filas */
 body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) :is(
   .data-table td,
   .data-table th
@@ -99,7 +97,6 @@ body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) :is(
   line-height: 1.5 !important;
 }
 
-/* Títulos de paneles */
 body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) .section-head h3 {
   font-size: 18px !important;
   font-weight: 700 !important;
@@ -182,7 +179,6 @@ body[data-dv-role="jefe"] .dv-approval-user-toggle {
 
 /* =========================================================
    REGLAS DLP
-   Esta sección tiene estilos propios.
    ========================================================= */
 
 body[data-dv-role="jefe"] #view-reglas {
@@ -211,7 +207,6 @@ body[data-dv-role="jefe"] #view-reglas .section-head p {
   line-height: 1.5 !important;
 }
 
-/* Incluye textos anidados con tamaños pequeños */
 body[data-dv-role="jefe"] #dlpRulesContainer,
 body[data-dv-role="jefe"] #dlpRulesContainer :is(
   table,
@@ -285,7 +280,7 @@ body[data-dv-role="jefe"] #view-reglas .info-strip strong {
 
 /* =========================================================
    APARIENCIA DE LA PAGINACIÓN
-   La lógica de 10 registros está en JavaScript.
+   La lógica de 10 registros se conserva en JavaScript.
    ========================================================= */
 
 body:is([data-dv-role="subordinado"], [data-dv-role="jefe"]) .dv-sub-pagination {
@@ -410,6 +405,177 @@ body[data-dv-role="subordinado"].dv-trash-mode .file-content-panel {
 
 
 /* =========================================================
+   LOGIN: PANEL GRIS Y FORMULARIO
+   ========================================================= */
+
+#loginSection.login-shell {
+  min-height: 100dvh;
+  padding: 24px;
+  background:
+    radial-gradient(
+      circle at 15% 10%,
+      rgba(108, 134, 152, 0.18),
+      transparent 30%
+    ),
+    linear-gradient(135deg, #eef3f6, #f8fafb);
+}
+
+#loginSection .login-card {
+  display: grid !important;
+  grid-template-columns: 46% 54% !important;
+  width: 100%;
+  max-width: 1120px !important;
+  min-height: 620px !important;
+  margin: auto;
+  overflow: hidden;
+  border: 1px solid #dde5ea !important;
+  border-radius: 20px !important;
+  background: #fff;
+  box-shadow: 0 28px 80px rgba(31, 43, 49, 0.14) !important;
+}
+
+/* Restaura el panel que estaba oculto por la clase hidden */
+body #loginSection .login-card > .login-visual {
+  display: flex !important;
+  position: relative;
+  flex-direction: column;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 44px !important;
+  overflow: hidden;
+  color: #fff;
+  background: linear-gradient(
+    145deg,
+    #12212a 0%,
+    #1f2b31 55%,
+    #314854 100%
+  );
+}
+
+#loginSection .login-visual > .relative {
+  position: relative;
+  z-index: 1;
+}
+
+#loginSection .login-architecture {
+  position: absolute;
+  inset: 0;
+  opacity: 0.35;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      130deg,
+      transparent 0 34%,
+      rgba(255, 255, 255, 0.09) 34.2% 35%,
+      transparent 35.2%
+    ),
+    linear-gradient(
+      90deg,
+      transparent 0 13%,
+      rgba(255, 255, 255, 0.07) 13.2% 13.6%,
+      transparent 13.8% 28%,
+      rgba(255, 255, 255, 0.06) 28.2% 28.6%,
+      transparent 28.8%
+    ),
+    repeating-linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.04) 0 1px,
+      transparent 1px 42px
+    );
+  transform: skewY(-9deg) scale(1.35);
+  transform-origin: center;
+}
+
+#loginSection .login-visual::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      circle at 75% 30%,
+      rgba(194, 207, 216, 0.18),
+      transparent 25%
+    ),
+    linear-gradient(
+      180deg,
+      transparent 45%,
+      rgba(4, 12, 16, 0.55)
+    );
+}
+
+#loginSection .login-visual h1 {
+  font-size: clamp(28px, 3vw, 38px) !important;
+  font-weight: 800 !important;
+  line-height: 1.2 !important;
+  color: #fff !important;
+}
+
+#loginSection .login-visual p.text-sm {
+  font-size: 14px !important;
+  line-height: 1.7 !important;
+}
+
+#loginSection .login-form-panel {
+  display: flex !important;
+  align-items: center;
+  min-width: 0;
+  padding: 44px !important;
+  background: #fff;
+}
+
+#loginSection .login-form-panel > div {
+  width: 100%;
+  max-width: 440px;
+  margin-inline: auto;
+}
+
+/* Logo compacto: solo para pantallas pequeñas */
+#loginSection .login-form-panel > div > div:first-child {
+  display: none !important;
+}
+
+#loginSection .login-form-panel h2 {
+  font-size: 30px !important;
+  font-weight: 800 !important;
+  line-height: 1.25 !important;
+}
+
+#loginSection .login-label {
+  font-size: 14px !important;
+  font-weight: 700 !important;
+}
+
+#loginSection .login-input-wrap {
+  display: flex;
+  align-items: center;
+  min-height: 50px;
+}
+
+#loginSection .login-input-wrap input {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  font-size: 15px !important;
+}
+
+#loginSection .login-submit {
+  width: 100%;
+  min-height: 50px;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+}
+
+#loginSection .login-options {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+
+/* =========================================================
    ADAPTACIÓN A PANTALLAS PEQUEÑAS
    ========================================================= */
 
@@ -427,6 +593,33 @@ body[data-dv-role="subordinado"].dv-trash-mode .file-content-panel {
   body[data-dv-role="subordinado"] .dv-home-rail {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  #loginSection.login-shell {
+    padding: 20px;
+  }
+
+  #loginSection .login-card {
+    grid-template-columns: minmax(0, 1fr) !important;
+    max-width: 520px !important;
+    min-height: auto !important;
+  }
+
+  body #loginSection .login-card > .login-visual {
+    display: none !important;
+  }
+
+  #loginSection .login-form-panel {
+    padding: 32px !important;
+  }
+
+  #loginSection .login-form-panel > div > div:first-child {
+    display: flex !important;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 28px;
   }
 }
 
@@ -459,5 +652,19 @@ body[data-dv-role="subordinado"].dv-trash-mode .file-content-panel {
     width: 100%;
     margin-right: 0;
     text-align: center;
+  }
+}
+
+@media (max-width: 480px) {
+  #loginSection.login-shell {
+    padding: 12px;
+  }
+
+  #loginSection .login-form-panel {
+    padding: 28px 20px !important;
+  }
+
+  #loginSection .login-form-panel h2 {
+    font-size: 27px !important;
   }
 }
