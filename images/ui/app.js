@@ -2226,6 +2226,8 @@ window.addEventListener('DOMContentLoaded',()=>{
     const st=document.getElementById('solStateFilter')?.value||'';
     let units=groupAuditUnits(isAdmin()?roleAllAudit:roleAllAudit.filter(belongsToMe));
     units=units.filter(u=>{const state=unitStatus(u);const text=norm([unitName(u),u.name,u.email,u.lote_id].join(' '));return(!q||text.includes(q))&&(!st||state===st);});
+    const allFilteredUnits=units;
+    if(isAdmin()) units=window.dvSubPage(units,'adminRequests',q+'|'+st,tbody,renderAuditRequests);
     tbody.innerHTML=units.length?units.map((u,i)=>{
       const state=unitStatus(u),name=unitName(u);
       const actionCell=isAdmin()?`<td>${state==='PENDIENTE'?'<span class="text-xs text-blue-600 font-semibold"><i class="fa-brands fa-telegram mr-1"></i>Resolver en Telegram</span>':'—'}</td>`:'';
@@ -2234,8 +2236,8 @@ window.addEventListener('DOMContentLoaded',()=>{
       <td>${u.lote_id?'Carpeta':'Archivo'}<div class="text-[9px] text-slate-400">${u.rows.length} archivo(s)</div></td>
       <td>${escapeHtml(name)}</td><td>Google Drive</td><td>${escapeHtml(u.name)}</td><td>${formatShortDate(u.fecha)}</td><td>${statusPill(state)}</td>${actionCell}
     </tr>`}).join(''):`<tr><td colspan="${isAdmin()?8:7}" class="p-8 text-center text-slate-400">No se encontraron solicitudes.</td></tr>`;
-    const pending=units.filter(u=>unitStatus(u)==='PENDIENTE').length;
-    const sum=document.getElementById('solSummary');if(sum)sum.textContent=`${units.length} unidad(es) · ${pending} pendiente(s)`;
+    const pending=allFilteredUnits.filter(u=>unitStatus(u)==='PENDIENTE').length;
+    const sum=document.getElementById('solSummary');if(sum)sum.textContent=`${allFilteredUnits.length} unidad(es) · ${pending} pendiente(s)`;
     const mini=document.getElementById('solPendingMini');if(mini)mini.textContent=pending;
     updateKpis({pendientes:pending});
   }
@@ -2255,7 +2257,13 @@ window.addEventListener('DOMContentLoaded',()=>{
     const rows=isAdmin()?roleAllAudit:roleAllAudit.filter(belongsToMe);
     auditCache=rows;
     const body=document.getElementById('auditTableBody');
-    if(body)body.innerHTML=rows.length?rows.map(r=>`<tr><td>${escapeHtml(r.nombre_archivo||'Sin nombre')}</td><td>${escapeHtml(rowName(r))}</td><td>${escapeHtml(auditFolderName(r))}</td><td class="font-mono text-[9px]" title="${escapeHtml(r.hash_sha256||'')}">${r.hash_sha256?escapeHtml(r.hash_sha256.slice(0,18))+'…':'N/A'}</td><td>${statusPill(r.estado)}</td></tr>`).join(''):'<tr><td colspan="5" class="p-6 text-center text-slate-400">No existen registros.</td></tr>';
+    if(body){
+      const paintAudit=()=>{
+        const pageRows=window.dvSubPage(rows,'audit','',body,paintAudit);
+        body.innerHTML=pageRows.length?pageRows.map(r=>`<tr><td>${escapeHtml(r.nombre_archivo||'Sin nombre')}</td><td>${escapeHtml(rowName(r))}</td><td>${escapeHtml(auditFolderName(r))}</td><td class="font-mono text-[9px]" title="${escapeHtml(r.hash_sha256||'')}">${r.hash_sha256?escapeHtml(r.hash_sha256.slice(0,18))+'…':'N/A'}</td><td>${statusPill(r.estado)}</td></tr>`).join(''):'<tr><td colspan="5" class="p-6 text-center text-slate-400">No existen registros.</td></tr>';
+      };
+      paintAudit();
+    }
     renderRoleRecent(rows);
     loadRoleHome();
     if(document.getElementById('view-gestor')?.classList.contains('active')){populateAdminFileFilter();renderFilesTable(currentAuditRows());}
