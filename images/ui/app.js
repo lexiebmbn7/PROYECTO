@@ -4802,10 +4802,32 @@ window.addEventListener('DOMContentLoaded',()=>{
   const folderPending=new Map();
   const FOLDER_MEMORY_TTL_MS=30000;
   let folderCacheEpoch=0;
+  let rootWarmupKey='';
+  // Solo precargamos la primera capa de cada carpeta autorizada, con dos
+  // peticiones simultáneas como máximo. No rastrea recursivamente Drive.
+  function warmAssignedFolders(data,userId){
+    if(currentRole==='jefe' || !userId)return;
+    const roots=(Array.isArray(data?.folders)?data.folders:[])
+      .map(f=>String(f?.id||'').trim()).filter(id=>id && id!=='root').slice(0,5);
+    const signature=userId+':'+roots.join('|');
+    if(rootWarmupKey===signature)return;
+    rootWarmupKey=signature;
+    const epoch=folderCacheEpoch;
+    let next=0;
+    async function worker(){
+      while(next<roots.length && epoch===folderCacheEpoch && activeUserId()===userId){
+        const id=roots[next++];
+        try{await fetchFolder(id,false);}catch(_){ /* sin bloquear login ni selector */ }
+      }
+    }
+    // La pantalla presenta "Mis carpetas" primero; la precarga es paralela.
+    Promise.resolve().then(()=>Promise.all([worker(),worker()])).catch(()=>{});
+  }
   function activeUserId(){return String(currentUser?.id||'');}
   function cacheKey(userId,id,files){return `${userId}:${files?'files':'folders'}:${id}`;}
   function clearFolderMemory(){
     folderCacheEpoch++;
+    rootWarmupKey='';
     folderMemory.clear();
     folderPending.clear();
     for(const ctx of Object.values(contexts)){
@@ -4839,6 +4861,7 @@ window.addEventListener('DOMContentLoaded',()=>{
       // resultados de una consulta desplazada por una actualización forzada.
       if(epoch===folderCacheEpoch && activeUserId()===userId && folderPending.get(key)===request){
         folderMemory.set(key,{data,expiresAt:Date.now()+FOLDER_MEMORY_TTL_MS});
+        if(id==='root' && !includeFiles && !force)warmAssignedFolders(data,userId);
       }
       return data;
     })();
@@ -5136,6 +5159,19 @@ window.addEventListener('DOMContentLoaded',()=>{
   }
 
   document.addEventListener('click',handleBrowseClick);
+  let browseHoverTimer=null;
+  document.addEventListener('pointerover',event=>{
+    if(currentRole==='jefe' || event.pointerType==='touch')return;
+    const button=event.target.closest?.('[data-dv-browse-kind="folder"][data-dv-folder-id]');
+    if(!button || !button.closest('#dvUploadDestinationList,#dvMoveFolderList'))return;
+    clearTimeout(browseHoverTimer);
+    const id=String(button.dataset.dvFolderId||'');
+    const uid=activeUserId();
+    if(!uid || !id || folderMemory.has(cacheKey(uid,id,false)) || folderPending.has(cacheKey(uid,id,false)))return;
+    browseHoverTimer=setTimeout(()=>{
+      if(uid===activeUserId())fetchFolder(id,false).catch(()=>{});
+    },180);
+  },true);
 
   // API pública para drag & drop y futuras vistas. No expone ni maneja la caché interna.
   window.DVDriveBrowser={
