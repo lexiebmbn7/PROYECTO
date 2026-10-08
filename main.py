@@ -5,6 +5,7 @@ import io
 import mimetypes
 import os
 import threading
+import time
 import base64
 import httpx
 from datetime import datetime, timezone, timedelta
@@ -1579,6 +1580,45 @@ def obtener_archivo_drive(service, file_id: str):
     )
 
 
+
+# Caché efímera de navegación (NO de autorizaciones): evita lecturas de Supabase
+# y consultas get repetidas a Google Drive al entrar a carpetas vacías.
+# Los permisos se verifican en Supabase en CADA petición de subordinado.
+_DRIVE_BROWSE_MEMO = {}
+_DRIVE_BROWSE_MEMO_LOCK = threading.RLock()
+_DRIVE_BROWSE_MEMO_TTL = 45  # segundos
+_DRIVE_BROWSE_MEMO_MAX = 1200
+
+
+def _drive_browse_memo_get(key):
+    with _DRIVE_BROWSE_MEMO_LOCK:
+        entry = _DRIVE_BROWSE_MEMO.get(key)
+        if entry is None:
+            return None
+        expires_at, payload = entry
+        if expires_at <= time.monotonic():
+            _DRIVE_BROWSE_MEMO.pop(key, None)
+            return None
+        return payload
+
+
+def _drive_browse_memo_set(key, payload):
+    with _DRIVE_BROWSE_MEMO_LOCK:
+        if len(_DRIVE_BROWSE_MEMO) >= _DRIVE_BROWSE_MEMO_MAX:
+            now = time.monotonic()
+            for old_key, (expiry, _) in list(_DRIVE_BROWSE_MEMO.items()):
+                if expiry <= now:
+                    _DRIVE_BROWSE_MEMO.pop(old_key, None)
+            if len(_DRIVE_BROWSE_MEMO) >= _DRIVE_BROWSE_MEMO_MAX:
+                _DRIVE_BROWSE_MEMO.pop(next(iter(_DRIVE_BROWSE_MEMO)), None)
+        _DRIVE_BROWSE_MEMO[key] = (time.monotonic() + _DRIVE_BROWSE_MEMO_TTL, payload)
+
+
+def _drive_browse_memo_clear():
+    with _DRIVE_BROWSE_MEMO_LOCK:
+        _DRIVE_BROWSE_MEMO.clear()
+
+
 def _cache_drive_get(cache_key: str):
     try:
         respuesta = (
@@ -1640,6 +1680,7 @@ def _cache_drive_set(cache_key: str, payload):
 
 def invalidar_cache_drive():
     """Invalida navegación después de subir, mover o eliminar."""
+    _drive_browse_memo_clear()
     try:
         (
             supabase_admin
@@ -1734,7 +1775,7 @@ def _mi_raiz_virtual() -> dict:
     }
 
 
-def resolver_ruta_drive_usuario(folder_id: str, usuario: dict) -> dict:
+def resolver_ruta_drive_usuario(folder_id: str, usuario: dict, permisos: list | None = None) -> dict:
     """Restringe el recorrido a una carpeta asignada y sus descendientes.
 
     Nunca incluye el ROOT real ni sus ancestros en el breadcrumb del usuario.
@@ -1742,13 +1783,27 @@ def resolver_ruta_drive_usuario(folder_id: str, usuario: dict) -> dict:
     """
     if usuario.get("rol") == "jefe":
         return resolver_ruta_drive(folder_id)
-    permisos = obtener_carpetas_autorizadas(usuario["id"])
+    if permisos is None:
+        permisos = obtener_carpetas_autorizadas(usuario["id"])
     if not folder_id or str(folder_id) == "root":
         return _mi_raiz_virtual()
     permitidos = {str(f.get("id") or "") for f in permisos}
     actual_id = str(folder_id).strip()
     if not permitidos:
         raise error_api(403, "DRIVE_ACCESS_DENIED", "No tienes carpetas de Drive autorizadas.")
+    # Las raíces fueron verificadas al asignarlas por el administrador. Para
+    # listarlas NO hace falta pedir su metadata otra vez a Google en cada clic.
+    if actual_id in permitidos:
+        asignada = next(f for f in permisos if str(f.get("id")) == actual_id)
+        nombre = str(asignada.get("name") or "Carpeta")
+        raiz = _mi_raiz_virtual()
+        breadcrumb = [raiz["breadcrumb"][0], {"id": actual_id, "name": nombre}]
+        return {
+            "id": actual_id, "name": nombre, "parent_id": "root",
+            "path": f"Mis carpetas / {nombre}", "depth": 1,
+            "ancestors": [], "breadcrumb": breadcrumb,
+            "root": False, "selectable": True,
+        }
     service = obtener_servicio_google_drive()
     cadena, visitados = [], set()
     for _ in range(80):
@@ -1756,13 +1811,23 @@ def resolver_ruta_drive_usuario(folder_id: str, usuario: dict) -> dict:
             break
         visitados.add(actual_id)
         # Se consulta el árbol real, pero solo se devuelve el tramo permitido.
-        try:
-            meta = service.files().get(
-                fileId=actual_id, fields="id,name,mimeType,parents,trashed",
-                supportsAllDrives=True,
-            ).execute(num_retries=GOOGLE_API_RETRIES)
-        except Exception as exc:
-            raise error_api(403, "DRIVE_ACCESS_DENIED", "Carpeta no autorizada o inaccesible.") from exc
+        if actual_id in permitidos:
+            # Ya fue comprobada al asignarla: no solicitar su metadata otra vez.
+            item = next(f for f in permisos if str(f.get("id")) == actual_id)
+            meta = {"id": actual_id, "name": item.get("name") or "Carpeta",
+                    "mimeType": "application/vnd.google-apps.folder",
+                    "parents": [], "trashed": False}
+        else:
+            meta = _drive_browse_memo_get(f"folder-meta:{actual_id}")
+            if meta is None:
+                try:
+                    meta = service.files().get(
+                        fileId=actual_id, fields="id,name,mimeType,parents,trashed",
+                        supportsAllDrives=True,
+                    ).execute(num_retries=GOOGLE_API_RETRIES)
+                except Exception as exc:
+                    raise error_api(403, "DRIVE_ACCESS_DENIED", "Carpeta no autorizada o inaccesible.") from exc
+                _drive_browse_memo_set(f"folder-meta:{actual_id}", meta)
         if meta.get("trashed"):
             raise error_api(403, "DRIVE_ACCESS_DENIED", "La carpeta no está disponible.")
         cadena.append(meta)
@@ -1976,17 +2041,25 @@ def listar_hijos_drive(
             "files": [],
         }
 
-    service = obtener_servicio_google_drive()
-    actual = (resolver_ruta_drive_usuario(folder_id, usuario)
-              if usuario else resolver_ruta_drive(folder_id))
+    is_subordinado = bool(usuario and usuario.get("rol") != "jefe")
+    # Una consulta SQL de permisos por visita; nunca cachear la autorización.
+    permisos_vigentes = obtener_carpetas_autorizadas(usuario["id"]) if is_subordinado else None
+    actual = (resolver_ruta_drive_usuario(folder_id, usuario, permisos=permisos_vigentes)
+              if is_subordinado else resolver_ruta_drive(folder_id))
     actual_id = str(actual["id"])
     cache_key = (
-        f"children:{usuario['id'] if usuario and usuario.get('rol') != 'jefe' else 'admin'}:{actual_id}:"
+        f"children:{usuario['id'] if is_subordinado else 'admin'}:{actual_id}:"
         f"{'all' if include_files else 'folders'}"
     )
-    cached = _cache_drive_get(cache_key)
+    # En subordinados se usa memoria efímera: evita ir y volver a Supabase
+    # solo para preguntar si hay cero subcarpetas.
+    cached = (_drive_browse_memo_get(cache_key) if is_subordinado
+              else _cache_drive_get(cache_key))
     if cached:
-        return cached
+        # La ruta y los permisos se acabaron de validar, pero la miga puede
+        # cambiar si el administrador cambia el nombre de la carpeta raíz.
+        return {**cached, "current": actual, "breadcrumb": actual.get("breadcrumb") or []}
+    service = obtener_servicio_google_drive()
 
     consulta = f"'{actual_id}' in parents and trashed=false"
     # Para los selectores de destino no descargar metadatos de archivos:
@@ -2057,7 +2130,19 @@ def listar_hijos_drive(
         "files": files,
     }
 
-    _cache_drive_set(cache_key, salida)
+    if is_subordinado:
+        # Los items ya traen nombre, tipo y parent_id; guárdalos para poder
+        # abrirlos sin repetir files.get para reconstruir la ruta.
+        for carpeta in folders:
+            if carpeta.get("id"):
+                _drive_browse_memo_set(f"folder-meta:{carpeta['id']}", {
+                    "id": carpeta["id"], "name": carpeta["name"],
+                    "mimeType": "application/vnd.google-apps.folder",
+                    "parents": [actual_id], "trashed": False,
+                })
+        _drive_browse_memo_set(cache_key, salida)
+    else:
+        _cache_drive_set(cache_key, salida)
     return salida
 
 
@@ -7283,6 +7368,7 @@ async def admin_guardar_carpetas_usuario(user_id: str, request: Request):
     if confirmadas != guardadas:
         raise error_api(503, "DRIVE_ACL_SAVE_FAILED",
                         "Las carpetas no quedaron guardadas como se solicitaron. Reintenta.")
+    _drive_browse_memo_clear()
     registrar_evento_auditoria(
         evento="PERMISOS_DRIVE_ACTUALIZADOS", categoria="USUARIOS",
         actor=admin, accion="CAMBIAR_CARPETAS", objeto_tipo="USUARIO", objeto_id=user_id,
