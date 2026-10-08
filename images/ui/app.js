@@ -3136,30 +3136,36 @@ window.addEventListener('DOMContentLoaded',()=>{
     return `<tr class="dv-folder-summary${dvCanDragMove('CARPETA',loteId,rows)?' dv-draggable-row':''}" ${dvDragAttrs('CARPETA',loteId,rows)} ${dropAttrs}><td><button class="dv-folder-toggle" onclick="toggleDvFolder('${escapeHtml(String(loteId))}')"><span class="dv-caret" id="${id}-icon">▶</span><i class="fa-solid fa-folder text-amber-500"></i><span>${escapeHtml(root)}</span><span class="dv-folder-chip">${rows.length} archivo(s)</span></button></td><td class="text-[8px] text-slate-500">${escapeHtml(rows[0]?.ubicacion_drive||'Carpeta / lote')}</td><td><span class="integrity-ok"><i class="fa-solid fa-fingerprint"></i> ${formatBytes(total)}</span></td><td><span class="status-pill ${stateClass(state)}">${escapeHtml(state)}</span></td><td class="text-[8px] text-slate-400">${dvDate(last)}</td><td>${operationButtons('CARPETA',loteId,rows)}</td></tr><tr id="${id}" class="hidden dv-folder-detail"><td colspan="6"><div class="dv-folder-panel"><div class="flex flex-wrap justify-between gap-2 mb-2"><div><b class="text-[11px] text-slate-700"><i class="fa-solid fa-folder-open mr-2 text-amber-500"></i>${escapeHtml(root)}</b><div class="text-[8px] text-slate-400 mt-1">Lote ${escapeHtml(String(loteId))}</div></div><span class="text-[9px] text-slate-500">${rows.length} archivo(s) · ${formatBytes(total)}</span></div><div class="dv-tree">${dvRenderTree(tree)}</div></div></td></tr>`;
   }
 
-  // Mis archivos: misma paginación que Mis solicitudes (10 unidades por página).
-  // Se pagina después de agrupar, sin dividir el contenido interno de una carpeta.
+  // Inventario del subordinado y del administrador: 10 unidades por página.
+  // La paginación se aplica DESPUÉS de agrupar para no dividir las carpetas.
   renderFilesTable=function(rows){
     ensureTableHeader();
     const body=document.getElementById('filesTableBody');if(!body)return;
     const allUnits=dvGroupedUnits(rows||[]);
     const count=document.getElementById('fileCountLabel');
     if(count)count.textContent=`${allUnits.length} unidad${allUnits.length===1?'':'es'} visuales · ${(rows||[]).length} archivo(s)`;
-    const previousPager=document.getElementById('dv-pages-files');
+    const pagerKey=isAdmin()?'adminFiles':'files';
+    // Al cerrar sesión y entrar con otro rol, no dejar visible su paginación.
+    document.getElementById(`dv-pages-${isAdmin()?'files':'adminFiles'}`)?.remove();
+    const previousPager=document.getElementById(`dv-pages-${pagerKey}`);
     if(!allUnits.length){
       previousPager?.remove();
       body.innerHTML='<tr><td colspan="6" class="p-8 text-center text-slate-400">No hay archivos registrados.</td></tr>';
       return;
     }
     let visibleUnits=allUnits;
-    if(!isAdmin() && typeof window.dvSubPage==='function'){
+    if(typeof window.dvSubPage==='function'){
       const search=(document.getElementById('fileSearch')?.value||'').trim().toLowerCase();
       const selected=(document.getElementById('fileFolderFilter')?.value||'');
-      // Cada cambio de carpeta o búsqueda reinicia la numeración en página 1.
-      const filterSignature=[dvExplorerFolder||'',selected,search].join('|');
-      visibleUnits=window.dvSubPage(allUnits,'files',filterSignature,body,()=>renderFilesTable(rows));
-      document.getElementById('dv-pages-files')?.setAttribute('aria-label','Páginas de mis archivos');
+      // Reiniciar a la primera página al cambiar carpeta, búsqueda o usuario filtrado.
+      // El filtro del administrador pertenece a otro módulo: leer su valor del DOM.
+      const adminSelection=isAdmin()?(document.getElementById('adminFileUserFilter')?.value||''):'';
+      const filterSignature=[dvExplorerFolder||'',selected,search,adminSelection].join('|');
+      visibleUnits=window.dvSubPage(allUnits,pagerKey,filterSignature,body,()=>renderFilesTable(rows));
+      document.getElementById(`dv-pages-${pagerKey}`)?.setAttribute('aria-label',
+        isAdmin()?'Páginas del explorador de archivos':'Páginas de mis archivos');
     }else{
-      // No agregar paginación al panel administrador ni mantener una antigua.
+      // Conservar la tabla disponible incluso si el script de paginación no cargó.
       previousPager?.remove();
     }
     body.innerHTML=visibleUnits.map(u=>u.type==='folder'?opsFolderRows(u.rows,u.id):opsLooseRow(u.row)).join('');
