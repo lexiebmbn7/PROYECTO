@@ -191,7 +191,7 @@ function setSessionFromUser(user) {
   currentUser = user;
   currentUserEmail = user.email;
   currentDisplayName = user.user_metadata?.full_name || currentUserEmail;
-  currentRole = (user.user_metadata?.rol || "subordinado").toLowerCase();
+  currentRole = (user.app_metadata?.rol || "subordinado").toLowerCase();
 
   const inicial = currentDisplayName.substring(0, 1).toUpperCase();
   const rolTexto = currentRole === "jefe" ? "Jefe" : "Subordinado";
@@ -347,6 +347,9 @@ function enterApp() {
 async function handleLogout() {
   await supabaseClient.auth.signOut();
   currentUserEmail = ""; currentDisplayName = ""; currentRole = "subordinado";
+  if(typeof dvResetUploadDestination==='function')dvResetUploadDestination();
+  if(typeof dvSelectedEntries!=='undefined')dvSelectedEntries=[];
+  if(typeof dvUploadDestinationFolders!=='undefined')dvUploadDestinationFolders=[];
   if (auditRealtimeChannel) { supabaseClient.removeChannel(auditRealtimeChannel); auditRealtimeChannel = null; }
   if (colaRealtimeChannel) { supabaseClient.removeChannel(colaRealtimeChannel); colaRealtimeChannel = null; }
   document.getElementById('appSection').classList.add('hidden');
@@ -1356,7 +1359,7 @@ window.addEventListener('DOMContentLoaded',()=>{renderDlpRules();updateDashboard
   const roleSetSessionBase = setSessionFromUser;
   setSessionFromUser = function(user){
     roleSetSessionBase(user);
-    currentRole = String(user?.user_metadata?.rol || ROLE_SUBORDINADO).toLowerCase() === ROLE_JEFE
+    currentRole = String(user?.app_metadata?.rol || ROLE_SUBORDINADO).toLowerCase() === ROLE_JEFE
       ? ROLE_JEFE : ROLE_SUBORDINADO;
     applyRoleUI();
   };
@@ -2025,7 +2028,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     return !!who && (norm(who)===norm(currentDisplayName) || norm(who)===norm(currentUserEmail));
   }
   function roleFromUser(user){
-    const raw = user?.app_metadata?.rol || user?.app_metadata?.role || user?.user_metadata?.rol || user?.user_metadata?.role || ROLE_SUB;
+    const raw = user?.app_metadata?.rol || user?.app_metadata?.role || ROLE_SUB;
     const v=norm(raw);
     return ['jefe','admin','administrador'].includes(v) ? ROLE_ADMIN : ROLE_SUB;
   }
@@ -2399,6 +2402,7 @@ window.addEventListener('DOMContentLoaded',()=>{
         name:String(u.nombre||u.email||'Usuario'),
         email:String(u.email||''),
         rol:String(u.rol||'subordinado'),
+        driveFolderCount:Number(u.drive_folder_count||0),
         rows:[],
         last:u.last_sign_in_at||u.created_at||''
       })).filter(u=>u.id);
@@ -2454,9 +2458,82 @@ window.addEventListener('DOMContentLoaded',()=>{
     const body=document.getElementById('adminUsersBody');if(!body)return;const q=norm(document.getElementById('adminUserSearch')?.value||'');
     const rows=adminUsersCache.filter(u=>!q||norm(u.name+' '+u.email).includes(q));
     body.innerHTML=rows.length?rows.map(u=>{const a=u.rows.filter(r=>r.estado==='APROBADO').length,p=u.rows.filter(r=>r.estado==='PENDIENTE').length,x=u.rows.filter(r=>r.estado==='RECHAZADO').length;const activityBtn=u.rows.length?`<button class="secondary-btn" onclick="openAdminUserDetail('${escapeHtml(u.key)}')">Ver actividad</button>`:'<button class="secondary-btn" disabled>Sin actividad</button>';return `<tr>
-      <td><div class="flex items-center gap-2"><span class="admin-user-avatar">${escapeHtml((u.name||'?').slice(0,1).toUpperCase())}</span><div><span class="admin-user-name">${escapeHtml(u.name)}</span><div class="text-[10px] text-slate-400 uppercase tracking-wide">${escapeHtml(u.rol||'subordinado')}</div></div></div></td><td>${escapeHtml(u.email||'—')}</td><td><b>${u.rows.length}</b></td><td><span class="text-emerald-600 font-bold">${a}</span></td><td><span class="text-amber-600 font-bold">${p}</span></td><td><span class="text-red-500 font-bold">${x}</span></td><td>${formatShortDate(u.last)}</td><td><div class="flex items-center justify-end gap-2">${activityBtn}<button class="danger-btn" onclick="deleteAdminUser('${escapeHtml(u.id)}')"><i class="fa-solid fa-trash"></i>Eliminar</button></div></td>
+      <td><div class="flex items-center gap-2"><span class="admin-user-avatar">${escapeHtml((u.name||'?').slice(0,1).toUpperCase())}</span><div><span class="admin-user-name">${escapeHtml(u.name)}</span><div class="text-[10px] text-slate-400 uppercase tracking-wide">${escapeHtml(u.rol||'subordinado')}</div></div></div></td><td>${escapeHtml(u.email||'—')}</td><td><b>${u.rows.length}</b></td><td><span class="text-emerald-600 font-bold">${a}</span></td><td><span class="text-amber-600 font-bold">${p}</span></td><td><span class="text-red-500 font-bold">${x}</span></td><td>${formatShortDate(u.last)}</td><td><div class="flex items-center justify-end gap-2">${activityBtn}<button type="button" class="secondary-btn" onclick="dvOpenUserDriveFolders('${escapeHtml(u.id)}')"><i class="fa-solid fa-folder-closed"></i> Carpetas Drive (${u.driveFolderCount||0}/5)</button><button class="danger-btn" onclick="deleteAdminUser('${escapeHtml(u.id)}')"><i class="fa-solid fa-trash"></i>Eliminar</button></div></td>
     </tr>`}).join(''):'<tr><td colspan="8" class="p-8 text-center text-slate-400">No se encontraron usuarios registrados.</td></tr>';
   };
+  // Editor exclusivo del administrador: hasta 5 enlaces completos por usuario.
+  // Todo se valida y guarda en backend, no en localStorage.
+  let dvFolderEditorUserId='';
+  let dvFolderEditorEntries=[];
+  function dvEnsureFolderEditor(){
+    let modal=document.getElementById('dvUserDriveFoldersModal');
+    if(modal)return modal;
+    modal=document.createElement('div');
+    modal.id='dvUserDriveFoldersModal';
+    modal.className='dv-drive-permissions-overlay dv-hidden';
+    modal.setAttribute('role','dialog');
+    modal.setAttribute('aria-modal','true');
+    modal.setAttribute('aria-labelledby','dvDrivePermissionsTitle');
+    modal.innerHTML=`<div class="dv-drive-permissions-card">
+      <div class="dv-drive-permissions-head"><div><p class="text-xs text-slate-500">ADMINISTRACIÓN · GOOGLE DRIVE</p><h3 id="dvDrivePermissionsTitle">Carpetas autorizadas</h3><p id="dvDrivePermissionsSubtitle" class="text-xs text-slate-500">Solo el administrador puede modificarlas.</p></div><button type="button" class="icon-btn" onclick="dvCloseUserDriveFolders()" aria-label="Cerrar"><i class="fa-solid fa-xmark"></i></button></div>
+      <form id="dvDrivePermissionsForm" onsubmit="dvSaveUserDriveFolders(event)">
+      <p class="dv-drive-permissions-note">Pega hasta cinco enlaces de carpetas de Drive. El usuario podrá entrar a sus subcarpetas, pero no al ROOT ni a otras carpetas.</p>
+      <div id="dvDrivePermissionsRows" class="dv-drive-permissions-rows"></div>
+      <button type="button" class="secondary-btn" id="dvAddDrivePermission" onclick="dvAddUserDriveFolder()"><i class="fa-solid fa-plus"></i> Añadir enlace</button>
+      <p id="dvDrivePermissionsFeedback" role="status" class="text-xs"></p>
+      <div class="dv-drive-permissions-actions"><button type="button" class="secondary-btn" onclick="dvCloseUserDriveFolders()">Cancelar</button><button type="submit" class="primary-btn" id="dvSaveDrivePermissions"><i class="fa-solid fa-floppy-disk"></i> Guardar permisos</button></div>
+      </form></div>`;
+    modal.addEventListener('click',event=>{if(event.target===modal)dvCloseUserDriveFolders();});
+    document.body.appendChild(modal);return modal;
+  }
+  function dvDrawDrivePermissionRows(){
+    const rows=document.getElementById('dvDrivePermissionsRows');if(!rows)return;
+    rows.innerHTML=dvFolderEditorEntries.map((f,i)=>`<div class="dv-drive-permissions-row"><label class="field-label" for="dvDriveLink${i}">Carpeta ${i+1}${f.name?' · '+escapeHtml(f.name):''}</label><div class="dv-drive-permissions-input"><input id="dvDriveLink${i}" class="input-modern" type="url" required placeholder="https://drive.google.com/drive/folders/..." value="${escapeHtml(f.url||'')}" oninput="dvUpdateUserDriveFolder(${i},this.value)"/><button type="button" class="icon-btn" title="Quitar" aria-label="Quitar carpeta ${i+1}" onclick="dvRemoveUserDriveFolder(${i})"><i class="fa-solid fa-trash-can"></i></button></div></div>`).join('')||'<p class="text-sm text-slate-500">Este usuario no tiene carpetas asignadas. No podrá navegar por Drive hasta que le asignes una.</p>';
+    const add=document.getElementById('dvAddDrivePermission');if(add)add.disabled=dvFolderEditorEntries.length>=5;
+  }
+  window.dvCloseUserDriveFolders=function(){document.getElementById('dvUserDriveFoldersModal')?.classList.add('dv-hidden');dvFolderEditorUserId='';dvFolderEditorEntries=[];};
+  window.dvAddUserDriveFolder=function(){if(dvFolderEditorEntries.length>=5)return;dvFolderEditorEntries.push({url:'',name:''});dvDrawDrivePermissionRows();document.getElementById('dvDriveLink'+(dvFolderEditorEntries.length-1))?.focus();};
+  window.dvUpdateUserDriveFolder=function(i,value){if(dvFolderEditorEntries[i])dvFolderEditorEntries[i].url=value;};
+  window.dvRemoveUserDriveFolder=function(i){dvFolderEditorEntries.splice(i,1);dvDrawDrivePermissionRows();};
+  window.dvOpenUserDriveFolders=async function(userId){
+    if(!isAdmin())return;
+    const u=adminUsersCache.find(x=>String(x.id)===String(userId));if(!u)return;
+    dvFolderEditorUserId=String(userId);dvFolderEditorEntries=[];
+    const modal=dvEnsureFolderEditor();modal.classList.remove('dv-hidden');
+    document.getElementById('dvSaveDrivePermissions').disabled=true;
+    document.getElementById('dvAddDrivePermission').disabled=true;
+    document.getElementById('dvDrivePermissionsTitle').textContent='Carpetas de '+u.name;
+    document.getElementById('dvDrivePermissionsSubtitle').textContent=u.email||'';
+    document.getElementById('dvDrivePermissionsRows').innerHTML='<p class="text-xs text-slate-500">Cargando permisos...</p>';
+    document.getElementById('dvDrivePermissionsFeedback').textContent='';
+    try{
+      const res=await fetch(`${API_URL}/admin/users/${encodeURIComponent(userId)}/drive-folders`,{headers:await authHeaders(false)});
+      const data=await res.json().catch(()=>({}));
+      if(!res.ok)throw new Error(dvHttpErrorMessage(res,data));
+      if(dvFolderEditorUserId!==String(userId))return;
+      dvFolderEditorEntries=(Array.isArray(data.folders)?data.folders:[]).map(f=>({url:String(f.url||''),name:String(f.name||'')}));
+      dvDrawDrivePermissionRows();
+      document.getElementById('dvSaveDrivePermissions').disabled=false;
+    }catch(error){
+      document.getElementById('dvDrivePermissionsRows').innerHTML='';
+      document.getElementById('dvDrivePermissionsFeedback').textContent=error?.message||'No se pudieron cargar los permisos.';
+    }
+  };
+  window.dvSaveUserDriveFolders=async function(event){
+    event?.preventDefault();if(!dvFolderEditorUserId||!isAdmin())return;
+    const btn=document.getElementById('dvSaveDrivePermissions');const feedback=document.getElementById('dvDrivePermissionsFeedback');
+    const id=dvFolderEditorUserId;
+    try{
+      btn.disabled=true;feedback.textContent='Validando carpetas y guardando permisos...';
+      const res=await fetch(`${API_URL}/admin/users/${encodeURIComponent(id)}/drive-folders`,{method:'PUT',headers:await authHeaders(true),body:JSON.stringify({folders:dvFolderEditorEntries.map(f=>({url:f.url}))})});
+      const data=await res.json().catch(()=>({}));
+      if(!res.ok)throw new Error(dvHttpErrorMessage(res,data));
+      const user=adminUsersCache.find(u=>u.id===id);if(user)user.driveFolderCount=(data.folders||[]).length;
+      renderAdminUsers();dvCloseUserDriveFolders();toast('Permisos de Drive guardados correctamente.');
+    }catch(error){feedback.textContent=error?.message||'Error al guardar permisos.';}
+    finally{btn.disabled=false;}
+  };
+
   window.deleteAdminUser=async function(userId){
     if(!isAdmin()||!userId)return;
     const user=adminUsersCache.find(u=>u.id===userId);
@@ -3758,7 +3835,7 @@ window.addEventListener('DOMContentLoaded',()=>{
   };
 
   async function backfillLegacyDriveIds(){
-    if(!currentUser || sessionStorage.getItem('dv_legacy_backfill_done')==='1') return;
+    if(!currentUser || !isAdmin() || sessionStorage.getItem('dv_legacy_backfill_done')==='1') return;
     try{
       const res=await fetch(`${API_URL}/drive/backfill-legacy`,{method:'POST',headers:await authHeaders(false)});
       if(res.ok){
@@ -3770,7 +3847,7 @@ window.addEventListener('DOMContentLoaded',()=>{
   }
 
   async function reconcileDrive(){
-    if(dvOpsSyncBusy || !currentUser)return;
+    if(dvOpsSyncBusy || !currentUser || !isAdmin())return;
     dvOpsSyncBusy=true;
     try{
       const res=await fetch(`${API_URL}/drive/reconcile`,{method:'POST',headers:await authHeaders(false)});
@@ -4697,7 +4774,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     const q=searchValue(name);
     const folders=(Array.isArray(data.folders)?data.folders:[]).filter(f=>!q||norm(f?.name).includes(q));
     const current=data.current||{};
-    const restriction=name==='move'?moveRestriction(current):'';
+    const restriction=current?.selectable===false?'Selecciona una carpeta autorizada.':(name==='move'?moveRestriction(current):'');
     const isSelected=name==='upload'
       ? String(dvUploadDestinationSelectedId||'')===String(current?.id||'')
       : String(moveSelected?.id||'')===String(current?.id||'');
@@ -4782,7 +4859,7 @@ window.addEventListener('DOMContentLoaded',()=>{
   window.dvRetryUploadDriveFolder=function(){return load('upload',contexts.upload.folderId||'root',true);};
   window.dvFilterUploadDestinations=function(){render('upload');};
   window.dvSelectUploadCurrentFolder=function(){
-    const current=contexts.upload.data?.current;if(!current?.id)return;
+    const current=contexts.upload.data?.current;if(!current?.id||current.selectable===false)return;
     dvUploadDestinationSelectedId=String(current.id);
     dvUploadDestinationSelectedPath=visualPath(contexts.upload.data);
     const selection=document.getElementById('dvUploadDestinationSelection');
@@ -4798,7 +4875,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     if(typeof dvSelectedEntries!=='undefined' && !dvSelectedEntries.length){if(panel)panel.classList.add('hidden');return;}
     if(panel)panel.classList.remove('hidden');
     const currentId=contexts.upload.folderId||'root';
-    if(!contexts.upload.data || force)return load('upload',currentId,force);
+    if(!contexts.upload.data || force)return load('upload',force?'root':currentId,force);
     render('upload');
   };
   // Rebind global identifier used by existing code/onclick handlers.
@@ -4812,7 +4889,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     contexts.upload={folderId:'root',data:null,error:null,loading:false,seq:contexts.upload.seq+1};
     const search=document.getElementById('dvUploadDestinationSearch');if(search)search.value='';
     const selection=document.getElementById('dvUploadDestinationSelection');
-    if(selection)selection.innerHTML='Navega por Drive y selecciona explícitamente la carpeta destino.';
+    if(selection)selection.innerHTML='Elige una carpeta autorizada y, si deseas, entra a una de sus subcarpetas.';
     if(typeof dvRefreshUploadButtonState==='function')dvRefreshUploadButtonState();
   };
   try{dvResetUploadDestination=window.dvResetUploadDestination;}catch(_){}
@@ -4826,7 +4903,7 @@ window.addEventListener('DOMContentLoaded',()=>{
   window.dvRetryMoveDriveFolder=function(){return load('move',contexts.move.folderId||'root',true);};
   window.dvFilterMoveFolders=function(){render('move');};
   window.dvSelectMoveCurrentFolder=function(){
-    const data=contexts.move.data;const current=data?.current;if(!current?.id)return;
+    const data=contexts.move.data;const current=data?.current;if(!current?.id||current.selectable===false)return;
     const restriction=moveRestriction(current);
     if(restriction){if(typeof dvShowMessageModal==='function')dvShowMessageModal({type:'error',title:'Destino no válido',message:restriction});return;}
     moveSelected={id:String(current.id),path:visualPath(data),name:current.name||'Carpeta'};
