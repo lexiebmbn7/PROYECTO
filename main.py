@@ -1379,7 +1379,7 @@ def notificar_login_subordinado_telegram(
         f"👤 {usuario.get('nombre') or 'Usuario'}\n"
         f"📧 {usuario.get('correo') or 'Sin correo'}\n"
         f"🧩 Rol: {usuario.get('rol') or 'subordinado'}\n"
-        f"🕒 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"
+        f"🕒 {datetime.now(timezone(timedelta(hours=-5))).strftime('%Y-%m-%d %H:%M:%S')} (hora de Perú)"
     )
 
     for chat_id in AUTHORIZED_CHAT_IDS:
