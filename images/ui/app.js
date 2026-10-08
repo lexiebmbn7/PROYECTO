@@ -2458,7 +2458,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     const body=document.getElementById('adminUsersBody');if(!body)return;const q=norm(document.getElementById('adminUserSearch')?.value||'');
     const rows=adminUsersCache.filter(u=>!q||norm(u.name+' '+u.email).includes(q));
     body.innerHTML=rows.length?rows.map(u=>{const a=u.rows.filter(r=>r.estado==='APROBADO').length,p=u.rows.filter(r=>r.estado==='PENDIENTE').length,x=u.rows.filter(r=>r.estado==='RECHAZADO').length;const activityBtn=u.rows.length?`<button class="secondary-btn" onclick="openAdminUserDetail('${escapeHtml(u.key)}')">Ver actividad</button>`:'<button class="secondary-btn" disabled>Sin actividad</button>';return `<tr>
-      <td><div class="flex items-center gap-2"><span class="admin-user-avatar">${escapeHtml((u.name||'?').slice(0,1).toUpperCase())}</span><div><span class="admin-user-name">${escapeHtml(u.name)}</span><div class="text-[10px] text-slate-400 uppercase tracking-wide">${escapeHtml(u.rol||'subordinado')}</div></div></div></td><td>${escapeHtml(u.email||'—')}</td><td><b>${u.rows.length}</b></td><td><span class="text-emerald-600 font-bold">${a}</span></td><td><span class="text-amber-600 font-bold">${p}</span></td><td><span class="text-red-500 font-bold">${x}</span></td><td>${formatShortDate(u.last)}</td><td><div class="flex items-center justify-end gap-2">${activityBtn}<button type="button" class="secondary-btn" onclick="dvOpenUserDriveFolders('${escapeHtml(u.id)}')"><i class="fa-solid fa-folder-closed"></i> Carpetas Drive (${u.driveFolderCount||0}/5)</button><button class="danger-btn" onclick="deleteAdminUser('${escapeHtml(u.id)}')"><i class="fa-solid fa-trash"></i>Eliminar</button></div></td>
+      <td><div class="flex items-center gap-2"><span class="admin-user-avatar">${escapeHtml((u.name||'?').slice(0,1).toUpperCase())}</span><div><span class="admin-user-name">${escapeHtml(u.name)}</span><div class="text-[10px] text-slate-400 uppercase tracking-wide">${escapeHtml(u.rol||'subordinado')}</div></div></div></td><td>${escapeHtml(u.email||'—')}</td><td><b>${u.rows.length}</b></td><td><span class="text-emerald-600 font-bold">${a}</span></td><td><span class="text-amber-600 font-bold">${p}</span></td><td><span class="text-red-500 font-bold">${x}</span></td><td>${formatShortDate(u.last)}</td><td><div class="flex items-center justify-end gap-2">${activityBtn}<button type="button" class="secondary-btn" data-dv-drive-permission-user="${escapeHtml(u.id)}"><i class="fa-solid fa-folder-closed"></i> Carpetas Drive (${u.driveFolderCount||0}/5)</button><button class="danger-btn" onclick="deleteAdminUser('${escapeHtml(u.id)}')"><i class="fa-solid fa-trash"></i>Eliminar</button></div></td>
     </tr>`}).join(''):'<tr><td colspan="8" class="p-8 text-center text-slate-400">No se encontraron usuarios registrados.</td></tr>';
   };
   // Editor exclusivo del administrador: hasta 5 enlaces completos por usuario.
@@ -2466,7 +2466,43 @@ window.addEventListener('DOMContentLoaded',()=>{
   let dvFolderEditorUserId='';
   let dvFolderEditorEntries=[];
   let dvFolderEditorLoading=false;
+  // Estilos autosuficientes: la ventana debe visualizarse incluso cuando el
+  // CSS del repositorio todavía no se ha desplegado o está en caché.
+  function dvEnsureDrivePermissionsStyles(){
+    if(document.getElementById('dvDrivePermissionsRuntimeStyles'))return;
+    const style=document.createElement('style');
+    style.id='dvDrivePermissionsRuntimeStyles';
+    style.textContent=`
+      .dv-drive-permissions-overlay{position:fixed;inset:0;z-index:2147483000;background:rgba(15,23,42,.66);display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box}
+      .dv-drive-permissions-overlay.dv-hidden{display:none!important}
+      .dv-drive-permissions-card{width:min(100%,620px);max-height:92vh;overflow:auto;background:#fff;border-radius:16px;box-shadow:0 24px 70px rgba(0,0,0,.25);padding:22px;color:#1e293b;box-sizing:border-box}
+      .dv-drive-permissions-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;border-bottom:1px solid #e2e8f0;padding-bottom:14px;margin-bottom:14px}
+      .dv-drive-permissions-head h3{font-size:19px;font-weight:800}
+      .dv-drive-permissions-note{font-size:13px;line-height:1.5;color:#475569;margin-bottom:16px}
+      .dv-drive-permissions-rows{display:grid;gap:12px;margin-bottom:14px}
+      .dv-drive-permissions-row{border:1px solid #e2e8f0;padding:12px;border-radius:10px;background:#f8fafc}
+      .dv-drive-permissions-input{display:flex;gap:8px;align-items:center;margin-top:5px}
+      .dv-drive-permissions-input input{min-width:0;flex:1;font-size:12px}
+      .dv-drive-permissions-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:18px;flex-wrap:wrap}
+      #dvDrivePermissionsFeedback{color:#b45309;margin-top:10px;min-height:16px;white-space:pre-wrap;overflow-wrap:anywhere}
+      @media(max-width:480px){.dv-drive-permissions-card{padding:14px}.dv-drive-permissions-actions button{flex:1}}
+    `;
+    (document.head||document.body).appendChild(style);
+  }
+  // Delegación de eventos: las filas de usuarios se recrean tras cargar auditoría.
+  document.addEventListener('click',function(event){
+    const btn=event.target.closest?.('[data-dv-drive-permission-user]');
+    if(!btn)return;
+    event.preventDefault();
+    const uid=btn.getAttribute('data-dv-drive-permission-user');
+    if(!uid)return;
+    try{window.dvOpenUserDriveFolders(uid);}catch(error){
+      console.error('[CARPETAS DRIVE] No se pudo abrir el editor',error);
+      alert('No se pudo abrir Carpetas Drive: '+(error?.message||String(error)));
+    }
+  });
   function dvEnsureFolderEditor(){
+    dvEnsureDrivePermissionsStyles();
     let modal=document.getElementById('dvUserDriveFoldersModal');
     if(modal)return modal;
     modal=document.createElement('div');
