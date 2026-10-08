@@ -1959,16 +1959,27 @@ def listar_hijos_drive(
 ) -> dict:
     """Lista solo los hijos inmediatos. No hace búsqueda recursiva."""
 
+    # Ruta rápida: la raíz virtual del subordinado no necesita hablar con
+    # Google Drive. Consultamos UNA sola vez sus permisos vigentes en la BD.
+    # Se evita además construir el cliente de Google y resolver los padres.
+    if usuario and usuario.get("rol") != "jefe" and str(folder_id or "root").strip() in ("", "root"):
+        permisos = obtener_carpetas_autorizadas(usuario["id"])
+        actual = _mi_raiz_virtual()
+        return {
+            "current": actual,
+            "breadcrumb": actual["breadcrumb"],
+            "folders": [
+                {"id": f["id"], "name": f["name"],
+                 "parent_id": "root", "type": "folder"}
+                for f in permisos
+            ],
+            "files": [],
+        }
+
     service = obtener_servicio_google_drive()
     actual = (resolver_ruta_drive_usuario(folder_id, usuario)
               if usuario else resolver_ruta_drive(folder_id))
     actual_id = str(actual["id"])
-    if usuario and usuario.get("rol") != "jefe" and actual_id == "root":
-        permisos = obtener_carpetas_autorizadas(usuario["id"])
-        return {"current": actual, "breadcrumb": actual["breadcrumb"],
-                "folders": [{"id": f["id"], "name": f["name"],
-                             "parent_id": "root", "type": "folder"} for f in permisos],
-                "files": []}
     cache_key = (
         f"children:{usuario['id'] if usuario and usuario.get('rol') != 'jefe' else 'admin'}:{actual_id}:"
         f"{'all' if include_files else 'folders'}"
@@ -1978,6 +1989,10 @@ def listar_hijos_drive(
         return cached
 
     consulta = f"'{actual_id}' in parents and trashed=false"
+    # Para los selectores de destino no descargar metadatos de archivos:
+    # Drive filtra las carpetas en origen, incluso si hay miles de ficheros.
+    if not include_files:
+        consulta += " and mimeType = 'application/vnd.google-apps.folder'"
 
     page_token = None
     elementos = []
