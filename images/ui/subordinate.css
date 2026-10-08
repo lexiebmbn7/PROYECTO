@@ -1135,3 +1135,118 @@ body[data-dv-role="subordinado"] #view-gestor #dropZone .dv-op-btn {
 body[data-dv-role="subordinado"].dv-upload-mode #dv-pages-files {
   display: none !important;
 }
+
+/* =========================================================
+   ADMINISTRADOR - EXPLORADOR DE ARCHIVOS
+   La tabla ocupa su panel sin desplazamiento lateral y utiliza
+   la misma paginación inferior que Mis archivos/Mis solicitudes.
+   No altera las solicitudes, el dashboard ni los permisos de Drive.
+   ========================================================= */
+body[data-dv-role="jefe"] #view-gestor,
+body[data-dv-role="jefe"] #view-gestor .file-manager-shell,
+body[data-dv-role="jefe"] #view-gestor .file-content-panel,
+body[data-dv-role="jefe"] #view-gestor #dropZone {
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+
+body[data-dv-role="jefe"] #view-gestor #dropZone {
+  overflow-x: hidden !important;
+}
+
+body[data-dv-role="jefe"] #view-gestor #dropZone > .data-table {
+  width: 100% !important;
+  min-width: 0 !important;
+  table-layout: fixed !important;
+  white-space: normal !important;
+}
+
+body[data-dv-role="jefe"] #view-gestor #dropZone .data-table th,
+body[data-dv-role="jefe"] #view-gestor #dropZone .data-table td {
+  box-sizing: border-box;
+  padding: 12px 8px !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  vertical-align: middle;
+}
+
+body[data-dv-role="jefe"] #view-gestor #dropZone .data-table th:nth-child(1) { width: 25%; }
+body[data-dv-role="jefe"] #view-gestor #dropZone .data-table th:nth-child(2) { width: 18%; }
+body[data-dv-role="jefe"] #view-gestor #dropZone .data-table th:nth-child(3) { width: 12%; }
+body[data-dv-role="jefe"] #view-gestor #dropZone .data-table th:nth-child(4) { width: 12%; }
+body[data-dv-role="jefe"] #view-gestor #dropZone .data-table th:nth-child(5) { width: 13%; }
+body[data-dv-role="jefe"] #view-gestor #dropZone .data-table th:nth-child(6) { width: 20%; }
+
+body[data-dv-role="jefe"] #view-gestor #dropZone .data-table td:first-child > .flex,
+body[data-dv-role="jefe"] #view-gestor #dropZone .data-table td:first-child > .flex > div:last-child,
+body[data-dv-role="jefe"] #view-gestor #dropZone .dv-folder-toggle {
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+
+body[data-dv-role="jefe"] #view-gestor #dropZone .dv-folder-toggle {
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+/* En pantallas medianas, colocar tarjetas de protección debajo del inventario. */
+@media (max-width: 1550px) {
+  body[data-dv-role="jefe"] #view-gestor .file-manager-shell:not(.subordinate-layout) {
+    grid-template-columns: 205px minmax(0, 1fr) !important;
+  }
+  body[data-dv-role="jefe"] #view-gestor .file-security-panel {
+    grid-column: 1 / -1;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  body[data-dv-role="jefe"] #view-gestor .file-security-panel > .security-card {
+    flex: 1 1 230px;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 1200px) {
+  body[data-dv-role="jefe"] #view-gestor .file-manager-shell:not(.subordinate-layout) {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  body[data-dv-role="jefe"] #view-gestor .file-explorer-panel {
+    border-right: 0 !important;
+    border-bottom: 1px solid #e4eaed !important;
+  }
+}
+
+/* En móviles los datos se distribuyen verticalmente, sin barra horizontal. */
+@media (max-width: 720px) {
+  body[data-dv-role="jefe"] #view-gestor #dropZone > .data-table,
+  body[data-dv-role="jefe"] #view-gestor #dropZone > .data-table > tbody {
+    display: block !important;
+    width: 100% !important;
+  }
+  body[data-dv-role="jefe"] #view-gestor #dropZone > .data-table > thead {
+    display: none !important;
+  }
+  body[data-dv-role="jefe"] #view-gestor #dropZone > .data-table > tbody > tr:not(.hidden):not(.dv-folder-detail) {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px 10px;
+    padding: 12px;
+    border-bottom: 1px solid #e6edf3;
+  }
+  body[data-dv-role="jefe"] #view-gestor #dropZone > .data-table > tbody > tr:not(.hidden) > td {
+    display: block !important;
+    min-width: 0;
+    padding: 5px 0 !important;
+    border: 0 !important;
+  }
+  body[data-dv-role="jefe"] #view-gestor #dropZone > .data-table > tbody > tr:not(.hidden):not(.dv-folder-detail) > td:nth-child(1),
+  body[data-dv-role="jefe"] #view-gestor #dropZone > .data-table > tbody > tr:not(.hidden):not(.dv-folder-detail) > td:nth-child(2),
+  body[data-dv-role="jefe"] #view-gestor #dropZone > .data-table > tbody > tr:not(.hidden):not(.dv-folder-detail) > td:nth-child(6) {
+    grid-column: 1 / -1;
+  }
+  body[data-dv-role="jefe"] #view-gestor #dropZone .data-table td:nth-child(2)::before { content: 'Ubicación: '; font-weight: 700; }
+  body[data-dv-role="jefe"] #view-gestor #dropZone .data-table td:nth-child(3)::before { content: 'Integridad '; display: block; font-weight: 700; }
+  body[data-dv-role="jefe"] #view-gestor #dropZone .data-table td:nth-child(4)::before { content: 'Estado '; display: block; font-weight: 700; }
+  body[data-dv-role="jefe"] #view-gestor #dropZone .data-table td:nth-child(5)::before { content: 'Fecha '; display: block; font-weight: 700; }
+}
