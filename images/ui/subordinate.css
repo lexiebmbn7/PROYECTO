@@ -1130,3 +1130,8 @@ body[data-dv-role="subordinado"] #view-gestor #dropZone .dv-op-btn {
     min-height: 36px !important;
   }
 }
+
+/* Ocultar el paginador del inventario mientras el subordinado sube archivos. */
+body[data-dv-role="subordinado"].dv-upload-mode #dv-pages-files {
+  display: none !important;
+}
