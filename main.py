@@ -22,6 +22,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 
 from datavault.config import settings
+from datavault.drive_acl import normalize_assignments, scoped_chain
 from datavault.outbox import (
     encolar_evento as outbox_encolar_evento,
     listar_pendientes as outbox_listar_pendientes,
@@ -87,7 +88,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Telegram-Bot-Api-Secret-Token"],
 )
 
@@ -1513,8 +1514,8 @@ def obtener_usuario_supabase_desde_request(request: Request) -> dict:
     rol = str(
         app_metadata.get("rol")
         or app_metadata.get("role")
-        or metadata.get("rol")
-        or metadata.get("role")
+        # user_metadata es editable por el propietario de la cuenta.
+        # Solo app_metadata, bajo control del backend, determina privilegios.
         or "subordinado"
     ).strip().lower()
 
@@ -1698,6 +1699,144 @@ def _normalizar_drive_id(folder_id: str, service=None) -> str:
     return valor
 
 
+# ============================================================
+# PERMISOS DE CARPETAS POR USUARIO (MÁXIMO 5)
+# ============================================================
+
+def obtener_carpetas_autorizadas(usuario_id: str) -> list:
+    """Consulta siempre la BD: una revocación tiene efecto sin esperar el caché."""
+    try:
+        response = (
+            supabase_admin.table("user_drive_permissions")
+            .select("folders")
+            .eq("user_id", str(usuario_id))
+            .limit(1).execute()
+        )
+    except Exception as exc:
+        print("[DRIVE ACL CONFIG ERROR]", type(exc).__name__)
+        raise error_api(503, "DRIVE_ACL_UNAVAILABLE",
+                        "La tabla de permisos de Drive no está disponible. Ejecuta la migración SQL.") from exc
+    rows = response.data or []
+    folders = rows[0].get("folders") if rows else []
+    if not isinstance(folders, list) or len(folders) > 5 or any(
+        not isinstance(f, dict) or not f.get("id") or not f.get("name") for f in folders
+    ):
+        raise error_api(503, "DRIVE_ACL_INVALID", "Los permisos de Drive tienen un formato inválido.")
+    return folders
+
+
+def _mi_raiz_virtual() -> dict:
+    return {
+        "id": "root", "name": "Mis carpetas", "path": "Mis carpetas",
+        "root": True, "selectable": False, "depth": 0, "ancestors": [],
+        "breadcrumb": [{"id": "root", "name": "Mis carpetas"}],
+        "parent_id": None,
+    }
+
+
+def resolver_ruta_drive_usuario(folder_id: str, usuario: dict) -> dict:
+    """Restringe el recorrido a una carpeta asignada y sus descendientes.
+
+    Nunca incluye el ROOT real ni sus ancestros en el breadcrumb del usuario.
+    Permite carpetas compartidas externas a GOOGLE_DRIVE_ROOT_ID.
+    """
+    if usuario.get("rol") == "jefe":
+        return resolver_ruta_drive(folder_id)
+    permisos = obtener_carpetas_autorizadas(usuario["id"])
+    if not folder_id or str(folder_id) == "root":
+        return _mi_raiz_virtual()
+    permitidos = {str(f.get("id") or "") for f in permisos}
+    actual_id = str(folder_id).strip()
+    if not permitidos:
+        raise error_api(403, "DRIVE_ACCESS_DENIED", "No tienes carpetas de Drive autorizadas.")
+    service = obtener_servicio_google_drive()
+    cadena, visitados = [], set()
+    for _ in range(80):
+        if actual_id in visitados:
+            break
+        visitados.add(actual_id)
+        # Se consulta el árbol real, pero solo se devuelve el tramo permitido.
+        try:
+            meta = service.files().get(
+                fileId=actual_id, fields="id,name,mimeType,parents,trashed",
+                supportsAllDrives=True,
+            ).execute(num_retries=GOOGLE_API_RETRIES)
+        except Exception as exc:
+            raise error_api(403, "DRIVE_ACCESS_DENIED", "Carpeta no autorizada o inaccesible.") from exc
+        if meta.get("trashed"):
+            raise error_api(403, "DRIVE_ACCESS_DENIED", "La carpeta no está disponible.")
+        cadena.append(meta)
+        if str(meta.get("id")) in permitidos:
+            break
+        parents = meta.get("parents") or []
+        if not parents:
+            break
+        actual_id = str(parents[0])
+    permitida = scoped_chain(cadena, permitidos)
+    if not permitida:
+        raise error_api(403, "DRIVE_ACCESS_DENIED", "No tienes acceso a esta carpeta.")
+    if permitida[-1].get("mimeType") != "application/vnd.google-apps.folder":
+        raise error_api(400, "DRIVE_DESTINATION_NOT_FOLDER", "El destino no es una carpeta.")
+    ruta = [_mi_raiz_virtual()["name"]] + [str(x.get("name") or "Carpeta") for x in permitida]
+    breadcrumb = [{"id": "root", "name": "Mis carpetas"}] + [
+        {"id": str(x["id"]), "name": str(x.get("name") or "Carpeta")}
+        for x in permitida
+    ]
+    last = permitida[-1]
+    return {
+        "id": str(last["id"]), "name": str(last.get("name") or "Carpeta"),
+        "parent_id": str((last.get("parents") or [None])[0]) if len(permitida) > 1 else "root",
+        "path": " / ".join(ruta), "depth": len(permitida),
+        "ancestors": [str(x["id"]) for x in permitida[:-1]],
+        "breadcrumb": breadcrumb, "root": False, "selectable": True,
+    }
+
+
+def validar_destino_usuario(destino_id: str, usuario: dict) -> dict:
+    if not destino_id or str(destino_id).strip() == "root" and usuario.get("rol") != "jefe":
+        raise error_api(403, "DRIVE_ACCESS_DENIED", "Selecciona una de tus carpetas autorizadas.")
+    return (validar_destino_drive(destino_id) if usuario.get("rol") == "jefe"
+            else resolver_ruta_drive_usuario(destino_id, usuario))
+
+
+def validar_objeto_en_carpeta_usuario(usuario: dict, objeto: dict):
+    """Asegura origen real en Drive, no solo origen guardado en Supabase."""
+    if usuario.get("rol") == "jefe":
+        return
+    service = obtener_servicio_google_drive()
+    try:
+        meta = service.files().get(fileId=str(objeto["drive_id"]),
+            fields="id,parents,trashed", supportsAllDrives=True,
+        ).execute(num_retries=GOOGLE_API_RETRIES)
+    except Exception as exc:
+        raise error_api(403, "DRIVE_ACCESS_DENIED", "No puedes operar sobre este elemento.") from exc
+    if meta.get("trashed") or not (meta.get("parents") or []):
+        raise error_api(403, "DRIVE_ACCESS_DENIED", "Este elemento no está disponible.")
+    # Prohíbe eliminar/mover la misma carpeta raíz que asignó el administrador.
+    validar_destino_usuario(str(meta["parents"][0]), usuario)
+
+
+def obtener_rol_confiable_usuario(usuario_id: str) -> str:
+    """Validar el rol del solicitante al resolver operaciones desde Telegram/web."""
+    try:
+        resp = HTTP_CLIENT.get(f"{SUPABASE_URL}/auth/v1/admin/users/{usuario_id}",
+            headers={"apikey": SUPABASE_SERVICE_ROLE_KEY,
+                     "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}"}, timeout=15)
+        resp.raise_for_status()
+        data = resp.json() or {}
+        usuario = data.get("user") or data
+        metadata = usuario.get("app_metadata") or {}
+        return "jefe" if str(metadata.get("rol") or metadata.get("role") or "").lower() in ("jefe", "admin", "administrador") else "subordinado"
+    except Exception as exc:
+        raise error_api(503, "DRIVE_ROLE_UNAVAILABLE", "No se pudo verificar el rol del usuario.") from exc
+
+
+def validar_permiso_en_aprobacion(usuario_id: str, destino_id: str):
+    """Los permisos pueden revocarse después de crear una solicitud."""
+    rol = obtener_rol_confiable_usuario(str(usuario_id))
+    validar_destino_usuario(str(destino_id or ""), {"id": str(usuario_id), "rol": rol})
+
+
 def resolver_ruta_drive(folder_id: str) -> dict:
     """Valida pertenencia a la raíz autorizada sin recorrer todo Drive."""
 
@@ -1816,15 +1955,22 @@ def resolver_ruta_drive(folder_id: str) -> dict:
 def listar_hijos_drive(
     folder_id: str,
     include_files: bool = True,
+    usuario: dict | None = None,
 ) -> dict:
     """Lista solo los hijos inmediatos. No hace búsqueda recursiva."""
 
     service = obtener_servicio_google_drive()
-    actual = resolver_ruta_drive(folder_id)
+    actual = (resolver_ruta_drive_usuario(folder_id, usuario)
+              if usuario else resolver_ruta_drive(folder_id))
     actual_id = str(actual["id"])
-
+    if usuario and usuario.get("rol") != "jefe" and actual_id == "root":
+        permisos = obtener_carpetas_autorizadas(usuario["id"])
+        return {"current": actual, "breadcrumb": actual["breadcrumb"],
+                "folders": [{"id": f["id"], "name": f["name"],
+                             "parent_id": "root", "type": "folder"} for f in permisos],
+                "files": []}
     cache_key = (
-        f"children:{actual_id}:"
+        f"children:{usuario['id'] if usuario and usuario.get('rol') != 'jefe' else 'admin'}:{actual_id}:"
         f"{'all' if include_files else 'folders'}"
     )
     cached = _cache_drive_get(cache_key)
@@ -1909,17 +2055,19 @@ def listar_carpetas_drive_raiz():
     return salida.get("folders") or []
 
 
-def listar_carpetas_drive_recursivas():
+def listar_carpetas_drive_recursivas(usuario: dict | None = None):
     """Compatibilidad con el selector antiguo.
 
     La navegación nueva usa /drive/browse (hijos inmediatos). Esta función solo
     mantiene el frontend existente y guarda el resultado plano en caché.
     """
 
-    raiz = obtener_raiz_drive_autorizada()
-    cache_key = f"flat-folders:{raiz['id']}"
+    raiz = (_mi_raiz_virtual() if usuario and usuario.get("rol") != "jefe"
+            else obtener_raiz_drive_autorizada())
+    cache_key = f"flat-folders:{usuario['id'] if usuario and usuario.get('rol') != 'jefe' else 'admin'}:{raiz['id']}"
 
-    cached = _cache_drive_get(cache_key)
+    # La lista plana de subordinados cambia al revocar o asignar carpetas.
+    cached = _cache_drive_get(cache_key) if not usuario or usuario.get("rol") == "jefe" else None
     if cached:
         return cached
 
@@ -1939,6 +2087,7 @@ def listar_carpetas_drive_recursivas():
         hijos = listar_hijos_drive(
             padre["id"],
             include_files=False,
+            usuario=usuario,
         ).get("folders") or []
 
         for carpeta in hijos:
@@ -1967,10 +2116,12 @@ def listar_carpetas_drive_recursivas():
             pendientes.append(item)
 
             if len(carpetas) >= 5000:
-                _cache_drive_set(cache_key, carpetas)
+                if not usuario or usuario.get("rol") == "jefe":
+                    _cache_drive_set(cache_key, carpetas)
                 return carpetas
 
-    _cache_drive_set(cache_key, carpetas)
+    if not usuario or usuario.get("rol") == "jefe":
+        _cache_drive_set(cache_key, carpetas)
     return carpetas
 
 
@@ -2822,17 +2973,22 @@ def procesar_solicitud_operacion(
 
             return solicitud_final, True
 
-        marcar_procesamiento_seguro(
-            "solicitudes_operacion",
-            {"id": solicitud_id},
-            PROCESAMIENTO_PROCESANDO,
-        )
-
         objeto = obtener_objeto_operable(
             str(solicitud.get("solicitante_id") or ""),
             solicitud.get("objeto_tipo"),
             auditoria_id=solicitud.get("auditoria_id"),
             lote_id=solicitud.get("lote_id"),
+        )
+
+        solicitante_operacion = str(solicitud.get("solicitante_id") or "")
+        rol_operacion = obtener_rol_confiable_usuario(solicitante_operacion)
+        usuario_operacion = {"id": solicitante_operacion, "rol": rol_operacion}
+        validar_objeto_en_carpeta_usuario(usuario_operacion, objeto)
+        if str(solicitud.get("tipo_operacion") or "").upper() == "MOVER":
+            validar_destino_usuario(solicitud.get("carpeta_destino_id"), usuario_operacion)
+
+        marcar_procesamiento_seguro(
+            "solicitudes_operacion", {"id": solicitud_id}, PROCESAMIENTO_PROCESANDO,
         )
 
         tipo = str(solicitud.get("tipo_operacion") or "").upper()
@@ -5481,10 +5637,8 @@ async def registrar_y_solicitar_custodia(
 
     file: UploadFile = File(...),
 
-    carpeta: str = Form(
-        "PLANOS"
-    )
-
+    carpeta: str = Form("PLANOS"),
+    carpeta_destino_id: str = Form(""),
 ):
 
     usuario_auth = (
@@ -5493,6 +5647,13 @@ async def registrar_y_solicitar_custodia(
         )
     )
 
+
+    # La carga individual antigua no puede saltarse la selección de destino.
+    destino_id_solicitado = (carpeta_destino_id or
+        (GOOGLE_FOLDER_ID or GOOGLE_DRIVE_ROOT_ID if usuario_auth["rol"] == "jefe" else ""))
+    destino_upload = validar_destino_usuario(destino_id_solicitado, usuario_auth)
+    destino_upload_id = str(destino_upload["id"])
+    destino_upload_path = str(destino_upload.get("path") or destino_upload.get("name") or "Carpeta")
 
     solicitante_id = (
         usuario_auth["id"]
@@ -5636,17 +5797,10 @@ async def registrar_y_solicitar_custodia(
         "solicitante_correo":
             solicitante_correo,
 
-        "drive_parent_id":
-            (GOOGLE_FOLDER_ID or GOOGLE_DRIVE_ROOT_ID),
-
-        "ubicacion_drive":
-            "DRIVE PROYECTO",
-
-        "destino_solicitado_id":
-            (GOOGLE_FOLDER_ID or GOOGLE_DRIVE_ROOT_ID),
-
-        "destino_solicitado_ruta":
-            "DRIVE PROYECTO"
+        "drive_parent_id": destino_upload_id,
+        "ubicacion_drive": destino_upload_path,
+        "destino_solicitado_id": destino_upload_id,
+        "destino_solicitado_ruta": destino_upload_path
 
     }
 
@@ -5775,10 +5929,8 @@ async def registrar_y_solicitar_custodia(
         detalle={
             "nombre_archivo": nombre_final,
             "sha256": hash_sha256,
-            "destino_solicitado_id": (
-                GOOGLE_FOLDER_ID or GOOGLE_DRIVE_ROOT_ID
-            ),
-            "destino_solicitado_ruta": "DRIVE PROYECTO",
+            "destino_solicitado_id": destino_upload_id,
+            "destino_solicitado_ruta": destino_upload_path,
         },
         request=request,
     )
@@ -6075,13 +6227,13 @@ async def registrar_lote_custodia(
             detail=(
                 "Selecciona una carpeta destino de Google Drive. "
                 "Si deseas dejar archivos sueltos, selecciona "
-                "explícitamente DRIVE PROYECTO (raíz)."
+                "una de las carpetas autorizadas."
             )
         )
 
 
-    destino_upload = validar_destino_drive(
-        carpeta_destino_id
+    destino_upload = validar_destino_usuario(
+        carpeta_destino_id, usuario_auth
     )
 
 
@@ -7027,8 +7179,6 @@ async def listar_usuarios_desde_web(
                 (
                     app_metadata.get("rol")
                     or
-                    metadata.get("rol")
-                    or
                     "subordinado"
                 ),
 
@@ -7041,10 +7191,78 @@ async def listar_usuarios_desde_web(
         })
 
 
+    # La carga del listado de usuarios se mantiene aun antes de ejecutar la migración.
+    try:
+        registros_permisos = supabase_admin.table("user_drive_permissions").select("user_id,folders").execute().data or []
+        counts = {str(f.get("user_id")): len(f.get("folders") or []) for f in registros_permisos}
+    except Exception:
+        counts = {}
+    for u in usuarios:
+        u["drive_folder_count"] = counts.get(str(u.get("id")), 0)
+
     return {
         "status": "ok",
         "usuarios": usuarios
     }
+
+
+# La edición de permisos se permite exclusivamente a usuarios con rol jefe.
+@app.get("/admin/users/{user_id}/drive-folders")
+def admin_consultar_carpetas_usuario(user_id: str, request: Request):
+    obtener_admin_desde_request(request)
+    try:
+        user_id = str(UUID(user_id))
+    except (TypeError, ValueError, AttributeError):
+        raise HTTPException(status_code=400, detail="ID de usuario inválido.")
+    return {"status": "ok", "folders": obtener_carpetas_autorizadas(user_id), "max_folders": 5}
+
+
+@app.put("/admin/users/{user_id}/drive-folders")
+async def admin_guardar_carpetas_usuario(user_id: str, request: Request):
+    admin = obtener_admin_desde_request(request)
+    try:
+        user_id = str(UUID(user_id))
+    except (TypeError, ValueError, AttributeError):
+        raise HTTPException(status_code=400, detail="ID de usuario inválido.")
+    try:
+        payload = await request.json()
+        carpetas = normalize_assignments(payload.get("folders"))
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    service = obtener_servicio_google_drive() if carpetas else None
+    # Nunca permitir al subordinado la raíz general, ni por asignación errónea.
+    root_id = str(obtener_raiz_drive_autorizada(service)["id"]) if carpetas else ""
+    guardadas = []
+    for item in carpetas:
+        if item["id"] == root_id:
+            raise HTTPException(status_code=400, detail="No puedes asignar la raíz general de Drive a un subordinado.")
+        try:
+            meta = service.files().get(fileId=item["id"],
+                fields="id,name,mimeType,trashed", supportsAllDrives=True,
+            ).execute(num_retries=GOOGLE_API_RETRIES)
+        except Exception as exc:
+            raise error_api(400, "DRIVE_FOLDER_UNAVAILABLE",
+                            "No se pudo acceder a una de las carpetas con la cuenta de Drive conectada.") from exc
+        if meta.get("trashed") or meta.get("mimeType") != "application/vnd.google-apps.folder":
+            raise HTTPException(status_code=400, detail="Uno de los enlaces no corresponde a una carpeta activa.")
+        guardadas.append({"id": item["id"], "name": str(meta.get("name") or "Carpeta"),
+                          "url": item["url"]})
+    try:
+        result = supabase_admin.table("user_drive_permissions").upsert({
+            "user_id": user_id, "folders": guardadas, "updated_at": ahora_iso(),
+        }, on_conflict="user_id").execute()
+    except Exception as exc:
+        print("[DRIVE ACL SAVE ERROR]", type(exc).__name__)
+        raise error_api(503, "DRIVE_ACL_SAVE_FAILED",
+                        "No se pudieron guardar los permisos. Verifica la tabla y el usuario.") from exc
+    if not result.data:
+        raise error_api(503, "DRIVE_ACL_SAVE_FAILED", "No se confirmó el guardado de permisos.")
+    registrar_evento_auditoria(
+        evento="PERMISOS_DRIVE_ACTUALIZADOS", categoria="USUARIOS",
+        actor=admin, accion="CAMBIAR_CARPETAS", objeto_tipo="USUARIO", objeto_id=user_id,
+        detalle={"carpetas_asignadas": [f["id"] for f in guardadas]}, request=request,
+    )
+    return {"status": "ok", "folders": guardadas, "max_folders": 5}
 
 
 @app.delete("/admin/users/{user_id}")
@@ -7277,6 +7495,12 @@ def resolver_custodia_archivo(
         registro = (
             consulta.data[0]
         )
+
+        if aprobar:
+            validar_permiso_en_aprobacion(
+                str(registro.get("solicitante_id") or ""),
+                str(registro.get("drive_parent_id") or ""),
+            )
 
 
         estado_actual = str(
@@ -7638,6 +7862,13 @@ def resolver_custodia_carpeta(
             consulta_lote.data
             or []
         )
+
+        if aprobar:
+            for solicitante_id, drive_parent_id in {
+                (str(f.get("solicitante_id") or ""), str(f.get("drive_parent_id") or ""))
+                for f in documentos
+            }:
+                validar_permiso_en_aprobacion(solicitante_id, drive_parent_id)
 
 
         if not documentos:
@@ -8362,7 +8593,7 @@ def mensaje_error_consulta_drive(error):
 
 @app.get("/drive/storage")
 def almacenamiento_drive(request: Request):
-    obtener_usuario_supabase_desde_request(request)
+    obtener_admin_desde_request(request)
     if not google_drive_configurado():
         raise HTTPException(status_code=503, detail="Google Drive no está configurado.")
     try:
@@ -8382,7 +8613,7 @@ def navegar_drive(
     folder_id: str = "root",
     include_files: bool = True,
 ):
-    obtener_usuario_supabase_desde_request(request)
+    usuario = obtener_usuario_supabase_desde_request(request)
 
     if not google_drive_configurado():
         raise error_api(
@@ -8394,11 +8625,9 @@ def navegar_drive(
     try:
         return {
             "status": "ok",
-            "root": obtener_raiz_drive_autorizada(),
-            **listar_hijos_drive(
-                folder_id,
-                include_files=bool(include_files),
-            ),
+            "root": (obtener_raiz_drive_autorizada() if usuario["rol"] == "jefe"
+                     else _mi_raiz_virtual()),
+            **listar_hijos_drive(folder_id, include_files=bool(include_files), usuario=usuario),
             "cache_ttl_seconds": DRIVE_CACHE_TTL_SECONDS,
         }
     except HTTPException:
@@ -8417,10 +8646,10 @@ def breadcrumb_drive(
     request: Request,
     folder_id: str = "root",
 ):
-    obtener_usuario_supabase_desde_request(request)
+    usuario = obtener_usuario_supabase_desde_request(request)
 
     try:
-        info = resolver_ruta_drive(folder_id)
+        info = resolver_ruta_drive_usuario(folder_id, usuario)
         return {
             "status": "ok",
             "folder": info,
@@ -8454,7 +8683,7 @@ def obtener_carpetas_drive(
     request: Request
 ):
     """Compatibilidad con el selector antiguo del frontend."""
-    obtener_usuario_supabase_desde_request(request)
+    usuario = obtener_usuario_supabase_desde_request(request)
 
     if not google_drive_configurado():
         raise error_api(
@@ -8463,12 +8692,12 @@ def obtener_carpetas_drive(
             "Google Drive no está configurado.",
         )
 
-    raiz = obtener_raiz_drive_autorizada()
-    carpetas = listar_carpetas_drive_recursivas()
+    raiz = (obtener_raiz_drive_autorizada() if usuario["rol"] == "jefe"
+            else _mi_raiz_virtual())
+    carpetas = listar_carpetas_drive_recursivas(usuario)
 
     return {
-        "folders": [
-            {
+        "folders": ([{
                 "id": raiz.get("id"),
                 "name": raiz.get("name"),
                 "parent_id": None,
@@ -8476,8 +8705,7 @@ def obtener_carpetas_drive(
                 "depth": 0,
                 "ancestors": [],
                 "root": True,
-            },
-            *[
+            }] if usuario["rol"] == "jefe" else []) + [
                 {
                     "id": c.get("id"),
                     "name": c.get("name"),
@@ -8489,7 +8717,6 @@ def obtener_carpetas_drive(
                 }
                 for c in carpetas
             ],
-        ]
     }
 
 
@@ -8639,15 +8866,16 @@ async def solicitar_operacion(
     )
 
 
+    # El solicitante también debe tener acceso al origen REAL del objeto.
+    validar_objeto_en_carpeta_usuario(usuario, objeto)
+
     destino = None
 
 
     if tipo == "MOVER":
 
-        destino = validar_destino_drive(
-            payload.get(
-                "carpeta_destino_id"
-            )
+        destino = validar_destino_usuario(
+            payload.get("carpeta_destino_id"), usuario
         )
 
 
@@ -9088,11 +9316,7 @@ def vincular_drive_legacy(
     request: Request
 ):
 
-    usuario = (
-        obtener_usuario_supabase_desde_request(
-            request
-        )
-    )
+    usuario = obtener_admin_desde_request(request)
 
 
     service = (
@@ -9112,11 +9336,6 @@ def vincular_drive_legacy(
             "id,lote_id,nombre_archivo,ruta_relativa,"
             "estado,estado_archivo,drive_file_id,"
             "drive_folder_id,solicitante_id"
-        )
-
-        .eq(
-            "solicitante_id",
-            usuario["id"]
         )
 
         .eq(
@@ -9481,11 +9700,7 @@ def reconciliar_drive(
     request: Request
 ):
 
-    usuario = (
-        obtener_usuario_supabase_desde_request(
-            request
-        )
-    )
+    usuario = obtener_admin_desde_request(request)
 
 
     service = (
