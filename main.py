@@ -7255,8 +7255,19 @@ async def admin_guardar_carpetas_usuario(user_id: str, request: Request):
         print("[DRIVE ACL SAVE ERROR]", type(exc).__name__)
         raise error_api(503, "DRIVE_ACL_SAVE_FAILED",
                         "No se pudieron guardar los permisos. Verifica la tabla y el usuario.") from exc
-    if not result.data:
-        raise error_api(503, "DRIVE_ACL_SAVE_FAILED", "No se confirmó el guardado de permisos.")
+    # PostgREST puede devolver data=[] aunque la escritura se haya completado
+    # (Prefer: return=minimal). Confirmar leyendo de nuevo la fila evita
+    # reportar un falso fallo o mostrar un éxito sin persistencia real.
+    try:
+        confirmadas = obtener_carpetas_autorizadas(user_id)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise error_api(503, "DRIVE_ACL_SAVE_FAILED",
+                        "No se pudo verificar el guardado de permisos en la base de datos.") from exc
+    if confirmadas != guardadas:
+        raise error_api(503, "DRIVE_ACL_SAVE_FAILED",
+                        "Las carpetas no quedaron guardadas como se solicitaron. Reintenta.")
     registrar_evento_auditoria(
         evento="PERMISOS_DRIVE_ACTUALIZADOS", categoria="USUARIOS",
         actor=admin, accion="CAMBIAR_CARPETAS", objeto_tipo="USUARIO", objeto_id=user_id,
