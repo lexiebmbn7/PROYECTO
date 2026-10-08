@@ -2462,9 +2462,10 @@ window.addEventListener('DOMContentLoaded',()=>{
     </tr>`}).join(''):'<tr><td colspan="8" class="p-8 text-center text-slate-400">No se encontraron usuarios registrados.</td></tr>';
   };
   // Editor exclusivo del administrador: hasta 5 enlaces completos por usuario.
-  // Todo se valida y guarda en backend, no en localStorage.
+  // Si la lectura falla, NO se puede sobrescribir una configuración desconocida.
   let dvFolderEditorUserId='';
   let dvFolderEditorEntries=[];
+  let dvFolderEditorLoading=false;
   function dvEnsureFolderEditor(){
     let modal=document.getElementById('dvUserDriveFoldersModal');
     if(modal)return modal;
@@ -2477,61 +2478,118 @@ window.addEventListener('DOMContentLoaded',()=>{
     modal.innerHTML=`<div class="dv-drive-permissions-card">
       <div class="dv-drive-permissions-head"><div><p class="text-xs text-slate-500">ADMINISTRACIÓN · GOOGLE DRIVE</p><h3 id="dvDrivePermissionsTitle">Carpetas autorizadas</h3><p id="dvDrivePermissionsSubtitle" class="text-xs text-slate-500">Solo el administrador puede modificarlas.</p></div><button type="button" class="icon-btn" onclick="dvCloseUserDriveFolders()" aria-label="Cerrar"><i class="fa-solid fa-xmark"></i></button></div>
       <form id="dvDrivePermissionsForm" onsubmit="dvSaveUserDriveFolders(event)">
-      <p class="dv-drive-permissions-note">Pega hasta cinco enlaces de carpetas de Drive. El usuario podrá entrar a sus subcarpetas, pero no al ROOT ni a otras carpetas.</p>
+      <p class="dv-drive-permissions-note">Asigna hasta 5 enlaces de carpetas de Google Drive. Cada subordinado podrá navegar por esas carpetas y sus subcarpetas, sin entrar al ROOT general.</p>
       <div id="dvDrivePermissionsRows" class="dv-drive-permissions-rows"></div>
       <button type="button" class="secondary-btn" id="dvAddDrivePermission" onclick="dvAddUserDriveFolder()"><i class="fa-solid fa-plus"></i> Añadir enlace</button>
-      <p id="dvDrivePermissionsFeedback" role="status" class="text-xs"></p>
+      <p id="dvDrivePermissionsFeedback" role="alert" aria-live="polite" class="text-xs"></p>
+      <button type="button" class="secondary-btn dv-hidden" id="dvRetryDrivePermissions" onclick="dvReloadUserDriveFolders()"><i class="fa-solid fa-rotate-right"></i> Reintentar carga</button>
       <div class="dv-drive-permissions-actions"><button type="button" class="secondary-btn" onclick="dvCloseUserDriveFolders()">Cancelar</button><button type="submit" class="primary-btn" id="dvSaveDrivePermissions"><i class="fa-solid fa-floppy-disk"></i> Guardar permisos</button></div>
       </form></div>`;
     modal.addEventListener('click',event=>{if(event.target===modal)dvCloseUserDriveFolders();});
-    document.body.appendChild(modal);return modal;
+    document.body.appendChild(modal);
+    return modal;
   }
   function dvDrawDrivePermissionRows(){
     const rows=document.getElementById('dvDrivePermissionsRows');if(!rows)return;
-    rows.innerHTML=dvFolderEditorEntries.map((f,i)=>`<div class="dv-drive-permissions-row"><label class="field-label" for="dvDriveLink${i}">Carpeta ${i+1}${f.name?' · '+escapeHtml(f.name):''}</label><div class="dv-drive-permissions-input"><input id="dvDriveLink${i}" class="input-modern" type="url" required placeholder="https://drive.google.com/drive/folders/..." value="${escapeHtml(f.url||'')}" oninput="dvUpdateUserDriveFolder(${i},this.value)"/><button type="button" class="icon-btn" title="Quitar" aria-label="Quitar carpeta ${i+1}" onclick="dvRemoveUserDriveFolder(${i})"><i class="fa-solid fa-trash-can"></i></button></div></div>`).join('')||'<p class="text-sm text-slate-500">Este usuario no tiene carpetas asignadas. No podrá navegar por Drive hasta que le asignes una.</p>';
-    const add=document.getElementById('dvAddDrivePermission');if(add)add.disabled=dvFolderEditorEntries.length>=5;
+    rows.innerHTML=dvFolderEditorEntries.map((f,i)=>`<div class="dv-drive-permissions-row"><label class="field-label" for="dvDriveLink${i}">Carpeta ${i+1}${f.name?' · '+escapeHtml(f.name):''}</label><div class="dv-drive-permissions-input"><input id="dvDriveLink${i}" class="input-modern" type="url" required placeholder="https://drive.google.com/drive/folders/ID" value="${escapeHtml(f.url||'')}" oninput="dvUpdateUserDriveFolder(${i},this.value)"/><button type="button" class="icon-btn" title="Quitar" aria-label="Quitar carpeta ${i+1}" onclick="dvRemoveUserDriveFolder(${i})"><i class="fa-solid fa-trash-can"></i></button></div></div>`).join('')||'<p class="text-sm text-slate-500">Este usuario todavía no tiene carpetas asignadas.</p>';
+    const add=document.getElementById('dvAddDrivePermission');
+    if(add)add.disabled=dvFolderEditorLoading||dvFolderEditorEntries.length>=5;
   }
-  window.dvCloseUserDriveFolders=function(){document.getElementById('dvUserDriveFoldersModal')?.classList.add('dv-hidden');dvFolderEditorUserId='';dvFolderEditorEntries=[];};
-  window.dvAddUserDriveFolder=function(){if(dvFolderEditorEntries.length>=5)return;dvFolderEditorEntries.push({url:'',name:''});dvDrawDrivePermissionRows();document.getElementById('dvDriveLink'+(dvFolderEditorEntries.length-1))?.focus();};
+  function dvFolderEditorError(response,data){
+    const detail=dvHttpErrorMessage(response,data,'No se pudo cargar o guardar la asignación.');
+    const status=Number(response?.status||0);
+    if(status===401)return 'Sesión expirada (401). Cierra sesión e ingresa de nuevo.';
+    if(status===403)return 'Acceso denegado (403). Verifica que la cuenta administradora tenga app_metadata.rol = jefe en Supabase Auth.';
+    if(status===404)return 'Función no disponible (404). Railway aún no está utilizando el main.py actualizado.';
+    if(status===503)return `Servicio no disponible (503). ${detail} Comprueba la tabla public.user_drive_permissions y SUPABASE_SERVICE_ROLE_KEY.`;
+    if(status===400)return `Enlace rechazado (400). ${detail} Usa la URL de una carpeta a la que acceda la cuenta de Drive conectada.`;
+    return `Error HTTP ${status||'de conexión'}. ${detail}`;
+  }
+  window.dvCloseUserDriveFolders=function(){
+    document.getElementById('dvUserDriveFoldersModal')?.classList.add('dv-hidden');
+    dvFolderEditorUserId='';dvFolderEditorEntries=[];
+  };
+  window.dvAddUserDriveFolder=function(){
+    if(dvFolderEditorLoading||dvFolderEditorEntries.length>=5)return;
+    dvFolderEditorEntries.push({url:'',name:''});dvDrawDrivePermissionRows();
+    document.getElementById('dvDriveLink'+(dvFolderEditorEntries.length-1))?.focus();
+  };
   window.dvUpdateUserDriveFolder=function(i,value){if(dvFolderEditorEntries[i])dvFolderEditorEntries[i].url=value;};
-  window.dvRemoveUserDriveFolder=function(i){dvFolderEditorEntries.splice(i,1);dvDrawDrivePermissionRows();};
-  window.dvOpenUserDriveFolders=async function(userId){
-    if(!isAdmin())return;
-    const u=adminUsersCache.find(x=>String(x.id)===String(userId));if(!u)return;
-    dvFolderEditorUserId=String(userId);dvFolderEditorEntries=[];
-    const modal=dvEnsureFolderEditor();modal.classList.remove('dv-hidden');
-    document.getElementById('dvSaveDrivePermissions').disabled=true;
-    document.getElementById('dvAddDrivePermission').disabled=true;
-    document.getElementById('dvDrivePermissionsTitle').textContent='Carpetas de '+u.name;
-    document.getElementById('dvDrivePermissionsSubtitle').textContent=u.email||'';
-    document.getElementById('dvDrivePermissionsRows').innerHTML='<p class="text-xs text-slate-500">Cargando permisos...</p>';
-    document.getElementById('dvDrivePermissionsFeedback').textContent='';
+  window.dvRemoveUserDriveFolder=function(i){
+    if(dvFolderEditorLoading)return;
+    dvFolderEditorEntries.splice(i,1);dvDrawDrivePermissionRows();
+  };
+  window.dvReloadUserDriveFolders=async function(){
+    const id=dvFolderEditorUserId;if(!id)return;
+    dvFolderEditorLoading=true;
+    const add=document.getElementById('dvAddDrivePermission');
+    const save=document.getElementById('dvSaveDrivePermissions');
+    const retry=document.getElementById('dvRetryDrivePermissions');
+    const feedback=document.getElementById('dvDrivePermissionsFeedback');
+    if(add)add.disabled=true;
+    if(save)save.disabled=true;
+    if(retry)retry.classList.add('dv-hidden');
+    if(feedback)feedback.textContent='Consultando carpetas asignadas…';
+    const rows=document.getElementById('dvDrivePermissionsRows');
+    if(rows)rows.innerHTML='<p class="text-xs text-slate-500">Cargando permisos…</p>';
     try{
-      const res=await fetch(`${API_URL}/admin/users/${encodeURIComponent(userId)}/drive-folders`,{headers:await authHeaders(false)});
+      const res=await fetch(`${API_URL}/admin/users/${encodeURIComponent(id)}/drive-folders`,{headers:await authHeaders(false)});
       const data=await res.json().catch(()=>({}));
-      if(!res.ok)throw new Error(dvHttpErrorMessage(res,data));
-      if(dvFolderEditorUserId!==String(userId))return;
+      if(!res.ok)throw new Error(dvFolderEditorError(res,data));
+      if(dvFolderEditorUserId!==id)return;
       dvFolderEditorEntries=(Array.isArray(data.folders)?data.folders:[]).map(f=>({url:String(f.url||''),name:String(f.name||'')}));
-      dvDrawDrivePermissionRows();
-      document.getElementById('dvSaveDrivePermissions').disabled=false;
+      if(feedback)feedback.textContent=`Permisos cargados: ${dvFolderEditorEntries.length} de 5 carpetas.`;
+      if(save)save.disabled=false;
     }catch(error){
-      document.getElementById('dvDrivePermissionsRows').innerHTML='';
-      document.getElementById('dvDrivePermissionsFeedback').textContent=error?.message||'No se pudieron cargar los permisos.';
+      if(dvFolderEditorUserId!==id)return;
+      dvFolderEditorEntries=[];
+      if(rows)rows.innerHTML='';
+      if(feedback)feedback.textContent=error?.message||'No se pudo consultar las carpetas.';
+      if(retry)retry.classList.remove('dv-hidden');
+    }finally{
+      dvFolderEditorLoading=false;
+      if(dvFolderEditorUserId===id && add && save && !save.disabled)dvDrawDrivePermissionRows();
     }
   };
+  window.dvOpenUserDriveFolders=function(userId){
+    if(!isAdmin()){toast('Solo un administrador puede modificar las carpetas.');return;}
+    const u=adminUsersCache.find(x=>String(x.id)===String(userId));
+    if(!u){toast('El usuario seleccionado no está en la lista. Actualiza Usuarios.');return;}
+    dvFolderEditorUserId=String(userId);dvFolderEditorEntries=[];
+    const modal=dvEnsureFolderEditor();modal.classList.remove('dv-hidden');
+    document.getElementById('dvDrivePermissionsTitle').textContent='Carpetas de '+u.name;
+    document.getElementById('dvDrivePermissionsSubtitle').textContent=u.email||'';
+    dvReloadUserDriveFolders();
+  };
   window.dvSaveUserDriveFolders=async function(event){
-    event?.preventDefault();if(!dvFolderEditorUserId||!isAdmin())return;
-    const btn=document.getElementById('dvSaveDrivePermissions');const feedback=document.getElementById('dvDrivePermissionsFeedback');
+    event?.preventDefault();if(!dvFolderEditorUserId||!isAdmin()||dvFolderEditorLoading)return;
+    const btn=document.getElementById('dvSaveDrivePermissions');
+    const feedback=document.getElementById('dvDrivePermissionsFeedback');
     const id=dvFolderEditorUserId;
+    const enlaces=dvFolderEditorEntries.map(f=>String(f.url||'').trim());
+    if(enlaces.length>5||enlaces.some(v=>!v)){
+      feedback.textContent='Ingresa enlaces válidos (máximo 5), o quita las filas vacías.';return;
+    }
     try{
-      btn.disabled=true;feedback.textContent='Validando carpetas y guardando permisos...';
-      const res=await fetch(`${API_URL}/admin/users/${encodeURIComponent(id)}/drive-folders`,{method:'PUT',headers:await authHeaders(true),body:JSON.stringify({folders:dvFolderEditorEntries.map(f=>({url:f.url}))})});
+      for(const value of enlaces){
+        const parsed=new URL(value);
+        if(parsed.protocol!=='https:'||parsed.hostname!=='drive.google.com'){
+          feedback.textContent='Debes pegar enlaces HTTPS de carpetas de Google Drive.';return;
+        }
+      }
+    }catch(_){feedback.textContent='Hay un enlace mal escrito. Verifícalo antes de guardar.';return;}
+    try{
+      btn.disabled=true;feedback.textContent='Validando enlaces con Google Drive y guardando permisos…';
+      const res=await fetch(`${API_URL}/admin/users/${encodeURIComponent(id)}/drive-folders`,{
+        method:'PUT',headers:await authHeaders(true),body:JSON.stringify({folders:enlaces.map(url=>({url}))})
+      });
       const data=await res.json().catch(()=>({}));
-      if(!res.ok)throw new Error(dvHttpErrorMessage(res,data));
-      const user=adminUsersCache.find(u=>u.id===id);if(user)user.driveFolderCount=(data.folders||[]).length;
-      renderAdminUsers();dvCloseUserDriveFolders();toast('Permisos de Drive guardados correctamente.');
+      if(!res.ok)throw new Error(dvFolderEditorError(res,data));
+      const user=adminUsersCache.find(u=>u.id===id);
+      if(user)user.driveFolderCount=(data.folders||[]).length;
+      renderAdminUsers();dvCloseUserDriveFolders();toast('Carpetas autorizadas guardadas correctamente.');
     }catch(error){feedback.textContent=error?.message||'Error al guardar permisos.';}
-    finally{btn.disabled=false;}
+    finally{if(btn)btn.disabled=false;}
   };
 
   window.deleteAdminUser=async function(userId){
