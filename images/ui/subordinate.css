@@ -1003,3 +1003,130 @@ body:has(#view-gestor.active):not(.dv-upload-mode):not(.dv-trash-mode)
 #topbar .dv-top-search {
   display: flex !important;
 }
+
+/* =========================================================
+   DATAVAULT · MIS ARCHIVOS (SUBORDINADO)
+   Ancho adaptativo: muestra la tabla completa SIN obligar
+   al usuario a desplazarse horizontalmente.
+   No altera la alineación del texto ni las vistas de admin.
+   ========================================================= */
+body[data-dv-role="subordinado"] #view-gestor,
+body[data-dv-role="subordinado"] #view-gestor .file-manager-shell,
+body[data-dv-role="subordinado"] #view-gestor .file-content-panel,
+body[data-dv-role="subordinado"] #view-gestor #dropZone {
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+
+/* Evitar que rutas y nombres largos ensanchen el panel. */
+body[data-dv-role="subordinado"] #view-gestor #dropZone {
+  overflow-x: hidden !important;
+}
+body[data-dv-role="subordinado"] #view-gestor #dropZone > .data-table {
+  width: 100% !important;
+  min-width: 0 !important;
+  table-layout: fixed !important;
+  white-space: normal !important;
+}
+body[data-dv-role="subordinado"] #view-gestor #dropZone .data-table th,
+body[data-dv-role="subordinado"] #view-gestor #dropZone .data-table td {
+  box-sizing: border-box;
+  padding: 12px 8px !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  vertical-align: middle;
+}
+body[data-dv-role="subordinado"] #view-gestor #dropZone .data-table th:nth-child(1) { width: 25%; }
+body[data-dv-role="subordinado"] #view-gestor #dropZone .data-table th:nth-child(2) { width: 18%; }
+body[data-dv-role="subordinado"] #view-gestor #dropZone .data-table th:nth-child(3) { width: 12%; }
+body[data-dv-role="subordinado"] #view-gestor #dropZone .data-table th:nth-child(4) { width: 12%; }
+body[data-dv-role="subordinado"] #view-gestor #dropZone .data-table th:nth-child(5) { width: 13%; }
+body[data-dv-role="subordinado"] #view-gestor #dropZone .data-table th:nth-child(6) { width: 20%; }
+
+body[data-dv-role="subordinado"] #view-gestor #dropZone .data-table td:first-child > .flex,
+body[data-dv-role="subordinado"] #view-gestor #dropZone .data-table td:first-child > .flex > div:last-child,
+body[data-dv-role="subordinado"] #view-gestor #dropZone .dv-folder-toggle {
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+body[data-dv-role="subordinado"] #view-gestor #dropZone .dv-folder-toggle {
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+body[data-dv-role="subordinado"] #view-gestor #dropZone .dv-op-actions {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 5px !important;
+  max-width: 100%;
+}
+body[data-dv-role="subordinado"] #view-gestor #dropZone .dv-op-btn {
+  min-width: 0 !important;
+  padding: 0 8px !important;
+}
+
+/* Por debajo de 1200 px dejamos el árbol encima del inventario.
+   Así la tabla dispone de todo el ancho de la pantalla. */
+@media (max-width: 1200px) {
+  body[data-dv-role="subordinado"] #view-gestor .file-manager-shell.subordinate-layout {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  body[data-dv-role="subordinado"] #view-gestor .file-explorer-panel {
+    border-right: 0 !important;
+    border-bottom: 1px solid #e4eaed !important;
+  }
+}
+
+/* En celulares el inventario pasa a tarjetas: las seis columnas
+   siguen visibles, pero en vertical y sin barra horizontal. */
+@media (max-width: 720px) {
+  body[data-dv-role="subordinado"] #view-gestor #dropZone > .data-table,
+  body[data-dv-role="subordinado"] #view-gestor #dropZone > .data-table > tbody {
+    display: block !important;
+    width: 100% !important;
+  }
+  body[data-dv-role="subordinado"] #view-gestor #dropZone > .data-table > thead {
+    display: none !important;
+  }
+  body[data-dv-role="subordinado"] #view-gestor #dropZone > .data-table > tbody > tr:not(.hidden):not(.dv-folder-detail) {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px 10px;
+    padding: 12px;
+    border-bottom: 1px solid #e6edf3;
+  }
+  body[data-dv-role="subordinado"] #view-gestor #dropZone > .data-table > tbody > tr:not(.hidden) > td {
+    display: block !important;
+    min-width: 0;
+    padding: 5px 0 !important;
+    border: 0 !important;
+  }
+  body[data-dv-role="subordinado"] #view-gestor #dropZone > .data-table > tbody > tr:not(.hidden):not(.dv-folder-detail) > td:nth-child(1),
+  body[data-dv-role="subordinado"] #view-gestor #dropZone > .data-table > tbody > tr:not(.hidden):not(.dv-folder-detail) > td:nth-child(2),
+  body[data-dv-role="subordinado"] #view-gestor #dropZone > .data-table > tbody > tr:not(.hidden):not(.dv-folder-detail) > td:nth-child(6) {
+    grid-column: 1 / -1;
+  }
+  body[data-dv-role="subordinado"] #view-gestor #dropZone > .data-table > tbody > tr:not(.hidden):not(.dv-folder-detail) > td:nth-child(2)::before {
+    content: "Ubicación: ";
+    font-weight: 700;
+  }
+  body[data-dv-role="subordinado"] #view-gestor #dropZone > .data-table > tbody > tr:not(.hidden):not(.dv-folder-detail) > td:nth-child(3)::before {
+    content: "Integridad ";
+    display: block;
+    font-weight: 700;
+  }
+  body[data-dv-role="subordinado"] #view-gestor #dropZone > .data-table > tbody > tr:not(.hidden):not(.dv-folder-detail) > td:nth-child(4)::before {
+    content: "Estado ";
+    display: block;
+    font-weight: 700;
+  }
+  body[data-dv-role="subordinado"] #view-gestor #dropZone > .data-table > tbody > tr:not(.hidden):not(.dv-folder-detail) > td:nth-child(5)::before {
+    content: "Fecha ";
+    display: block;
+    font-weight: 700;
+  }
+  body[data-dv-role="subordinado"] #view-gestor #dropZone .dv-op-btn {
+    min-height: 36px !important;
+  }
+}
