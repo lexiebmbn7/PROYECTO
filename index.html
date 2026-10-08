@@ -36,6 +36,8 @@ body #sidebar .dv-storage-box{display:none!important}
 #dvQuotaFinal [data-detail]{font-size:12px;color:#bac7d5;overflow-wrap:anywhere}
 #dvQuotaFinal .quota-track{height:6px;background:#ffffff20;margin:9px 0;border-radius:6px;overflow:hidden}
 #dvQuotaFinal [data-bar]{display:block;height:100%;width:0;background:#3696ef}
+/* Solo el administrador ve la cuota general de Google Drive. */
+body[data-dv-role="subordinado"] #sidebar #dvQuotaFinal{display:none!important}
 @media(max-width:650px){body #mainArea .dv-hero-mark{display:none!important}}
 
 </style>
@@ -340,6 +342,8 @@ body #sidebar .dv-storage-box{display:none!important}
   const used=panel.querySelector('[data-used]'), detail=panel.querySelector('[data-detail]'), bar=panel.querySelector('[data-bar]'), button=panel.querySelector('button');
   const fmt=n=>{if(n===0)return '0 B';const k=Math.min(5,Math.floor(Math.log(n)/Math.log(1024)));return (n/1024**k).toLocaleString('es-PE',{maximumFractionDigits:1})+' '+['B','KB','MB','GB','TB','PB'][k];};
   async function refresh(force=false){
+    // Los subordinados no consultan la cuota general de la cuenta Drive.
+    if(document.body.dataset.dvRole !== 'jefe') return;
     const id=typeof currentUser!=='undefined'?String(currentUser?.id||''):'';
     if(id!==identity){identity=id;generation++;last=0;used.textContent='Espacio pendiente de consulta';detail.textContent='';bar.style.width='0%';}
     if(!id||!document.getElementById('appSection')?.getClientRects().length||busy||(!force&&Date.now()-last<60000))return;
