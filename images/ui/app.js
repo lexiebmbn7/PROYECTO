@@ -4796,21 +4796,62 @@ window.addEventListener('DOMContentLoaded',()=>{
   let moveSource=null;
   let moveSelected=null;
 
+  // Memoria de navegación por usuario y por carpeta. Nunca persiste en el
+  // navegador; el servidor sigue verificando permisos en cada operación.
+  const folderMemory=new Map();
+  const folderPending=new Map();
+  const FOLDER_MEMORY_TTL_MS=30000;
+  let folderCacheEpoch=0;
+  function activeUserId(){return String(currentUser?.id||'');}
+  function cacheKey(userId,id,files){return `${userId}:${files?'files':'folders'}:${id}`;}
+  function clearFolderMemory(){
+    folderCacheEpoch++;
+    folderMemory.clear();
+    folderPending.clear();
+    for(const ctx of Object.values(contexts)){
+      ctx.seq++;
+      ctx.folderId='root';ctx.data=null;ctx.error=null;ctx.loading=false;
+    }
+  }
+
   const esc=v=>typeof escapeHtml==='function'?escapeHtml(v):String(v??'');
   const norm=v=>String(v??'').trim().toLowerCase();
 
   function context(name){return contexts[name];}
 
-  async function fetchFolder(folderId='root',includeFiles=false){
+  async function fetchFolder(folderId='root',includeFiles=false,force=false){
     const id=String(folderId||'root').trim()||'root';
-    const headers=await authHeaders(false);
-    const url=`${API_URL}/drive/browse?folder_id=${encodeURIComponent(id)}&include_files=${includeFiles?'true':'false'}`;
-    const response=await fetch(url,{method:'GET',headers});
-    const data=await response.json().catch(()=>({}));
-    if(!response.ok){
-      throw new Error(dvHttpErrorMessage(response,data,'No se pudo cargar Google Drive.'));
-    }
-    return data;
+    const userId=activeUserId();
+    if(!userId)throw new Error('Inicia sesión para consultar tus carpetas.');
+    const key=cacheKey(userId,id,includeFiles);
+    if(force)folderMemory.delete(key);
+    const remembered=folderMemory.get(key);
+    if(!force && remembered && remembered.expiresAt>Date.now())return remembered.data;
+    if(!force && folderPending.has(key))return folderPending.get(key);
+    const epoch=folderCacheEpoch;
+    const request=(async()=>{
+      const headers=await authHeaders(false);
+      const url=`${API_URL}/drive/browse?folder_id=${encodeURIComponent(id)}&include_files=${includeFiles?'true':'false'}`;
+      const response=await fetch(url,{method:'GET',headers,cache:'no-store'});
+      const data=await response.json().catch(()=>({}));
+      if(!response.ok)throw new Error(dvHttpErrorMessage(response,data,'No se pudo cargar Google Drive.'));
+      // No reutilizar datos recibidos después del cierre de sesión ni los
+      // resultados de una consulta desplazada por una actualización forzada.
+      if(epoch===folderCacheEpoch && activeUserId()===userId && folderPending.get(key)===request){
+        folderMemory.set(key,{data,expiresAt:Date.now()+FOLDER_MEMORY_TTL_MS});
+      }
+      return data;
+    })();
+    folderPending.set(key,request);
+    try{return await request;}
+    finally{if(folderPending.get(key)===request)folderPending.delete(key);}
+  }
+
+  // Se inicia después del login, sin bloquear la pantalla. El selector reutiliza
+  // la misma promesa si el usuario elige un archivo mientras aún está cargando.
+  function prefetchAllowedFolders(){
+    if(currentRole==='jefe'||!activeUserId())return;
+    fetchFolder('root',false).catch(()=>{});
   }
 
   function listElement(name){
@@ -4938,7 +4979,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     ctx.loading=true;ctx.error=null;
     render(name);
     try{
-      const data=await fetchFolder(requested,false);
+      const data=await fetchFolder(requested,false,force);
       if(seq!==ctx.seq)return;
       ctx.data=data;
       ctx.folderId=normalizeFolderId(data?.current?.id??requested,{allowRoot:true});
@@ -5099,6 +5140,8 @@ window.addEventListener('DOMContentLoaded',()=>{
   // API pública para drag & drop y futuras vistas. No expone ni maneja la caché interna.
   window.DVDriveBrowser={
     fetchFolder,
+    prefetchAllowedFolders,
+    clearCache:clearFolderMemory,
     loadUpload:(folderId='root')=>load('upload',folderId),
     loadMove:(folderId='root')=>load('move',folderId),
     refreshUpload:()=>load('upload',contexts.upload.folderId||'root',true),
@@ -5115,4 +5158,22 @@ window.addEventListener('DOMContentLoaded',()=>{
       refresh.setAttribute('onclick','dvEnsureUploadDestinationFolders(true)');
     }
   });
+})();
+
+
+/* datavault-drive-browse-fast-preload-v1 */
+(function(){
+  const originalEnterApp=enterApp;
+  enterApp=function(){
+    const result=originalEnterApp();
+    // Precarga no bloqueante de las cinco carpetas autorizadas.
+    try{window.DVDriveBrowser?.prefetchAllowedFolders?.();}catch(_){}
+    return result;
+  };
+  const originalLogout=handleLogout;
+  handleLogout=async function(){
+    // No compartir carpetas en memoria entre usuarios del mismo navegador.
+    try{window.DVDriveBrowser?.clearCache?.();}catch(_){}
+    return originalLogout();
+  };
 })();
